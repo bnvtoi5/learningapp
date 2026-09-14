@@ -832,9 +832,19 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
         {currentEx.type === 'error_correction' && (
           <div className="space-y-3 pt-1">
             {currentEx.wrongSentence && (
-              <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs space-y-1">
-                <span className="font-bold text-rose-500 block text-[11px] uppercase tracking-wider">Câu chứa lỗi sai:</span>
-                <p className="text-sm font-medium text-rose-200/90 leading-relaxed select-text">{currentEx.wrongSentence}</p>
+              <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs space-y-1">
+                <span className="font-bold text-rose-600 dark:text-rose-400 block text-[11px] uppercase tracking-wider">
+                  Câu chứa lỗi sai:
+                </span>
+                <p className={`text-sm font-semibold leading-relaxed select-text ${
+                  settings.theme === 'light' 
+                    ? 'text-rose-950' 
+                    : settings.theme === 'sepia' 
+                    ? 'text-[#4a1515]' 
+                    : 'text-rose-200'
+                }`}>
+                  {currentEx.wrongSentence}
+                </p>
               </div>
             )}
             <input

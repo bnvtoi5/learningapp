@@ -207,12 +207,12 @@ export const ErrorReview: React.FC<ErrorReviewProps> = ({
 
               {/* Answers comparison */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs pt-1">
-                <div className="p-2.5 rounded-lg bg-rose-500/10 text-rose-300">
-                  <span className="font-semibold block text-[10px] uppercase text-rose-400">Bạn đã chọn/viết:</span>
-                  <p className="line-through">{err.userAnswer || 'Chưa trả lời'}</p>
+                <div className="p-2.5 rounded-lg bg-rose-500/10 text-rose-950 dark:text-rose-300 border border-rose-500/20">
+                  <span className="font-semibold block text-[10px] uppercase text-rose-700 dark:text-rose-400">Bạn đã chọn/viết:</span>
+                  <p className="line-through font-medium">{err.userAnswer || 'Chưa trả lời'}</p>
                 </div>
-                <div className="p-2.5 rounded-lg bg-emerald-500/10 text-emerald-300">
-                  <span className="font-semibold block text-[10px] uppercase text-emerald-400">Đáp án chuẩn xác:</span>
+                <div className="p-2.5 rounded-lg bg-emerald-500/10 text-emerald-950 dark:text-emerald-300 border border-emerald-500/20">
+                  <span className="font-semibold block text-[10px] uppercase text-emerald-700 dark:text-emerald-400">Đáp án chuẩn xác:</span>
                   <p className="font-medium">{err.correctAnswer}</p>
                 </div>
               </div>
