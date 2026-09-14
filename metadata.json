@@ -1,0 +1,10 @@
+{
+  "name": "Sổ Tay Học Tập",
+  "description": "Ứng dụng học tập và luyện tập cá nhân tối ưu cho di động và máy tính với chế độ đọc ban đêm và đa dạng bài tập.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
