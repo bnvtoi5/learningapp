@@ -9,7 +9,7 @@ import {
   Sparkles,
   HelpCircle
 } from 'lucide-react';
-import { ErrorLog, SkillCategory, User } from '../types';
+import { ErrorLog, SkillCategory, User, Topic, Lesson, Exercise } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import { ConfirmModal } from './ConfirmModal';
 
@@ -20,6 +20,9 @@ interface ErrorReviewProps {
   onDeleteError: (errorId: string) => void;
   currentUser?: User | null;
   onNavigateToAdminErrors?: () => void;
+  topics?: Topic[];
+  lessons?: Lesson[];
+  exercises?: Exercise[];
 }
 
 export const ErrorReview: React.FC<ErrorReviewProps> = ({
@@ -29,6 +32,9 @@ export const ErrorReview: React.FC<ErrorReviewProps> = ({
   onDeleteError,
   currentUser,
   onNavigateToAdminErrors,
+  topics = [],
+  lessons = [],
+  exercises = [],
 }) => {
   const { getThemeClasses, getTypographyClasses } = useTheme();
   const theme = getThemeClasses();
@@ -38,8 +44,26 @@ export const ErrorReview: React.FC<ErrorReviewProps> = ({
   const [showResolved, setShowResolved] = useState(false);
   const [errorToDelete, setErrorToDelete] = useState<ErrorLog | null>(null);
 
+  const studentClassroomId = currentUser?.classroomId;
+  const studentTopicIds = new Set(topics.filter(t => studentClassroomId && t.classroomId === studentClassroomId).map(t => t.id));
+  const studentLessonIds = new Set(lessons.filter(l => studentTopicIds.has(l.topicId)).map(l => l.id));
+  const studentExerciseIds = new Set(exercises.filter(e => studentLessonIds.has(e.lessonId)).map(e => e.id));
+
   const userErrors = currentUser?.role === 'student'
-    ? errors.filter(e => e.userId === currentUser.id || (e.studentName && (e.studentName === currentUser.fullName || e.studentName === currentUser.username)))
+    ? errors.filter(e => {
+        const isThisUser = e.userId === currentUser.id || (
+          e.studentName && (
+            e.studentName.toLowerCase() === currentUser.fullName.toLowerCase() || 
+            e.studentName.toLowerCase() === currentUser.username.toLowerCase()
+          )
+        );
+        if (!isThisUser) return false;
+        // Scoped strictly to student's current classroom
+        if (e.classroomId) {
+          return e.classroomId === studentClassroomId;
+        }
+        return studentExerciseIds.has(e.exerciseId);
+      })
     : errors;
   const activeErrors = userErrors.filter(e => showResolved ? true : !e.resolved);
   const filteredErrors = activeErrors.filter(e => {

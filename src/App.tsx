@@ -118,10 +118,14 @@ function MainApp() {
     setLessons(loadLessons());
     setExercises(loadExercises());
     setErrors(loadErrors());
-    setStats(loadStats());
+    setStats(loadStats(currentUser?.id));
     setUsers(loadUsers());
     setClassrooms(loadClassrooms());
   };
+
+  useEffect(() => {
+    setStats(loadStats(currentUser?.id));
+  }, [currentUser?.id]);
 
   useEffect(() => {
     reloadAllData();
@@ -266,14 +270,35 @@ function MainApp() {
       return;
     }
 
+    const isStudent = currentUser?.role === 'student';
+    const studentTopicIds = isStudent 
+      ? new Set(topics.filter(t => currentUser?.classroomId && t.classroomId === currentUser.classroomId).map(t => t.id))
+      : null;
+    const studentLessonIds = isStudent && studentTopicIds
+      ? new Set(lessons.filter(l => studentTopicIds.has(l.topicId)).map(l => l.id))
+      : null;
+    const studentClassExercises = isStudent && studentLessonIds
+      ? exercises.filter(e => studentLessonIds.has(e.lessonId))
+      : exercises;
+    const studentExerciseIds = new Set(studentClassExercises.map(e => e.id));
+
     let targetExercises: Exercise[] = [];
 
     if (isErrorReview) {
-      const studentErrors = currentUser?.role === 'student'
-        ? errors.filter(e => !e.resolved && (e.userId === currentUser.id || (e.studentName && (e.studentName === currentUser.fullName || e.studentName === currentUser.username))))
+      const studentErrors = isStudent
+        ? errors.filter(e => 
+            !e.resolved && 
+            (e.userId === currentUser?.id || (
+              e.studentName && (
+                e.studentName.toLowerCase() === currentUser?.fullName.toLowerCase() || 
+                e.studentName.toLowerCase() === currentUser?.username.toLowerCase()
+              )
+            )) &&
+            (e.classroomId ? e.classroomId === currentUser?.classroomId : studentExerciseIds.has(e.exerciseId))
+          )
         : errors.filter(e => !e.resolved);
       const unresolvedErrorIds = studentErrors.map(e => e.exerciseId);
-      targetExercises = exercises.filter(e => unresolvedErrorIds.includes(e.id));
+      targetExercises = (isStudent ? studentClassExercises : exercises).filter(e => unresolvedErrorIds.includes(e.id));
       setPracticeTitle('Ôn tập câu làm sai');
     } else if (lessonId) {
       targetExercises = exercises.filter(e => e.lessonId === lessonId);
@@ -281,16 +306,18 @@ function MainApp() {
       setPracticeTitle(targetLesson ? `Luyện tập: ${targetLesson.title}` : 'Phiên luyện tập');
       setLastActiveLessonId(lessonId);
     } else if (isQuick) {
-      // Quick mixed practice
-      targetExercises = [...exercises].sort(() => Math.random() - 0.5).slice(0, 10);
+      // Quick mixed practice strictly from student's own class pool
+      targetExercises = [...studentClassExercises].sort(() => Math.random() - 0.5).slice(0, 10);
       setPracticeTitle('Luyện tập ngẫu nhiên nhanh');
     } else {
-      targetExercises = exercises.slice(0, 10);
+      targetExercises = studentClassExercises.slice(0, 10);
       setPracticeTitle('Phiên luyện tập');
     }
 
     if (targetExercises.length === 0) {
-      alert('Chưa có câu hỏi nào trong mục này. Vui lòng thêm câu hỏi mới!');
+      alert(isStudent 
+        ? 'Chưa có câu hỏi nào trong lớp học của bạn. Vui lòng liên hệ Thầy/Cô để được giao bài!' 
+        : 'Chưa có câu hỏi nào trong mục này. Vui lòng thêm câu hỏi mới!');
       return;
     }
 
@@ -303,9 +330,9 @@ function MainApp() {
   };
 
   const handleSuccessExercise = (exercise: Exercise) => {
-    recordExerciseResult(exercise.skill, true);
+    recordExerciseResult(exercise.skill, true, currentUser);
     recordErrorRetrySuccess(exercise.id, currentUser);
-    setStats(loadStats());
+    setStats(loadStats(currentUser?.id));
     setErrors(loadErrors());
   };
 
@@ -400,6 +427,18 @@ function MainApp() {
 
   const handleStartReviewSession = (targetIds?: string[]) => {
     let targetExs: Exercise[] = [];
+    const isStudent = currentUser?.role === 'student';
+    const studentTopicIds = isStudent 
+      ? new Set(topics.filter(t => currentUser?.classroomId && t.classroomId === currentUser.classroomId).map(t => t.id))
+      : null;
+    const studentLessonIds = isStudent && studentTopicIds
+      ? new Set(lessons.filter(l => studentTopicIds.has(l.topicId)).map(l => l.id))
+      : null;
+    const studentClassExercises = isStudent && studentLessonIds
+      ? exercises.filter(e => studentLessonIds.has(e.lessonId))
+      : exercises;
+    const studentExerciseIds = new Set(studentClassExercises.map(e => e.id));
+
     if (targetIds && targetIds.length > 0) {
       const resolvedExerciseIds = new Set<string>();
       targetIds.forEach(id => {
@@ -411,13 +450,22 @@ function MainApp() {
           resolvedExerciseIds.add(err.exerciseId);
         }
       });
-      targetExs = exercises.filter(e => resolvedExerciseIds.has(e.id));
+      targetExs = (isStudent ? studentClassExercises : exercises).filter(e => resolvedExerciseIds.has(e.id));
     } else {
-      const studentErrors = currentUser?.role === 'student'
-        ? errors.filter(e => !e.resolved && (e.userId === currentUser.id || (e.studentName && (e.studentName === currentUser.fullName || e.studentName === currentUser.username))))
+      const studentErrors = isStudent
+        ? errors.filter(e => 
+            !e.resolved && 
+            (e.userId === currentUser.id || (
+              e.studentName && (
+                e.studentName.toLowerCase() === currentUser.fullName.toLowerCase() || 
+                e.studentName.toLowerCase() === currentUser.username.toLowerCase()
+              )
+            )) &&
+            (e.classroomId ? e.classroomId === currentUser.classroomId : studentExerciseIds.has(e.exerciseId))
+          )
         : errors.filter(e => !e.resolved);
       const activeIds = studentErrors.map(e => e.exerciseId);
-      targetExs = exercises.filter(e => activeIds.includes(e.id));
+      targetExs = (isStudent ? studentClassExercises : exercises).filter(e => activeIds.includes(e.id));
     }
 
     // Fallback: If exercises were not in catalog, reconstruct cleanly from error log
@@ -446,10 +494,20 @@ function MainApp() {
     setPracticeTitle('Luyện tập sửa lỗi sai');
   };
 
-  const handleStartSkillPractice = (skill: SkillCategory) => {
-    const skillExs = exercises.filter(e => e.skill === skill);
+  const handleStartSkillPractice = (skill: SkillCategory, targetClassroomId?: string) => {
+    const classId = currentUser?.role === 'student' ? currentUser?.classroomId : targetClassroomId;
+    let skillExs: Exercise[] = [];
+
+    if (classId) {
+      const classTopicIds = new Set(topics.filter(t => t.classroomId === classId).map(t => t.id));
+      const classLessonIds = new Set(lessons.filter(l => classTopicIds.has(l.topicId)).map(l => l.id));
+      skillExs = exercises.filter(e => e.skill === skill && classLessonIds.has(e.lessonId));
+    } else {
+      skillExs = exercises.filter(e => e.skill === skill);
+    }
+
     if (skillExs.length === 0) {
-      alert(`Chưa có câu hỏi nào thuộc kỹ năng ${skill}. Bạn có thể tạo thêm ở mục Soạn bài!`);
+      alert(`Chưa có câu hỏi nào thuộc kỹ năng ${skill} trong lớp học này. Bạn có thể tạo thêm ở mục Soạn bài!`);
       return;
     }
     setActivePracticeExercises(skillExs);
@@ -547,6 +605,7 @@ function MainApp() {
                 }}
                 currentUser={currentUser}
                 classrooms={classrooms}
+                users={users}
                 pendingStudentsCount={pendingCount}
               />
             )}
@@ -648,6 +707,9 @@ function MainApp() {
               ) : currentUser.permissions?.canAccessErrorNotebook !== false ? (
                 <ErrorReview
                   errors={errors}
+                  topics={topics}
+                  lessons={lessons}
+                  exercises={exercises}
                   currentUser={currentUser}
                   onNavigateToAdminErrors={() => setCurrentTab('admin')}
                   onStartReviewSession={handleStartReviewSession}
@@ -661,6 +723,8 @@ function MainApp() {
             {currentTab === 'progress' && (currentUser.role === 'admin' || currentUser.permissions?.canViewProgress !== false) && (
               <ProgressView
                 stats={stats}
+                topics={topics}
+                lessons={lessons}
                 exercises={exercises}
                 errors={errors}
                 currentUser={currentUser}

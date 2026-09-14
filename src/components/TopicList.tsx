@@ -88,6 +88,7 @@ export const TopicList: React.FC<TopicListProps> = ({
     onConfirm: () => {},
   });
 
+  const [selectedClassFilter, setSelectedClassFilter] = useState<string>('all');
   const isAdmin = currentUser?.role === 'admin';
   const perms = currentUser?.permissions;
 
@@ -99,14 +100,19 @@ export const TopicList: React.FC<TopicListProps> = ({
     }
   };
 
-  // Filter topics for students based on their classroom
+  // Filter topics based on role:
+  // - Admin: can view "All" or filter by a specific classroom
+  // - Student: STRICTLY sees ONLY topics assigned to their own classroom
   const availableTopics = topics.filter(t => {
-    if (isAdmin) return true; // Admin sees all
-    // If student has a classroom, show topics assigned to that classroom OR general topics
-    if (currentUser?.classroomId) {
-      return !t.classroomId || t.classroomId === currentUser.classroomId;
+    if (isAdmin) {
+      if (selectedClassFilter === 'all') return true;
+      return t.classroomId === selectedClassFilter;
     }
-    return !t.classroomId;
+    // Student: must match student's classroomId
+    if (currentUser?.classroomId) {
+      return t.classroomId === currentUser.classroomId;
+    }
+    return false; // Student without classroom cannot see unassigned or other classes' topics
   });
 
   const filteredTopics = availableTopics.filter(t => 
@@ -131,14 +137,15 @@ export const TopicList: React.FC<TopicListProps> = ({
               Khóa học & Chủ đề
             </h2>
             {!isAdmin && studentClass && (
-              <span className="px-2 py-0.5 rounded-md text-xs font-semibold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+              <span className="px-2 py-0.5 rounded-md text-xs font-semibold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 flex items-center gap-1">
+                <School className="w-3 h-3" />
                 Lớp: {studentClass.name}
               </span>
             )}
           </div>
           <p className={`text-xs sm:text-sm ${theme.textMuted} mt-0.5`}>
             {isAdmin 
-              ? 'Quản lý cấu trúc bài học và nội dung đào tạo cho các lớp' 
+              ? 'Lọc xem tất cả hoặc theo từng lớp học để quản lý cấu trúc bài học' 
               : 'Nội dung học tập được phân bổ riêng cho lớp học của bạn'}
           </p>
         </div>
@@ -157,6 +164,74 @@ export const TopicList: React.FC<TopicListProps> = ({
           </div>
         )}
       </div>
+
+      {/* ADMIN CLASSROOM FILTER BAR (Xem tất cả hoặc theo lớp) */}
+      {isAdmin && classrooms.length > 0 && (
+        <div className={`${theme.card} p-3 rounded-xl border ${theme.border} space-y-2`}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-500">
+              <School className="w-3.5 h-3.5" />
+              <span>Lọc theo lớp học:</span>
+            </div>
+            <span className={`text-[11px] ${theme.textMuted}`}>
+              Hiển thị {filteredTopics.length} chủ đề
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-0.5">
+            <button
+              id="btn-topic-filter-all"
+              onClick={() => setSelectedClassFilter('all')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium shrink-0 transition-all cursor-pointer ${
+                selectedClassFilter === 'all'
+                  ? 'bg-emerald-600 text-white font-bold shadow-sm'
+                  : `${theme.highlight} ${theme.textMuted} hover:text-emerald-500`
+              }`}
+            >
+              <span>Tất cả lớp học ({topics.length})</span>
+            </button>
+
+            {classrooms.map(c => {
+              const isSelected = selectedClassFilter === c.id;
+              const countInClass = topics.filter(t => t.classroomId === c.id).length;
+
+              return (
+                <button
+                  key={c.id}
+                  id={`btn-topic-filter-class-${c.id}`}
+                  onClick={() => setSelectedClassFilter(c.id)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1.5 shrink-0 transition-all cursor-pointer ${
+                    isSelected
+                      ? 'bg-emerald-600 text-white font-bold shadow-sm'
+                      : `${theme.highlight} ${theme.textMuted} hover:text-emerald-500`
+                  }`}
+                >
+                  <School className="w-3 h-3" />
+                  <span>{c.name}</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded ${
+                    isSelected ? 'bg-black/20 text-white' : 'bg-neutral-500/10'
+                  }`}>
+                    {countInClass}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* STUDENT CLASSROOM BANNER */}
+      {!isAdmin && studentClass && (
+        <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between text-xs">
+          <div className="flex items-center gap-2">
+            <School className="w-4 h-4 text-emerald-500 shrink-0" />
+            <div>
+              <span className="font-bold text-emerald-500 block">Chủ đề của lớp: {studentClass.name}</span>
+              <span className={theme.textMuted}>Mã lớp: {studentClass.code} • {availableTopics.length} chủ đề bài học</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Search Bar */}
       <div className="relative">

@@ -7,13 +7,13 @@ import {
   Award, 
   Flame, 
   BookOpen, 
-  TrendingUp,
-  RotateCcw,
-  School,
-  Users,
-  Filter,
-  Layers,
-  ChevronRight
+  TrendingUp, 
+  RotateCcw, 
+  School, 
+  Users, 
+  Filter, 
+  Layers, 
+  ChevronRight 
 } from 'lucide-react';
 import { 
   UserStats, 
@@ -23,15 +23,20 @@ import {
   ErrorLog, 
   User, 
   Classroom,
-  ExerciseType
+  ExerciseType,
+  Topic,
+  Lesson
 } from '../types';
 import { useTheme } from '../context/ThemeContext';
+import { loadStats, getClassroomOverviewStats } from '../utils/storage';
 
 interface ProgressViewProps {
   stats: UserStats;
+  topics?: Topic[];
+  lessons?: Lesson[];
   exercises: Exercise[];
   errors: ErrorLog[];
-  onStartSkillPractice: (skill: SkillCategory) => void;
+  onStartSkillPractice: (skill: SkillCategory, classroomId?: string) => void;
   currentUser?: User | null;
   classrooms?: Classroom[];
   users?: User[];
@@ -61,8 +66,10 @@ const QUESTION_TYPES_META: { type: ExerciseType; label: string; icon: string }[]
 
 export const ProgressView: React.FC<ProgressViewProps> = ({
   stats,
-  exercises,
-  errors,
+  topics = [],
+  lessons = [],
+  exercises = [],
+  errors = [],
   onStartSkillPractice,
   currentUser,
   classrooms = [],
@@ -80,42 +87,79 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
     return classrooms.length > 0 ? classrooms[0].id : '';
   });
 
-  const selectedClass = classrooms.find(c => c.id === selectedClassId);
-  const classStudents = users.filter(u => u.role === 'student' && u.classroomId === selectedClassId);
-  const classErrors = errors.filter(e => {
-    const student = users.find(u => 
-      (e.userId && u.id === e.userId) || 
-      (e.studentName && (u.fullName.toLowerCase() === e.studentName.toLowerCase() || u.username.toLowerCase() === e.studentName.toLowerCase()))
-    );
-    const errClassId = e.classroomId || student?.classroomId;
-    return errClassId === selectedClassId;
+  // Keep selectedClassId valid
+  const effectiveClassId = isAdmin 
+    ? (classrooms.some(c => c.id === selectedClassId) ? selectedClassId : (classrooms[0]?.id || ''))
+    : (currentUser?.classroomId || '');
+
+  const selectedClass = classrooms.find(c => c.id === effectiveClassId);
+
+  // -------------------------------------------------------------
+  // CALCULATE SCOPED DATA (ADMIN SCOPED TO SELECTED CLASS, STUDENT SCOPED TO CURRENT CLASS)
+  // -------------------------------------------------------------
+  const scopedTopics = topics.filter(t => effectiveClassId && t.classroomId === effectiveClassId);
+  const scopedTopicIds = new Set(scopedTopics.map(t => t.id));
+  const scopedLessons = lessons.filter(l => scopedTopicIds.has(l.topicId));
+  const scopedLessonIds = new Set(scopedLessons.map(l => l.id));
+  const scopedExercises = exercises.filter(e => scopedLessonIds.has(e.lessonId));
+  const scopedExerciseIds = new Set(scopedExercises.map(e => e.id));
+
+  // Students in selected class (for Admin)
+  const classStudents = users.filter(u => u.role === 'student' && u.classroomId === effectiveClassId);
+
+  // Errors filtered strictly by classroom / student's current class (clearing old class legacy errors)
+  const scopedErrors = errors.filter(e => {
+    if (isAdmin) {
+      if (e.classroomId) return e.classroomId === effectiveClassId;
+      const student = users.find(u => 
+        (e.userId && u.id === e.userId) || 
+        (e.studentName && (u.fullName.toLowerCase() === e.studentName.toLowerCase() || u.username.toLowerCase() === e.studentName.toLowerCase()))
+      );
+      if (student && student.classroomId === effectiveClassId) return true;
+      return scopedExerciseIds.has(e.exerciseId);
+    } else {
+      // Student: Must belong to current student AND current classroom
+      const isThisUser = e.userId === currentUser?.id || (
+        currentUser && e.studentName && (
+          e.studentName.toLowerCase() === currentUser.fullName.toLowerCase() || 
+          e.studentName.toLowerCase() === currentUser.username.toLowerCase()
+        )
+      );
+      if (!isThisUser) return false;
+      if (e.classroomId) return e.classroomId === effectiveClassId;
+      return scopedExerciseIds.has(e.exerciseId);
+    }
   });
 
-  // Student specific errors
-  const userErrors = isAdmin 
-    ? (selectedClassId ? classErrors : errors)
-    : errors.filter(e => e.userId === currentUser?.id || (currentUser && e.studentName && (e.studentName.toLowerCase() === currentUser.fullName.toLowerCase() || e.studentName.toLowerCase() === currentUser.username.toLowerCase())));
-  const activeErrors = userErrors.filter(e => !e.resolved);
-  const resolvedErrors = userErrors.filter(e => e.resolved);
+  const activeErrors = scopedErrors.filter(e => !e.resolved);
+  const resolvedErrors = scopedErrors.filter(e => e.resolved);
 
-  const getSkillStatus = (skillKey: SkillCategory): { status: MasteryStatus; label: string; color: string } => {
-    const prof = stats.skillProficiency[skillKey] || { completed: 0, correct: 0 };
-    const skillErrors = activeErrors.filter(e => e.skill === skillKey);
+  // Admin Classroom Overview Stats
+  const classOverview = (isAdmin && effectiveClassId)
+    ? getClassroomOverviewStats(effectiveClassId, users, topics, lessons, exercises, errors)
+    : null;
 
-    if (prof.completed === 0) {
+  // Function to evaluate mastery status
+  const getSkillStatus = (
+    skillKey: SkillCategory,
+    completedCount: number,
+    correctCount: number,
+    skillActiveErrorCount: number
+  ): { status: MasteryStatus; label: string; color: string } => {
+    if (completedCount === 0) {
       return { status: 'not_started', label: 'Chưa học', color: 'text-neutral-400 bg-neutral-500/10 border-neutral-500/20' };
     }
-    if (skillErrors.length > 0) {
+    if (skillActiveErrorCount > 0) {
       return { status: 'needs_review', label: 'Cần ôn lại', color: 'text-rose-500 bg-rose-500/10 border-rose-500/20' };
     }
-    const rate = prof.completed > 0 ? (prof.correct / prof.completed) * 100 : 0;
-    if (rate >= 80 && prof.completed >= 3) {
+    const rate = completedCount > 0 ? (correctCount / completedCount) * 100 : 0;
+    if (rate >= 80 && completedCount >= 3) {
       return { status: 'mastered', label: 'Đã đạt', color: 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20' };
     }
     return { status: 'learning', label: 'Đang học', color: 'text-amber-500 bg-amber-500/10 border-amber-500/20' };
   };
 
-  const overallAccuracy = stats.totalCompleted > 0 
+  const studentAccuracy = stats.totalCompleted > 0 
     ? Math.round((stats.totalCorrect / stats.totalCompleted) * 100) 
     : 0;
 
@@ -132,12 +176,14 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
           </span>
         </div>
         <h2 className={`${typo.headingText} tracking-tight`}>
-          {isAdmin ? 'Báo cáo tiến độ học tập theo Lớp' : 'Tiến độ học tập & Làm chủ kỹ năng'}
+          {isAdmin 
+            ? (selectedClass ? `Tiến độ lớp: ${selectedClass.name}` : 'Báo cáo tiến độ học tập theo Lớp')
+            : (selectedClass ? `Tiến độ học tập - Lớp ${selectedClass.name}` : 'Tiến độ học tập & Làm chủ kỹ năng')}
         </h2>
         <p className={`text-xs sm:text-sm ${theme.textMuted}`}>
           {isAdmin 
-            ? 'Chọn lớp học phía dưới để xem chi tiết kết quả làm bài, phân loại kỹ năng (bao gồm Mixed) và tình trạng lỗi sai.'
-            : 'Đánh giá năng lực theo 7 kỹ năng cốt lõi (Bao gồm Tổng hợp Mixed Practice) và phân loại dạng câu hỏi.'}
+            ? 'Thống kê kết quả làm bài và phân tích 7 kỹ năng (bao gồm Mixed) được lọc chính xác theo lớp học đã chọn.'
+            : 'Đánh giá năng lực theo 7 kỹ năng cốt lõi (Bao gồm Tổng hợp Mixed Practice) cho các bài học của lớp bạn.'}
         </p>
       </div>
 
@@ -151,16 +197,16 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
                 <label htmlFor="admin-classroom-select" className="text-xs font-bold uppercase tracking-wider text-emerald-500 block">
                   Bộ Lọc Lớp Học Bắt Buộc
                 </label>
-                <span className="text-sm font-semibold">Chọn lớp để thống kê tiến độ:</span>
+                <span className="text-sm font-semibold">Chọn lớp để phân tích & xem kỹ năng:</span>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
               <select
                 id="admin-classroom-select"
-                value={selectedClassId}
+                value={effectiveClassId}
                 onChange={e => setSelectedClassId(e.target.value)}
-                className={`px-3 py-2 rounded-xl text-sm font-semibold ${theme.inputBg} border ${theme.border} focus:ring-2 focus:ring-emerald-500`}
+                className={`px-3 py-2 rounded-xl text-sm font-semibold ${theme.inputBg} border ${theme.border} text-emerald-500 focus:ring-2 focus:ring-emerald-500 cursor-pointer`}
               >
                 {classrooms.length === 0 ? (
                   <option value="">Chưa có lớp học nào</option>
@@ -181,7 +227,7 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
                 {selectedClass.description || 'Không có mô tả'} • Mã lớp: <strong className="text-emerald-400">{selectedClass.code}</strong>
               </span>
               <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-500 font-medium">
-                Sĩ số: {classStudents.length} học sinh
+                Sĩ số: {classStudents.length} học sinh • {scopedExercises.length} câu hỏi bài tập
               </span>
             </div>
           )}
@@ -190,6 +236,7 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
 
       {/* Overview Metric Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {/* Card 1 */}
         <div className={`${theme.card} p-4 rounded-xl text-center border ${theme.border}`}>
           <div className="flex items-center justify-center gap-1.5 text-xs text-amber-500 font-semibold mb-1">
             <Flame className="w-4 h-4 fill-amber-500" />
@@ -203,25 +250,38 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
           </div>
         </div>
 
+        {/* Card 2 */}
         <div className={`${theme.card} p-4 rounded-xl text-center border ${theme.border}`}>
           <div className="flex items-center justify-center gap-1.5 text-xs text-emerald-500 font-semibold mb-1">
             <CheckCircle2 className="w-4 h-4" />
             <span>Đã hoàn thành</span>
           </div>
-          <div className="text-2xl font-bold">{stats.totalCompleted}</div>
-          <div className={`text-[11px] ${theme.textMuted} mt-0.5`}>{stats.totalCorrect} câu đúng</div>
+          <div className="text-2xl font-bold">
+            {isAdmin ? (classOverview?.totalCompleted ?? 0) : stats.totalCompleted}
+          </div>
+          <div className={`text-[11px] ${theme.textMuted} mt-0.5`}>
+            {isAdmin ? `${classOverview?.totalCorrect ?? 0} câu đúng` : `${stats.totalCorrect} câu đúng`}
+          </div>
         </div>
 
+        {/* Card 3 */}
         <div className={`${theme.card} p-4 rounded-xl text-center border ${theme.border}`}>
           <div className="flex items-center justify-center gap-1.5 text-xs text-teal-500 font-semibold mb-1">
             <TrendingUp className="w-4 h-4" />
             <span>Độ chính xác</span>
           </div>
-          <div className="text-2xl font-bold text-emerald-500">{overallAccuracy}%</div>
+          <div className="text-2xl font-bold text-emerald-500">
+            {isAdmin ? `${classOverview?.accuracyRate ?? 0}%` : `${studentAccuracy}%`}
+          </div>
           <div className={`text-[11px] ${theme.textMuted} mt-0.5`}>Tỷ lệ đạt chuẩn</div>
         </div>
 
-        <div className={`${theme.card} p-4 rounded-xl text-center border ${theme.border}`}>
+        {/* Card 4 */}
+        <div 
+          className={`${theme.card} p-4 rounded-xl text-center border ${theme.border} cursor-pointer hover:border-rose-500/40 transition-colors`}
+          onClick={onNavigateToErrors}
+          title="Xem chi tiết sổ lỗi sai"
+        >
           <div className="flex items-center justify-center gap-1.5 text-xs text-rose-500 font-semibold mb-1">
             <AlertCircle className="w-4 h-4" />
             <span>Lỗi sai tồn đọng</span>
@@ -247,16 +307,16 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
               <button
                 id="btn-nav-to-admin-errors"
                 onClick={onNavigateToErrors}
-                className="text-xs font-semibold text-rose-400 hover:text-rose-300 flex items-center gap-1"
+                className="text-xs font-semibold text-rose-400 hover:text-rose-300 flex items-center gap-1 cursor-pointer"
               >
-                <span>Xem Sổ lỗi học sinh ({classErrors.length})</span>
+                <span>Xem Sổ lỗi học sinh ({scopedErrors.length})</span>
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
 
           {classStudents.length === 0 ? (
-            <div className={`${theme.card} p-6 rounded-xl text-center border-dashed border`}>
+            <div className={`${theme.card} p-6 rounded-xl text-center border-dashed border ${theme.border}`}>
               <p className={`text-xs ${theme.textMuted}`}>Lớp học này chưa có học sinh nào đăng ký.</p>
             </div>
           ) : (
@@ -274,7 +334,7 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
                   </thead>
                   <tbody className="divide-y divide-inherit">
                     {classStudents.map(student => {
-                      const sErrors = errors.filter(e => 
+                      const sErrors = scopedErrors.filter(e => 
                         e.userId === student.id || 
                         (e.studentName && (e.studentName.toLowerCase() === student.fullName.toLowerCase() || e.studentName.toLowerCase() === student.username.toLowerCase()))
                       );
@@ -315,24 +375,52 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
         </div>
       )}
 
-      {/* 7 SKILLS MATRIX (INCLUDING MIXED PRACTICE) */}
+      {/* 7 SKILLS MATRIX (INCLUDING MIXED PRACTICE) - FILTERED BY SELECTED CLASSROOM */}
       <div className="space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <h3 className="text-base font-semibold tracking-tight flex items-center gap-2">
             <Award className="w-4 h-4 text-emerald-500" />
-            <span>Phân tích 7 Kỹ năng cốt lõi (Bao gồm Tổng hợp Mixed)</span>
+            <span>
+              Phân tích 7 Kỹ năng cốt lõi (Bao gồm Tổng hợp Mixed)
+              {isAdmin && selectedClass && (
+                <span className="text-xs font-normal text-emerald-500 ml-1.5">
+                  — Lớp {selectedClass.name}
+                </span>
+              )}
+            </span>
           </h3>
           <span className={`text-xs ${theme.textMuted}`}>
-            {exercises.filter(e => e.skill === 'mixed').length} câu Mixed trong kho
+            {scopedExercises.filter(e => e.skill === 'mixed').length} câu Mixed trong {isAdmin && selectedClass ? `lớp ${selectedClass.name}` : 'lớp của bạn'}
           </span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {SKILLS_META.map(item => {
-            const prof = stats.skillProficiency[item.key] || { completed: 0, correct: 0 };
-            const statusInfo = getSkillStatus(item.key);
-            const accuracy = prof.completed > 0 ? Math.round((prof.correct / prof.completed) * 100) : 0;
-            const skillExercises = exercises.filter(e => e.skill === item.key);
+            // Calculate skill proficiency:
+            // For Admin: aggregate from students of selectedClass
+            // For Student: student's own stats
+            let completed = 0;
+            let correct = 0;
+
+            if (isAdmin) {
+              classStudents.forEach(student => {
+                const sStats = loadStats(student.id);
+                const sProf = sStats.skillProficiency?.[item.key];
+                if (sProf) {
+                  completed += sProf.completed || 0;
+                  correct += sProf.correct || 0;
+                }
+              });
+            } else {
+              const prof = stats.skillProficiency[item.key] || { completed: 0, correct: 0 };
+              completed = prof.completed;
+              correct = prof.correct;
+            }
+
+            const skillActiveErrors = activeErrors.filter(e => e.skill === item.key);
+            const statusInfo = getSkillStatus(item.key, completed, correct, skillActiveErrors.length);
+            const accuracy = completed > 0 ? Math.round((correct / completed) * 100) : 0;
+            const skillExercises = scopedExercises.filter(e => e.skill === item.key);
 
             return (
               <div
@@ -370,7 +458,7 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
                   <div className="space-y-1">
                     <div className="flex items-center justify-between text-xs">
                       <span className={theme.textMuted}>
-                        {prof.completed} lượt làm • {skillExercises.length} câu trong kho
+                        {completed} lượt làm • {skillExercises.length} câu trong lớp
                       </span>
                       <span className="font-semibold text-emerald-500">
                         {accuracy}% đúng
@@ -389,18 +477,18 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
 
                 <div className="pt-2 border-t border-inherit flex items-center justify-between">
                   <span className={`text-[11px] ${theme.textMuted}`}>
-                    {prof.correct} đúng / {prof.completed} tổng
+                    {correct} đúng / {completed} tổng lượt
                   </span>
                   <button
                     id={`btn-practice-skill-${item.key}`}
                     disabled={skillExercises.length === 0}
-                    onClick={() => onStartSkillPractice(item.key)}
+                    onClick={() => onStartSkillPractice(item.key, effectiveClassId)}
                     className={`px-2.5 py-1 rounded-lg text-xs font-medium text-white disabled:opacity-40 flex items-center gap-1 cursor-pointer ${
                       item.key === 'mixed' ? 'bg-amber-600 hover:bg-amber-500' : 'bg-emerald-600 hover:bg-emerald-500'
                     }`}
                   >
                     <RotateCcw className="w-3 h-3" />
-                    <span>Luyện {item.key === 'mixed' ? 'Mixed' : 'kỹ năng'}</span>
+                    <span>Luyện {item.key === 'mixed' ? 'Mixed' : 'kỹ năng'} ({skillExercises.length})</span>
                   </button>
                 </div>
               </div>
@@ -409,16 +497,25 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
         </div>
       </div>
 
-      {/* QUESTION TYPE CLASSIFICATION MATRIX */}
+      {/* QUESTION TYPE CLASSIFICATION MATRIX - FILTERED BY SELECTED CLASSROOM */}
       <div className="space-y-3 pt-2">
-        <h3 className="text-base font-semibold tracking-tight flex items-center gap-2">
-          <Layers className="w-4 h-4 text-emerald-500" />
-          <span>Phân bố dạng câu hỏi trong kho kiến thức</span>
-        </h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-semibold tracking-tight flex items-center gap-2">
+            <Layers className="w-4 h-4 text-emerald-500" />
+            <span>
+              Phân bố dạng câu hỏi trong kho kiến thức
+              {isAdmin && selectedClass && (
+                <span className="text-xs font-normal text-emerald-500 ml-1.5">
+                  — Lớp {selectedClass.name} ({scopedExercises.length} câu)
+                </span>
+              )}
+            </span>
+          </h3>
+        </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
           {QUESTION_TYPES_META.map(q => {
-            const count = exercises.filter(e => e.type === q.type).length;
+            const count = scopedExercises.filter(e => e.type === q.type).length;
             return (
               <div
                 key={q.type}

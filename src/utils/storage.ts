@@ -169,8 +169,9 @@ export function saveErrors(errors: ErrorLog[]) {
   errors?.forEach(err => syncDocToCloud('errors', err.id, err));
 }
 
-export function loadStats(): UserStats {
-  const raw = safeParse<UserStats>(STORAGE_KEYS.STATS, initialStats);
+export function loadStats(userId?: string): UserStats {
+  const key = userId ? `${STORAGE_KEYS.STATS}_${userId}` : STORAGE_KEYS.STATS;
+  const raw = safeParse<UserStats>(key, initialStats);
   const stats: UserStats = (raw && raw.skillProficiency) ? raw : { ...initialStats };
   if (!stats.skillProficiency.mixed) {
     stats.skillProficiency.mixed = { completed: 0, correct: 0 };
@@ -188,13 +189,17 @@ export function loadStats(): UserStats {
       stats.streakDays = 1;
     }
     stats.lastActiveDate = today;
-    saveStats(stats);
+    saveStats(stats, userId);
   }
   return stats;
 }
 
-export function saveStats(stats: UserStats) {
-  localStorage.setItem(STORAGE_KEYS.STATS, JSON.stringify(stats));
+export function saveStats(stats: UserStats, userId?: string) {
+  const key = userId ? `${STORAGE_KEYS.STATS}_${userId}` : STORAGE_KEYS.STATS;
+  localStorage.setItem(key, JSON.stringify(stats));
+  if (!userId) {
+    localStorage.setItem(STORAGE_KEYS.STATS, JSON.stringify(stats));
+  }
 }
 
 export function loadSettings(): AppSettings {
@@ -485,8 +490,10 @@ export function deleteExercise(exerciseId: string) {
 }
 
 // Record exercise result to update statistics
-export function recordExerciseResult(skill: SkillCategory, isCorrect: boolean) {
-  const stats = loadStats();
+export function recordExerciseResult(skill: SkillCategory, isCorrect: boolean, currentUser?: User | null) {
+  const activeUser = currentUser || getCurrentUser();
+  const userId = activeUser?.id;
+  const stats = loadStats(userId);
   stats.totalCompleted += 1;
   if (isCorrect) stats.totalCorrect += 1;
 
@@ -498,7 +505,59 @@ export function recordExerciseResult(skill: SkillCategory, isCorrect: boolean) {
     stats.skillProficiency[skill].correct += 1;
   }
 
-  saveStats(stats);
+  saveStats(stats, userId);
+  // Also keep general fallback stats updated if admin or guest
+  if (!userId) {
+    saveStats(stats);
+  }
+}
+
+export function getClassroomOverviewStats(
+  classroomId: string,
+  users: User[],
+  topics: Topic[],
+  lessons: Lesson[],
+  exercises: Exercise[],
+  errors: ErrorLog[]
+) {
+  const classStudents = users.filter(u => u.role === 'student' && u.classroomId === classroomId);
+  const classTopics = topics.filter(t => t.classroomId === classroomId);
+  const classTopicIds = new Set(classTopics.map(t => t.id));
+  const classLessons = lessons.filter(l => classTopicIds.has(l.topicId));
+  const classLessonIds = new Set(classLessons.map(l => l.id));
+  const classExercises = exercises.filter(e => classLessonIds.has(e.lessonId));
+
+  const classErrors = errors.filter(e => {
+    if (e.classroomId === classroomId) return true;
+    const student = classStudents.find(s => s.id === e.userId || (e.studentName && (s.fullName === e.studentName || s.username === e.studentName)));
+    return !!student;
+  });
+
+  const activeErrors = classErrors.filter(e => !e.resolved);
+  const resolvedErrors = classErrors.filter(e => e.resolved);
+
+  let totalCompleted = 0;
+  let totalCorrect = 0;
+
+  classStudents.forEach(student => {
+    const sStats = loadStats(student.id);
+    totalCompleted += sStats.totalCompleted;
+    totalCorrect += sStats.totalCorrect;
+  });
+
+  const accuracyRate = totalCompleted > 0 ? Math.round((totalCorrect / totalCompleted) * 100) : 0;
+
+  return {
+    totalStudents: classStudents.length,
+    totalTopics: classTopics.length,
+    totalLessons: classLessons.length,
+    totalExercises: classExercises.length,
+    totalCompleted,
+    totalCorrect,
+    accuracyRate,
+    activeErrorsCount: activeErrors.length,
+    resolvedErrorsCount: resolvedErrors.length,
+  };
 }
 
 // -------------------------------------------------------------
