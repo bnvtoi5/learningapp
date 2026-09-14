@@ -104,7 +104,7 @@ export async function fetchAllFromCloud() {
     const media = mediaSnap.docs.map(d => d.data() as MediaAsset);
 
     return {
-      hasData: classrooms.length > 0 || topics.length > 0 || lessons.length > 0,
+      hasData: classrooms.length > 0 || topics.length > 0 || lessons.length > 0 || exercises.length > 0 || users.length > 0 || media.length > 0,
       classrooms,
       topics,
       lessons,

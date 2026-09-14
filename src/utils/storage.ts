@@ -409,12 +409,14 @@ export function resolveError(errorId: string) {
 export function deleteError(errorId: string) {
   const errors = loadErrors().filter(e => e.id !== errorId);
   saveErrors(errors);
+  deleteDocFromCloud('errors', errorId);
 }
 
 export function bulkDeleteErrors(errorIds: string[]): ErrorLog[] {
   const idSet = new Set(errorIds);
   const updated = loadErrors().filter(e => !idSet.has(e.id));
   saveErrors(updated);
+  errorIds.forEach(id => deleteDocFromCloud('errors', id));
   return updated;
 }
 
@@ -450,6 +452,10 @@ export function updateTopic(updatedTopic: Topic): Topic[] {
   return next;
 }
 
+export function deleteTopic(topicId: string) {
+  return deleteTopicCascade(topicId);
+}
+
 export function updateLesson(updatedLesson: Lesson): Lesson[] {
   const lessons = loadLessons();
   const exists = lessons.some(l => l.id === updatedLesson.id);
@@ -458,6 +464,10 @@ export function updateLesson(updatedLesson: Lesson): Lesson[] {
     : [...lessons, updatedLesson];
   saveLessons(next);
   return next;
+}
+
+export function deleteLesson(lessonId: string) {
+  return deleteLessonCascade(lessonId);
 }
 
 export function updateExercise(updatedExercise: Exercise): Exercise[] {
@@ -470,10 +480,8 @@ export function updateExercise(updatedExercise: Exercise): Exercise[] {
   return next;
 }
 
-export function deleteExercise(exerciseId: string): Exercise[] {
-  const exercises = loadExercises().filter(e => e.id !== exerciseId);
-  saveExercises(exercises);
-  return exercises;
+export function deleteExercise(exerciseId: string) {
+  return deleteExerciseCascade(exerciseId);
 }
 
 // Record exercise result to update statistics
@@ -527,7 +535,7 @@ export function updateUser(updatedUser: User) {
 }
 
 export function deleteUser(userId: string) {
-  deleteUserCascade(userId);
+  return deleteUserCascade(userId);
 }
 
 export function deleteUserCascade(userId: string): {
@@ -584,7 +592,7 @@ export function updateClassroom(updatedClassroom: Classroom) {
 }
 
 export function deleteClassroom(classroomId: string) {
-  deleteClassroomCascade(classroomId);
+  return deleteClassroomCascade(classroomId);
 }
 
 export function deleteClassroomCascade(classroomId: string): {
@@ -834,28 +842,16 @@ export async function syncDatabaseWithCloud(onDataChanged?: () => void): Promise
     }
 
     if (cloudData.hasData) {
-      // Cloud has existing data -> update LocalStorage
-      if (cloudData.classrooms && cloudData.classrooms.length > 0) {
-        localStorage.setItem(STORAGE_KEYS.CLASSROOMS, JSON.stringify(cloudData.classrooms));
-      }
-      if (cloudData.topics && cloudData.topics.length > 0) {
-        localStorage.setItem(STORAGE_KEYS.TOPICS, JSON.stringify(cloudData.topics));
-      }
-      if (cloudData.lessons && cloudData.lessons.length > 0) {
-        localStorage.setItem(STORAGE_KEYS.LESSONS, JSON.stringify(cloudData.lessons));
-      }
-      if (cloudData.exercises && cloudData.exercises.length > 0) {
-        localStorage.setItem(STORAGE_KEYS.EXERCISES, JSON.stringify(cloudData.exercises));
-      }
+      // Cloud has existing data -> update LocalStorage to perfectly mirror cloud
+      localStorage.setItem(STORAGE_KEYS.CLASSROOMS, JSON.stringify(cloudData.classrooms || []));
+      localStorage.setItem(STORAGE_KEYS.TOPICS, JSON.stringify(cloudData.topics || []));
+      localStorage.setItem(STORAGE_KEYS.LESSONS, JSON.stringify(cloudData.lessons || []));
+      localStorage.setItem(STORAGE_KEYS.EXERCISES, JSON.stringify(cloudData.exercises || []));
       if (cloudData.users && cloudData.users.length > 0) {
         localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(cloudData.users));
       }
-      if (cloudData.errors && cloudData.errors.length > 0) {
-        localStorage.setItem(STORAGE_KEYS.ERRORS, JSON.stringify(cloudData.errors));
-      }
-      if (cloudData.media && cloudData.media.length > 0) {
-        localStorage.setItem(STORAGE_KEYS.MEDIA, JSON.stringify(cloudData.media));
-      }
+      localStorage.setItem(STORAGE_KEYS.ERRORS, JSON.stringify(cloudData.errors || []));
+      localStorage.setItem(STORAGE_KEYS.MEDIA, JSON.stringify(cloudData.media || []));
       if (onDataChanged) {
         onDataChanged();
       }

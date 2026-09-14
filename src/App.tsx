@@ -20,7 +20,12 @@ import {
   loadExercises, 
   saveExercises, 
   updateExercise,
+  deleteTopic,
+  deleteLesson,
   deleteExercise,
+  deleteTopicCascade,
+  deleteLessonCascade,
+  deleteExerciseCascade,
   loadErrors, 
   saveErrors, 
   loadStats, 
@@ -213,8 +218,9 @@ function MainApp() {
   };
 
   const handleDeleteUser = (userId: string) => {
-    storageDeleteUser(userId);
-    setUsers(loadUsers());
+    const res = storageDeleteUser(userId);
+    setUsers(res.users);
+    setErrors(res.errors);
   };
 
   const handleCreateClassroom = (classroom: Classroom) => {
@@ -228,8 +234,13 @@ function MainApp() {
   };
 
   const handleDeleteClassroom = (classroomId: string) => {
-    storageDeleteClassroom(classroomId);
-    setClassrooms(loadClassrooms());
+    const res = storageDeleteClassroom(classroomId);
+    setClassrooms(res.classrooms);
+    setTopics(res.topics);
+    setLessons(res.lessons);
+    setExercises(res.exercises);
+    setUsers(res.users);
+    setErrors(res.errors);
   };
 
   // Last active lesson
@@ -315,20 +326,11 @@ function MainApp() {
   };
 
   const handleDeleteTopic = (topicId: string) => {
-    const updatedTopics = topics.filter(t => t.id !== topicId);
-    saveTopics(updatedTopics);
-    setTopics(updatedTopics);
-
-    // Also delete associated lessons and exercises
-    const childLessons = lessons.filter(l => l.topicId === topicId);
-    const childLessonIds = childLessons.map(l => l.id);
-    const updatedLessons = lessons.filter(l => l.topicId !== topicId);
-    saveLessons(updatedLessons);
-    setLessons(updatedLessons);
-
-    const updatedExercises = exercises.filter(e => !childLessonIds.includes(e.lessonId));
-    saveExercises(updatedExercises);
-    setExercises(updatedExercises);
+    const result = deleteTopicCascade(topicId);
+    setTopics(result.topics);
+    setLessons(result.lessons);
+    setExercises(result.exercises);
+    setErrors(result.errors);
 
     if (selectedTopicId === topicId) {
       setSelectedTopicId(null);
@@ -347,13 +349,10 @@ function MainApp() {
   };
 
   const handleDeleteLesson = (lessonId: string) => {
-    const updatedLessons = lessons.filter(l => l.id !== lessonId);
-    saveLessons(updatedLessons);
-    setLessons(updatedLessons);
-
-    const updatedExercises = exercises.filter(e => e.lessonId !== lessonId);
-    saveExercises(updatedExercises);
-    setExercises(updatedExercises);
+    const result = deleteLessonCascade(lessonId);
+    setLessons(result.lessons);
+    setExercises(result.exercises);
+    setErrors(result.errors);
   };
 
   const handleUpdateLesson = (lesson: Lesson) => {
@@ -373,8 +372,9 @@ function MainApp() {
   };
 
   const handleDeleteExercise = (exerciseId: string) => {
-    const updated = deleteExercise(exerciseId);
-    setExercises(updated);
+    const result = deleteExerciseCascade(exerciseId);
+    setExercises(result.exercises);
+    setErrors(result.errors);
   };
 
   // Error Handlers

@@ -832,18 +832,21 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
         {currentEx.type === 'error_correction' && (
           <div className="space-y-3 pt-1">
             {currentEx.wrongSentence && (
-              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs">
-                <span className="font-bold text-rose-500 block mb-0.5">Câu chứa lỗi sai:</span>
-                <span className="line-through">{currentEx.wrongSentence}</span>
+              <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs space-y-1">
+                <span className="font-bold text-rose-500 block text-[11px] uppercase tracking-wider">Câu chứa lỗi sai:</span>
+                <p className="text-sm font-medium text-rose-200/90 leading-relaxed select-text">{currentEx.wrongSentence}</p>
               </div>
             )}
             <input
+              id="input-error-correction"
               type="text"
+              autoFocus
               disabled={isChecked}
               value={textAnswer}
               onChange={e => setTextAnswer(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && !isChecked && handleCheck()}
               placeholder="Gõ lại câu hoàn chỉnh sau khi sửa..."
-              className={`w-full p-3.5 rounded-xl ${theme.inputBg} text-xs font-medium border ${theme.border}`}
+              className={`w-full p-3.5 rounded-xl ${theme.inputBg} text-sm font-medium border ${theme.border} focus:border-emerald-500`}
             />
           </div>
         )}
