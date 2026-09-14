@@ -24,38 +24,49 @@ import {
   BarChart2,
   Filter
 } from 'lucide-react';
-import { User, Classroom, Topic, StudentPermissions, UserStatus } from '../types';
+import { User, Classroom, Topic, StudentPermissions, UserStatus, ErrorLog } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import { defaultStudentPermissions } from '../utils/storage';
 import { ConfirmModal } from './ConfirmModal';
+import { AdminErrorManager } from './AdminErrorManager';
 
 interface AdminPortalProps {
   users?: User[];
   classrooms?: Classroom[];
   topics?: Topic[];
+  errors?: ErrorLog[];
   onUpdateUser: (user: User) => void;
   onDeleteUser: (userId: string) => void;
   onCreateClassroom: (classroom: Classroom) => void;
   onUpdateClassroom: (classroom: Classroom) => void;
   onDeleteClassroom: (classroomId: string) => void;
   onUpdateTopic: (topic: Topic) => void;
+  onUpdateErrorPenalty?: (errorId: string, penaltyCount: number) => void;
+  onResetErrorProgress?: (errorId: string) => void;
+  onResolveError?: (errorId: string) => void;
+  onDeleteError?: (errorId: string) => void;
 }
 
 export const AdminPortal: React.FC<AdminPortalProps> = ({
   users = [],
   classrooms = [],
   topics = [],
+  errors = [],
   onUpdateUser,
   onDeleteUser,
   onCreateClassroom,
   onUpdateClassroom,
   onDeleteClassroom,
   onUpdateTopic,
+  onUpdateErrorPenalty,
+  onResetErrorProgress,
+  onResolveError,
+  onDeleteError,
 }) => {
   const { getThemeClasses } = useTheme();
   const theme = getThemeClasses();
 
-  const [activeTab, setActiveTab] = useState<'pending' | 'students' | 'classes' | 'permissions'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'students' | 'classes' | 'permissions' | 'errors'>('pending');
 
   // Search & filter states
   const [searchQuery, setSearchQuery] = useState('');

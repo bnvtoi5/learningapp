@@ -1,0 +1,62 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-\\.:]+$');
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Classrooms
+    match /classrooms/{classroomId} {
+      allow read: if true;
+      allow write: if true; // Managed by teacher
+    }
+
+    // Topics
+    match /topics/{topicId} {
+      allow read: if true;
+      allow write: if true; // Managed by teacher
+    }
+
+    // Lessons
+    match /lessons/{lessonId} {
+      allow read: if true;
+      allow write: if true; // Managed by teacher
+    }
+
+    // Exercises
+    match /exercises/{exerciseId} {
+      allow read: if true;
+      allow write: if true; // Managed by teacher
+    }
+
+    // Users
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if true; // User registration & teacher management
+    }
+
+    // Error Logs (Student error notebook)
+    match /errors/{errorId} {
+      allow read: if true;
+      allow write: if true; // Students log their errors and retries
+    }
+
+    // Media library (Audio and Images)
+    match /media/{mediaId} {
+      allow read: if true;
+      allow write: if true; // Teachers upload media
+    }
+
+    // System connection test doc
+    match /test/{docId} {
+      allow read, write: if true;
+    }
+  }
+}

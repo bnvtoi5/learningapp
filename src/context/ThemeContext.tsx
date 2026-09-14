@@ -33,7 +33,10 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     saveSettings(settings);
     // Add class to body/html if needed
     const root = document.documentElement;
-    root.classList.remove('theme-light', 'theme-dark', 'theme-oled', 'theme-sepia');
+    root.classList.remove('theme-light', 'theme-dark', 'theme-oled', 'theme-sepia', 'dark');
+    if (settings.theme === 'dark' || settings.theme === 'oled') {
+      root.classList.add('dark');
+    }
     root.classList.add(`theme-${settings.theme}`);
   }, [settings]);
 

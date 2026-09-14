@@ -12,11 +12,16 @@ import {
   Trash2, 
   Check, 
   ShieldCheck,
-  RotateCcw
+  RotateCcw,
+  Cloud,
+  CloudUpload,
+  RefreshCw,
+  Globe
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { ThemeMode, FontSize, LineSpacing } from '../types';
-import { exportAllData, importData, clearAllDatabase } from '../utils/storage';
+import { exportAllData, importData, clearAllDatabase, syncDatabaseWithCloud, loadUsers, loadClassrooms, loadTopics, loadLessons, loadExercises, loadErrors, loadMediaAssets } from '../utils/storage';
+import { syncAllToCloud } from '../lib/firebase';
 import { ConfirmModal } from './ConfirmModal';
 
 interface SettingsModalProps {
@@ -38,8 +43,53 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  
+  // Cloud sync states
+  const [isSyncingCloud, setIsSyncingCloud] = useState(false);
+  const [cloudMessage, setCloudMessage] = useState<string | null>(null);
+  const [showDeployGuide, setShowDeployGuide] = useState(false);
 
   if (!isOpen) return null;
+
+  const handleSyncCloud = async () => {
+    setIsSyncingCloud(true);
+    setCloudMessage(null);
+    try {
+      const res = await syncDatabaseWithCloud(() => {
+        onDataReload();
+      });
+      setCloudMessage(res.message);
+    } catch (e: any) {
+      setCloudMessage('Lỗi đồng bộ: ' + (e.message || 'Không thể kết nối'));
+    } finally {
+      setIsSyncingCloud(false);
+    }
+  };
+
+  const handlePushAllToCloud = async () => {
+    setIsSyncingCloud(true);
+    setCloudMessage(null);
+    try {
+      const success = await syncAllToCloud({
+        users: loadUsers(),
+        classrooms: loadClassrooms(),
+        topics: loadTopics(),
+        lessons: loadLessons(),
+        exercises: loadExercises(),
+        errors: loadErrors(),
+        media: loadMediaAssets(),
+      });
+      if (success) {
+        setCloudMessage('Đã đẩy toàn bộ dữ liệu hiện tại lên Cloud Firebase thành công!');
+      } else {
+        setCloudMessage('Đẩy dữ liệu thất bại, vui lòng kiểm tra kết nối mạng.');
+      }
+    } catch (e: any) {
+      setCloudMessage('Lỗi: ' + (e.message || 'Thao tác thất bại'));
+    } finally {
+      setIsSyncingCloud(false);
+    }
+  };
 
   const handleExport = () => {
     const dataStr = exportAllData();
@@ -73,7 +123,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const handleClearAll = () => {
-    clearAllDatabase();
+    clearAllDatabase(true);
     onDataReload();
     onClose();
   };
@@ -228,7 +278,77 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
 
-          {/* 5. Dữ liệu: Backup / Restore JSON */}
+          {/* 5. Cloud Database (Firebase Firestore) & Deploy Vercel */}
+          <div className="space-y-3 pt-2 border-t border-inherit">
+            <div className="flex items-center justify-between">
+              <label className={`text-xs font-semibold ${theme.textMuted} uppercase tracking-wider block`}>
+                Cơ sở dữ liệu Đám Mây (Firebase Cloud)
+              </label>
+              <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                Đã kết nối
+              </span>
+            </div>
+
+            <p className={`text-[11px] ${theme.textMuted} leading-relaxed`}>
+              Dữ liệu được lưu trữ trực tiếp trên Google Firebase Firestore. Khi bạn tạo bài giảng hoặc học sinh làm bài tập qua link Vercel, dữ liệu sẽ tự động đồng bộ ngay lập tức.
+            </p>
+
+            {cloudMessage && (
+              <div className="p-2.5 rounded-xl text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                {cloudMessage}
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                id="btn-sync-cloud-now"
+                type="button"
+                onClick={handleSyncCloud}
+                disabled={isSyncingCloud}
+                className={`py-2 px-3 rounded-xl border ${theme.border} ${theme.highlight} text-xs font-medium flex items-center justify-center gap-1.5 hover:opacity-80 disabled:opacity-50 cursor-pointer`}
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-emerald-500 ${isSyncingCloud ? 'animate-spin' : ''}`} />
+                <span>{isSyncingCloud ? 'Đang đồng bộ...' : 'Đồng bộ từ Cloud'}</span>
+              </button>
+
+              <button
+                id="btn-push-all-to-cloud"
+                type="button"
+                onClick={handlePushAllToCloud}
+                disabled={isSyncingCloud}
+                className={`py-2 px-3 rounded-xl border ${theme.border} ${theme.highlight} text-xs font-medium flex items-center justify-center gap-1.5 hover:opacity-80 disabled:opacity-50 cursor-pointer`}
+              >
+                <CloudUpload className="w-3.5 h-3.5 text-sky-500" />
+                <span>Đẩy lên Cloud DB</span>
+              </button>
+            </div>
+
+            <button
+              id="btn-toggle-deploy-guide"
+              type="button"
+              onClick={() => setShowDeployGuide(!showDeployGuide)}
+              className={`w-full py-1.5 px-3 rounded-xl border ${theme.border} text-[11px] font-medium text-center flex items-center justify-center gap-1.5 hover:opacity-80 text-amber-500 cursor-pointer`}
+            >
+              <Globe className="w-3.5 h-3.5" />
+              <span>{showDeployGuide ? 'Ẩn hướng dẫn Deploy Vercel / GitHub' : 'Xem hướng dẫn Deploy Vercel / GitHub Miễn Phí'}</span>
+            </button>
+
+            {showDeployGuide && (
+              <div className={`p-3 rounded-xl border ${theme.border} ${theme.highlight} text-xs space-y-2 leading-relaxed`}>
+                <div className="font-bold text-emerald-500 flex items-center gap-1.5">
+                  <Check className="w-4 h-4" /> 3 Bước Deploy lên GitHub & Vercel (100% Free):
+                </div>
+                <ol className="list-decimal list-inside space-y-1 text-[11px] text-left">
+                  <li><strong>Tải mã nguồn về:</strong> Nhấn nút Export/Download ZIP hoặc Push lên repository GitHub cá nhân của bạn.</li>
+                  <li><strong>Kết nối Vercel:</strong> Truy cập <a href="https://vercel.com" target="_blank" rel="noreferrer" className="underline text-sky-400">vercel.com</a>, chọn <em>Add New Project</em> và chọn repository GitHub vừa tạo.</li>
+                  <li><strong>Deploy:</strong> Nhấn <em>Deploy</em>. Vercel tự động build và cấp link miễn phí dạng <code className="font-mono bg-black/20 px-1 py-0.5 rounded">https://app-cua-ban.vercel.app</code>. Gửi link này cho học sinh là học sinh truy cập và đồng bộ bài học trên Cloud ngay!</li>
+                </ol>
+              </div>
+            )}
+          </div>
+
+          {/* 6. Dữ liệu: Backup / Restore JSON */}
           <div className="space-y-2 pt-1 border-t border-inherit">
             <label className={`text-xs font-semibold ${theme.textMuted} uppercase tracking-wider block`}>
               Sao lưu & Khôi phục dữ liệu (JSON)
@@ -290,7 +410,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             )}
           </div>
 
-          {/* 6. Xóa trắng dữ liệu */}
+          {/* 7. Xóa trắng dữ liệu */}
           <div className="pt-2 border-t border-inherit">
             <button
               id="btn-clear-all-data"

@@ -9,7 +9,7 @@ import {
   Sparkles,
   HelpCircle
 } from 'lucide-react';
-import { ErrorLog, SkillCategory } from '../types';
+import { ErrorLog, SkillCategory, User } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import { ConfirmModal } from './ConfirmModal';
 
@@ -18,6 +18,8 @@ interface ErrorReviewProps {
   onStartReviewSession: (exerciseIds?: string[]) => void;
   onResolveError: (errorId: string) => void;
   onDeleteError: (errorId: string) => void;
+  currentUser?: User | null;
+  onNavigateToAdminErrors?: () => void;
 }
 
 export const ErrorReview: React.FC<ErrorReviewProps> = ({
@@ -25,6 +27,8 @@ export const ErrorReview: React.FC<ErrorReviewProps> = ({
   onStartReviewSession,
   onResolveError,
   onDeleteError,
+  currentUser,
+  onNavigateToAdminErrors,
 }) => {
   const { getThemeClasses, getTypographyClasses } = useTheme();
   const theme = getThemeClasses();
@@ -34,7 +38,10 @@ export const ErrorReview: React.FC<ErrorReviewProps> = ({
   const [showResolved, setShowResolved] = useState(false);
   const [errorToDelete, setErrorToDelete] = useState<ErrorLog | null>(null);
 
-  const activeErrors = errors.filter(e => showResolved ? true : !e.resolved);
+  const userErrors = currentUser?.role === 'student'
+    ? errors.filter(e => e.userId === currentUser.id || (e.studentName && (e.studentName === currentUser.fullName || e.studentName === currentUser.username)))
+    : errors;
+  const activeErrors = userErrors.filter(e => showResolved ? true : !e.resolved);
   const filteredErrors = activeErrors.filter(e => {
     if (filterSkill === 'all') return true;
     return e.skill === filterSkill;
@@ -73,6 +80,25 @@ export const ErrorReview: React.FC<ErrorReviewProps> = ({
         )}
       </div>
 
+      {/* Admin Notice Banner */}
+      {currentUser?.role === 'admin' && onNavigateToAdminErrors && (
+        <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-300">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>
+              <strong>Dành cho Giáo viên / Quản trị viên:</strong> Bạn có thể xem danh sách học sinh theo lớp, tỷ lệ làm lại và cài đặt số lần làm đúng bắt buộc (hình phạt) tại mục Quản trị.
+            </span>
+          </div>
+          <button
+            id="btn-switch-to-admin-error-manager"
+            onClick={onNavigateToAdminErrors}
+            className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold whitespace-nowrap text-xs shadow-sm"
+          >
+            Mở Quản lý Sổ Lỗi & Phạt →
+          </button>
+        </div>
+      )}
+
       {/* Filter and Stats Bar */}
       <div className={`${theme.card} p-3 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs`}>
         <div className="flex items-center gap-2">
@@ -85,6 +111,7 @@ export const ErrorReview: React.FC<ErrorReviewProps> = ({
             className={`p-1.5 rounded-lg ${theme.inputBg} text-xs font-medium`}
           >
             <option value="all">Tất cả kỹ năng ({activeErrors.length})</option>
+            <option value="mixed">⚡ Tổng hợp (Mixed Practice)</option>
             <option value="grammar">Ngữ pháp (Grammar)</option>
             <option value="vocabulary">Từ vựng (Vocabulary)</option>
             <option value="reading">Đọc hiểu (Reading)</option>
@@ -197,6 +224,25 @@ export const ErrorReview: React.FC<ErrorReviewProps> = ({
                   <p className={`${theme.textMuted} whitespace-pre-line`}>{err.explanation}</p>
                 </div>
               )}
+
+              {/* Penalty & Retry Progress */}
+              <div className={`p-2.5 rounded-lg ${theme.badgeBg} flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs border ${theme.border}`}>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="font-semibold text-sky-400">
+                    Đã thử lại: <strong>{err.retryAttempts || 0} lượt</strong>
+                  </span>
+                  <span className="text-neutral-500">•</span>
+                  <span className="font-semibold text-amber-400">
+                    Tiến độ hoàn thành: <strong>{err.currentSuccessCount || 0} / {err.requiredSuccessCount || 2} lần đúng</strong>
+                  </span>
+                </div>
+
+                {!err.resolved && (
+                  <span className="text-[11px] text-rose-400 font-medium">
+                    (Cần đúng thêm {Math.max(1, (err.requiredSuccessCount || 2) - (err.currentSuccessCount || 0))} lần nữa)
+                  </span>
+                )}
+              </div>
 
               {/* Action Button */}
               <div className="flex justify-end pt-1">

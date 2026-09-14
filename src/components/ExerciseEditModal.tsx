@@ -14,9 +14,11 @@ import {
   ExerciseType, 
   SkillCategory, 
   DifficultyLevel,
-  MatchingPair 
+  MatchingPair,
+  MediaAsset 
 } from '../types';
 import { useTheme } from '../context/ThemeContext';
+import { MediaLibraryModal } from './MediaLibraryModal';
 
 interface ExerciseEditModalProps {
   exercise: Exercise | null;
@@ -80,6 +82,13 @@ export const ExerciseEditModal: React.FC<ExerciseEditModalProps> = ({
   const [matchingPairs, setMatchingPairs] = useState<MatchingPair[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Audio / Listening fields
+  const [audioUrl, setAudioUrl] = useState('');
+  const [audioText, setAudioText] = useState('');
+  const [audioPredictionHint, setAudioPredictionHint] = useState('');
+  const [transcript, setTranscript] = useState('');
+  const [isMediaModalOpen, setIsMediaModalOpen] = useState(false);
+
   // Load exercise data on open
   useEffect(() => {
     if (!exercise) return;
@@ -94,6 +103,11 @@ export const ExerciseEditModal: React.FC<ExerciseEditModalProps> = ({
     setExCorrectText(exercise.correctText || '');
     setExWrongSentence(exercise.wrongSentence || '');
     setExErrorType(exercise.errorType || '');
+
+    setAudioUrl(exercise.audioUrl || '');
+    setAudioText(exercise.audioText || '');
+    setAudioPredictionHint(exercise.audioPredictionHint || '');
+    setTranscript(exercise.transcript || '');
 
     setVocabWord(exercise.vocabWord || exercise.correctText || '');
     setVocabMeaning(exercise.vocabMeaning || '');
@@ -117,6 +131,25 @@ export const ExerciseEditModal: React.FC<ExerciseEditModalProps> = ({
       ]);
     }
   }, [exercise, isOpen]);
+
+  const handleAddMatchingPair = () => {
+    setMatchingPairs(prev => [
+      ...prev,
+      { id: 'pair_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6), left: '', right: '' },
+    ]);
+  };
+
+  const handleRemoveMatchingPair = (index: number) => {
+    setMatchingPairs(prev => prev.filter((_, idx) => idx !== index));
+  };
+
+  const handleUpdateMatchingPair = (index: number, field: 'left' | 'right', value: string) => {
+    setMatchingPairs(prev => {
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: value };
+      return next;
+    });
+  };
 
   if (!isOpen || !exercise) return null;
 
@@ -152,6 +185,13 @@ export const ExerciseEditModal: React.FC<ExerciseEditModalProps> = ({
       updated.correctOptions = [correctOptionIdx];
     } else if (exType === 'matching') {
       updated.matchingPairs = matchingPairs.filter(p => p.left.trim() && p.right.trim());
+    } else if (exType === 'listening') {
+      updated.audioUrl = audioUrl.trim() || undefined;
+      updated.audioText = audioText.trim() || undefined;
+      updated.audioPredictionHint = audioPredictionHint.trim() || undefined;
+      updated.transcript = transcript.trim() || undefined;
+      updated.options = options.filter(o => o.trim().length > 0);
+      updated.correctOptions = [correctOptionIdx];
     } else if (exType === 'error_correction') {
       updated.wrongSentence = exWrongSentence.trim();
       updated.errorType = exErrorType.trim();
@@ -350,11 +390,11 @@ export const ExerciseEditModal: React.FC<ExerciseEditModalProps> = ({
             </div>
           )}
 
-          {/* Options for Multiple Choice / Collocation */}
-          {(exType === 'multiple_choice' || exType === 'reading' || exType === 'collocation' || exType === 'image_identify') && (
+          {/* Options for Multiple Choice / Collocation / Listening */}
+          {(exType === 'multiple_choice' || exType === 'reading' || exType === 'collocation' || exType === 'image_identify' || exType === 'listening') && (
             <div className="space-y-2">
               <label className={`text-xs font-semibold ${theme.textMuted} block`}>
-                Các lựa chọn & Đánh dấu đáp án đúng:
+                Các phương án lựa chọn (A, B, C, D) & Đánh dấu đáp án đúng *:
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {options.map((opt, idx) => (
@@ -378,6 +418,149 @@ export const ExerciseEditModal: React.FC<ExerciseEditModalProps> = ({
                       placeholder={`Lựa chọn ${String.fromCharCode(65 + idx)}`}
                       className={`flex-1 p-2 rounded-xl ${theme.inputBg} text-xs`}
                     />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Listening Specific Setup */}
+          {exType === 'listening' && (
+            <div className="p-4 rounded-xl border border-sky-500/30 bg-sky-500/5 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-sky-400 flex items-center gap-1.5">
+                  <Volume2 className="w-4 h-4" />
+                  <span>Cài đặt âm thanh bài nghe (Listening Track)</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsMediaModalOpen(true)}
+                  className="px-2.5 py-1 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer shadow-xs"
+                >
+                  <Volume2 className="w-3.5 h-3.5" />
+                  <span>Kho Media / Tải lên MP3</span>
+                </button>
+              </div>
+
+              <div>
+                <label className={`text-xs font-semibold ${theme.textMuted} block mb-1`}>
+                  Đường dẫn / File âm thanh (Audio URL hoặc tải file):
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={audioUrl}
+                    onChange={e => setAudioUrl(e.target.value)}
+                    placeholder="https://... hoặc data:audio/... (hoặc chọn từ Kho Media ở trên)"
+                    className={`flex-1 p-2.5 rounded-xl ${theme.inputBg} text-xs font-mono`}
+                  />
+                  {audioUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setAudioUrl('')}
+                      className="px-2 py-1 rounded-lg border border-rose-500/30 text-rose-400 text-xs hover:bg-rose-500/10 cursor-pointer"
+                    >
+                      Xóa
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className={`text-xs font-semibold ${theme.textMuted} block mb-1`}>
+                  Hoặc nội dung văn bản cho giọng đọc AI (TTS) đọc nếu không có file âm thanh:
+                </label>
+                <textarea
+                  rows={2}
+                  value={audioText}
+                  onChange={e => setAudioText(e.target.value)}
+                  placeholder="Nhập đoạn văn bản tiếng Anh để hệ thống tự phát âm giọng chuẩn bản xứ..."
+                  className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-xs`}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className={`text-xs font-semibold ${theme.textMuted} block mb-1`}>
+                    Gợi ý trước khi nghe (Prediction Hint):
+                  </label>
+                  <input
+                    type="text"
+                    value={audioPredictionHint}
+                    onChange={e => setAudioPredictionHint(e.target.value)}
+                    placeholder="VD: Chú ý thời gian hoặc địa điểm..."
+                    className={`w-full p-2 rounded-xl ${theme.inputBg} text-xs`}
+                  />
+                </div>
+                <div>
+                  <label className={`text-xs font-semibold ${theme.textMuted} block mb-1`}>
+                    Lời thoại (Audio Transcript sau khi làm bài):
+                  </label>
+                  <input
+                    type="text"
+                    value={transcript}
+                    onChange={e => setTranscript(e.target.value)}
+                    placeholder="Transcript hiển thị khi học sinh đối chiếu..."
+                    className={`w-full p-2 rounded-xl ${theme.inputBg} text-xs`}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Matching Pairs Setup */}
+          {exType === 'matching' && (
+            <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-bold text-emerald-400 block">
+                    Thiết kế các cặp nối (Cột A ➔ Cột B):
+                  </span>
+                  <span className={`text-[10px] ${theme.textMuted}`}>
+                    Học sinh sẽ ghép từ/câu Cột A tương ứng với Cột B. Cột B sẽ tự động đảo vị trí khi làm bài.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAddMatchingPair}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer shadow-xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Thêm cặp nối</span>
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {matchingPairs.map((pair, idx) => (
+                  <div key={pair.id || idx} className="flex items-center gap-2">
+                    <span className="text-xs font-mono font-bold w-5 text-center text-neutral-400">
+                      {idx + 1}.
+                    </span>
+                    <input
+                      type="text"
+                      value={pair.left}
+                      onChange={e => handleUpdateMatchingPair(idx, 'left', e.target.value)}
+                      placeholder={`Cột A #${idx + 1} (Từ/Cụm từ)`}
+                      className={`flex-1 p-2 rounded-xl ${theme.inputBg} text-xs`}
+                    />
+                    <span className="text-emerald-500 font-bold">➔</span>
+                    <input
+                      type="text"
+                      value={pair.right}
+                      onChange={e => handleUpdateMatchingPair(idx, 'right', e.target.value)}
+                      placeholder={`Cột B #${idx + 1} (Nghĩa/Đáp án)`}
+                      className={`flex-1 p-2 rounded-xl ${theme.inputBg} text-xs`}
+                    />
+                    {matchingPairs.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveMatchingPair(idx)}
+                        className="p-1.5 rounded-lg border border-rose-500/30 text-rose-400 hover:bg-rose-500/10 cursor-pointer"
+                        title="Xóa cặp này"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -465,6 +648,23 @@ export const ExerciseEditModal: React.FC<ExerciseEditModalProps> = ({
           </div>
         </form>
       </div>
+
+      {/* Media Library Modal for selecting/uploading audio files */}
+      <MediaLibraryModal
+        isOpen={isMediaModalOpen}
+        initialTab="audio"
+        onClose={() => setIsMediaModalOpen(false)}
+        onSelectAsset={(asset: MediaAsset) => {
+          if (asset.type === 'audio') {
+            if (asset.url) {
+              setAudioUrl(asset.url);
+            } else if (asset.name) {
+              setAudioText(asset.name);
+            }
+          }
+          setIsMediaModalOpen(false);
+        }}
+      />
     </div>
   );
 };

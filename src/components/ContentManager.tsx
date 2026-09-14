@@ -12,24 +12,34 @@ import {
   HelpCircle,
   Search,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  School,
+  Sparkles,
+  HardDrive
 } from 'lucide-react';
 import { 
   Topic, 
   Lesson, 
   Exercise, 
-  SkillCategory 
+  SkillCategory,
+  Classroom
 } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import { ExerciseEditModal } from './ExerciseEditModal';
 import { TopicEditModal } from './TopicEditModal';
 import { LessonEditModal } from './LessonEditModal';
 import { ConfirmModal } from './ConfirmModal';
+import { LessonLectureModal } from './LessonLectureModal';
+import { LessonContentEditorModal } from './LessonContentEditorModal';
+import { MediaLibraryModal } from './MediaLibraryModal';
+import { loadClassrooms } from '../utils/storage';
 
 interface ContentManagerProps {
   topics?: Topic[];
   lessons?: Lesson[];
   exercises?: Exercise[];
+  classrooms?: Classroom[];
+  onNavigateToClassManager?: () => void;
   onStartPractice: (lessonId?: string, isQuick?: boolean, isErrorReview?: boolean, singleExercise?: Exercise) => void;
   onOpenCreateModal: (type: 'topic' | 'lesson' | 'exercise', contextId?: string) => void;
   onUpdateTopic: (topic: Topic) => void;
@@ -64,6 +74,8 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
   topics = [],
   lessons = [],
   exercises = [],
+  classrooms: propClassrooms = [],
+  onNavigateToClassManager,
   onStartPractice,
   onOpenCreateModal,
   onUpdateTopic,
@@ -76,9 +88,19 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
   const { getThemeClasses } = useTheme();
   const theme = getThemeClasses();
 
-  // Search & Filter
+  // Always ensure fresh classrooms from props or local storage
+  const classrooms = (propClassrooms && propClassrooms.length > 0) ? propClassrooms : loadClassrooms();
+
+  // Classroom & Search Filters
+  const [selectedClassFilter, setSelectedClassFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedTopicId, setSelectedTopicId] = useState<string | null>(topics?.[0]?.id || null);
+
+  // Filter topics by selected class
+  const filteredTopics = selectedClassFilter === 'all'
+    ? topics
+    : topics.filter(t => t.classroomId === selectedClassFilter);
+
+  const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
 
   // Edit & Create Modals
@@ -87,6 +109,9 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
   const [editingLesson, setEditingLesson] = useState<Lesson | null>(null);
   const [isCreatingLesson, setIsCreatingLesson] = useState(false);
   const [editingExercise, setEditingExercise] = useState<Exercise | null>(null);
+  const [lectureModalLesson, setLectureModalLesson] = useState<Lesson | null>(null);
+  const [editorModalLesson, setEditorModalLesson] = useState<Lesson | null>(null);
+  const [isMediaLibraryOpen, setIsMediaLibraryOpen] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
     title: string;
@@ -100,11 +125,11 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
   });
 
   // Current active topic & its lessons
-  const activeTopic = topics.find(t => t.id === selectedTopicId) || topics?.[0] || null;
+  const activeTopic = filteredTopics.find(t => t.id === selectedTopicId) || filteredTopics[0] || null;
   const currentLessons = activeTopic ? lessons.filter(l => l.topicId === activeTopic.id) : [];
   
   // Set default active lesson if not set
-  const activeLesson = currentLessons.find(l => l.id === selectedLessonId) || currentLessons?.[0] || null;
+  const activeLesson = currentLessons.find(l => l.id === selectedLessonId) || currentLessons[0] || null;
   const currentExercises = activeLesson ? exercises.filter(e => e.lessonId === activeLesson.id) : [];
 
   // Filtered exercises by search
@@ -126,11 +151,43 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
         <div>
           <h2 className="text-xl font-bold tracking-tight">Quản lý kho bài & Chỉnh sửa</h2>
           <p className={`text-xs ${theme.textMuted}`}>
-            Xem toàn bộ cấu trúc Chủ đề → Bài học → Câu hỏi; Sửa, xóa và thêm bài tập trực tiếp.
+            Cấu trúc chuẩn: <strong>Lớp học</strong> → <strong>Chủ đề</strong> → <strong>Bài học</strong> → <strong>Câu hỏi</strong>.
           </p>
         </div>
 
         <div className="flex items-center gap-2">
+          {classrooms.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <School className={`w-3.5 h-3.5 ${theme.textMuted}`} />
+              <select
+                id="select-manager-class-filter"
+                value={selectedClassFilter}
+                onChange={e => {
+                  setSelectedClassFilter(e.target.value);
+                  setSelectedTopicId(null);
+                  setSelectedLessonId(null);
+                }}
+                className={`p-2 rounded-xl text-xs font-semibold ${theme.inputBg} border ${theme.border}`}
+              >
+                <option value="all">Tất cả lớp ({classrooms.length})</option>
+                {classrooms.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({topics.filter(t => t.classroomId === c.id).length} chủ đề)
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <button
+            id="btn-manager-open-media-library"
+            onClick={() => setIsMediaLibraryOpen(true)}
+            className={`px-3.5 py-2 rounded-xl ${theme.card} border ${theme.border} hover:border-emerald-500 text-xs font-semibold flex items-center gap-1.5 shadow-xs cursor-pointer`}
+          >
+            <HardDrive className="w-3.5 h-3.5 text-emerald-500" />
+            <span>Mở kho tư liệu</span>
+          </button>
+
           <button
             id="btn-manager-create-topic"
             onClick={() => setIsCreatingTopic(true)}
@@ -142,11 +199,41 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
         </div>
       </div>
 
+      {/* No Classrooms Warning Banner */}
+      {classrooms.length === 0 && (
+        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-400 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+          <div className="flex items-center gap-2.5">
+            <School className="w-5 h-5 shrink-0 text-amber-400" />
+            <div>
+              <span className="font-bold text-xs sm:text-sm block text-amber-300">
+                Hệ thống chưa có Lớp học nào!
+              </span>
+              <span className={`text-[11px] ${theme.textMuted}`}>
+                Quy trình chuẩn: Vui lòng tạo Lớp học trước, sau đó tạo Chủ đề trực thuộc lớp đó.
+              </span>
+            </div>
+          </div>
+          {onNavigateToClassManager && (
+            <button
+              id="btn-manager-goto-create-class"
+              onClick={onNavigateToClassManager}
+              className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs shrink-0"
+            >
+              + Tạo Lớp học ngay
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Summary stats pills */}
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-4 gap-2">
+        <div className={`p-3 rounded-xl ${theme.card} border ${theme.border} text-center`}>
+          <span className={`text-[11px] ${theme.textMuted} block`}>Lớp học</span>
+          <span className="text-lg font-bold text-teal-400">{classrooms.length}</span>
+        </div>
         <div className={`p-3 rounded-xl ${theme.card} border ${theme.border} text-center`}>
           <span className={`text-[11px] ${theme.textMuted} block`}>Chủ đề</span>
-          <span className="text-lg font-bold text-emerald-500">{topics.length}</span>
+          <span className="text-lg font-bold text-emerald-500">{filteredTopics.length}</span>
         </div>
         <div className={`p-3 rounded-xl ${theme.card} border ${theme.border} text-center`}>
           <span className={`text-[11px] ${theme.textMuted} block`}>Bài học</span>
@@ -182,7 +269,7 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
             <div className={`${theme.card} p-4 rounded-2xl border ${theme.border} space-y-3`}>
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold uppercase tracking-wider text-emerald-500">
-                  1. Chủ đề ({topics.length})
+                  1. Chủ đề ({filteredTopics.length})
                 </span>
                 <button
                   onClick={() => setIsCreatingTopic(true)}
@@ -194,9 +281,10 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
               </div>
 
               <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-                {topics.map(topic => {
+                {filteredTopics.map(topic => {
                   const isSelected = activeTopic?.id === topic.id;
                   const topicLessons = lessons.filter(l => l.topicId === topic.id);
+                  const topicClass = classrooms.find(c => c.id === topic.classroomId);
                   return (
                     <div
                       key={topic.id}
@@ -212,6 +300,11 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                       }}
                     >
                       <div className="min-w-0 flex-1">
+                        {topicClass && (
+                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-teal-500/15 text-teal-400 font-medium inline-block mb-0.5">
+                            {topicClass.name}
+                          </span>
+                        )}
                         <span className="text-xs block truncate">{topic.title}</span>
                         <span className={`text-[10px] ${theme.textMuted} block`}>
                           {topic.subject} • {topicLessons.length} bài
@@ -355,7 +448,33 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                 </div>
 
                 {activeLesson && (
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <button
+                      id="btn-manager-view-lecture"
+                      type="button"
+                      onClick={() => setLectureModalLesson(activeLesson)}
+                      className="px-3 py-1.5 rounded-xl border border-sky-500/40 text-sky-400 hover:bg-sky-500/10 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                      title="Xem bài giảng lý thuyết"
+                    >
+                      <BookOpen className="w-3.5 h-3.5" />
+                      <span>Xem bài giảng</span>
+                    </button>
+
+                    <button
+                      id="btn-manager-edit-content"
+                      type="button"
+                      onClick={() => setEditorModalLesson(activeLesson)}
+                      className="px-3 py-1.5 rounded-xl border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                      title="Thiết kế nội dung bài học"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>
+                        {activeLesson.slides && activeLesson.slides.length > 0 
+                          ? 'Sửa nội dung bài học' 
+                          : 'Thêm nội dung bài học'}
+                      </span>
+                    </button>
+
                     <button
                       id="btn-manager-add-exercise"
                       onClick={() => onOpenCreateModal('exercise', activeLesson.id)}
@@ -540,6 +659,9 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
         topic={editingTopic}
         isOpen={!!editingTopic || isCreatingTopic}
         isCreate={isCreatingTopic}
+        classrooms={classrooms}
+        defaultClassroomId={selectedClassFilter !== 'all' ? selectedClassFilter : undefined}
+        onNavigateToClassManager={onNavigateToClassManager}
         onClose={() => {
           setEditingTopic(null);
           setIsCreatingTopic(false);
@@ -575,6 +697,41 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
         isOpen={!!editingExercise}
         onClose={() => setEditingExercise(null)}
         onSave={onUpdateExercise}
+      />
+
+      {/* Lecture Viewer Modal */}
+      <LessonLectureModal
+        isOpen={!!lectureModalLesson}
+        onClose={() => setLectureModalLesson(null)}
+        lesson={lectureModalLesson}
+        isAdmin={true}
+        onEditContent={(lessonToEdit) => {
+          setEditorModalLesson(lessonToEdit);
+        }}
+        onStartPractice={(lessonId) => {
+          setLectureModalLesson(null);
+          onStartPractice(lessonId);
+        }}
+      />
+
+      {/* Lesson Content Designer Modal */}
+      <LessonContentEditorModal
+        isOpen={!!editorModalLesson}
+        onClose={() => setEditorModalLesson(null)}
+        lesson={editorModalLesson}
+        onSave={(updatedLesson) => {
+          onUpdateLesson(updatedLesson);
+          if (lectureModalLesson?.id === updatedLesson.id) {
+            setLectureModalLesson(updatedLesson);
+          }
+          setEditorModalLesson(null);
+        }}
+      />
+
+      {/* Media Library Asset Manager */}
+      <MediaLibraryModal
+        isOpen={isMediaLibraryOpen}
+        onClose={() => setIsMediaLibraryOpen(false)}
       />
 
       {/* Confirm Action Dialog */}

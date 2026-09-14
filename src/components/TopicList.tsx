@@ -22,6 +22,8 @@ import { Topic, Lesson, Exercise, SkillCategory, User, Classroom } from '../type
 import { useTheme } from '../context/ThemeContext';
 import { ConfirmModal } from './ConfirmModal';
 import { TopicEditModal } from './TopicEditModal';
+import { LessonLectureModal } from './LessonLectureModal';
+import { LessonContentEditorModal } from './LessonContentEditorModal';
 
 interface TopicListProps {
   topics: Topic[];
@@ -32,10 +34,12 @@ interface TopicListProps {
   onStartPractice: (lessonId?: string) => void;
   onOpenCreateModal: (type: 'topic' | 'lesson' | 'exercise', contextId?: string) => void;
   onSaveTopic?: (topic: Topic) => void;
+  onSaveLesson?: (lesson: Lesson) => void;
   onDeleteTopic: (topicId: string) => void;
   onDeleteLesson: (lessonId: string) => void;
   currentUser?: User | null;
   classrooms?: Classroom[];
+  onNavigateToClassManager?: () => void;
 }
 
 const LESSON_STAGES = [
@@ -55,10 +59,13 @@ export const TopicList: React.FC<TopicListProps> = ({
   onSelectTopic,
   onStartPractice,
   onOpenCreateModal,
+  onSaveTopic,
+  onSaveLesson,
   onDeleteTopic,
   onDeleteLesson,
   currentUser,
   classrooms = [],
+  onNavigateToClassManager,
 }) => {
   const { getThemeClasses, getTypographyClasses } = useTheme();
   const theme = getThemeClasses();
@@ -66,6 +73,8 @@ export const TopicList: React.FC<TopicListProps> = ({
 
   const [searchQuery, setSearchQuery] = useState('');
   const [activeLessonDetail, setActiveLessonDetail] = useState<Lesson | null>(null);
+  const [selectedLectureLesson, setSelectedLectureLesson] = useState<Lesson | null>(null);
+  const [selectedEditorLesson, setSelectedEditorLesson] = useState<Lesson | null>(null);
   const [isCreateTopicOpen, setIsCreateTopicOpen] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
@@ -419,7 +428,42 @@ export const TopicList: React.FC<TopicListProps> = ({
                         {lessonExercises.length} câu hỏi luyện tập
                       </span>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* 1. Nút Xem bài giảng (Học sinh & Giáo viên) */}
+                        {canViewTheory && (
+                          <button
+                            id={`btn-view-lecture-${lesson.id}`}
+                            type="button"
+                            onClick={() => setSelectedLectureLesson(lesson)}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-sky-500/40 text-sky-400 hover:bg-sky-500/10 flex items-center gap-1.5 transition-colors cursor-pointer"
+                          >
+                            <BookOpen className="w-3.5 h-3.5" />
+                            <span>Xem bài giảng</span>
+                            {lesson.slides && lesson.slides.length > 0 && (
+                              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-sky-500/20 text-sky-300 font-bold">
+                                {lesson.slides.length} trang
+                              </span>
+                            )}
+                          </button>
+                        )}
+
+                        {/* 2. Nút Thêm nội dung bài học (Giáo viên / Admin) */}
+                        {isAdmin && (
+                          <button
+                            id={`btn-edit-lesson-content-${lesson.id}`}
+                            type="button"
+                            onClick={() => setSelectedEditorLesson(lesson)}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 flex items-center gap-1.5 transition-colors cursor-pointer"
+                          >
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span>
+                              {lesson.slides && lesson.slides.length > 0 
+                                ? 'Sửa nội dung bài học' 
+                                : 'Thêm nội dung bài học'}
+                            </span>
+                          </button>
+                        )}
+
                         {isAdmin && (
                           <button
                             id={`btn-add-exercise-to-lesson-${lesson.id}`}
@@ -474,6 +518,8 @@ export const TopicList: React.FC<TopicListProps> = ({
         topic={null}
         isOpen={isCreateTopicOpen}
         isCreate={true}
+        classrooms={classrooms}
+        onNavigateToClassManager={onNavigateToClassManager}
         onClose={() => setIsCreateTopicOpen(false)}
         onSave={(newTopic) => {
           if (onSaveTopic) {
@@ -481,6 +527,37 @@ export const TopicList: React.FC<TopicListProps> = ({
             onSelectTopic(newTopic.id);
           }
           setIsCreateTopicOpen(false);
+        }}
+      />
+
+      {/* Lesson Lecture Slide Player Modal */}
+      <LessonLectureModal
+        isOpen={!!selectedLectureLesson}
+        onClose={() => setSelectedLectureLesson(null)}
+        lesson={selectedLectureLesson}
+        isAdmin={isAdmin}
+        onEditContent={(lessonToEdit) => {
+          setSelectedEditorLesson(lessonToEdit);
+        }}
+        onStartPractice={(lessonId) => {
+          setSelectedLectureLesson(null);
+          onStartPractice(lessonId);
+        }}
+      />
+
+      {/* Lesson Content Designer / Slide Editor Modal */}
+      <LessonContentEditorModal
+        isOpen={!!selectedEditorLesson}
+        onClose={() => setSelectedEditorLesson(null)}
+        lesson={selectedEditorLesson}
+        onSave={(updatedLesson) => {
+          if (onSaveLesson) {
+            onSaveLesson(updatedLesson);
+          }
+          if (selectedLectureLesson?.id === updatedLesson.id) {
+            setSelectedLectureLesson(updatedLesson);
+          }
+          setSelectedEditorLesson(null);
         }}
       />
     </div>

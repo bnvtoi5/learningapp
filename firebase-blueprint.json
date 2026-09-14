@@ -1,0 +1,149 @@
+{
+  "entities": {
+    "classroom": {
+      "title": "Classroom",
+      "description": "A classroom managed by teacher/admin",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "code": { "type": "string" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "assignedTopicIds": { "type": "array" }
+      },
+      "required": ["id", "name", "code", "createdAt"]
+    },
+    "topic": {
+      "title": "Topic",
+      "description": "An educational topic belonging to a classroom",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "classroomId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "subject": { "type": "string" },
+        "primarySkill": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "classroomId", "title", "subject", "primarySkill", "createdAt"]
+    },
+    "lesson": {
+      "title": "Lesson",
+      "description": "A lesson slide deck belonging to a topic",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "topicId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "knowledgeSummary": { "type": "string" },
+        "examples": { "type": "array" },
+        "slides": { "type": "array" },
+        "order": { "type": "number" }
+      },
+      "required": ["id", "topicId", "title", "order"]
+    },
+    "exercise": {
+      "title": "Exercise",
+      "description": "An interactive exercise question in a lesson",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "lessonId": { "type": "string" },
+        "type": { "type": "string" },
+        "skill": { "type": "string" },
+        "difficulty": { "type": "string" },
+        "question": { "type": "string" }
+      },
+      "required": ["id", "lessonId", "type", "skill", "difficulty", "question"]
+    },
+    "user": {
+      "title": "User",
+      "description": "User account for student or teacher",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "password": { "type": "string" },
+        "fullName": { "type": "string" },
+        "role": { "type": "string" },
+        "status": { "type": "string" },
+        "classroomId": { "type": "string" },
+        "registeredAt": { "type": "number" },
+        "approvedAt": { "type": "number" }
+      },
+      "required": ["id", "username", "fullName", "role", "status", "registeredAt"]
+    },
+    "errorLog": {
+      "title": "ErrorLog",
+      "description": "Student error log for mastery tracking and retry notebook",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "exerciseId": { "type": "string" },
+        "userId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "classroomId": { "type": "string" },
+        "exerciseType": { "type": "string" },
+        "skill": { "type": "string" },
+        "question": { "type": "string" },
+        "userAnswer": { "type": "string" },
+        "correctAnswer": { "type": "string" },
+        "errorType": { "type": "string" },
+        "explanation": { "type": "string" },
+        "failedCount": { "type": "number" },
+        "lastFailedAt": { "type": "number" },
+        "resolved": { "type": "boolean" },
+        "retryAttempts": { "type": "number" },
+        "currentSuccessCount": { "type": "number" },
+        "requiredSuccessCount": { "type": "number" }
+      },
+      "required": ["id", "exerciseId", "question", "resolved", "failedCount"]
+    },
+    "mediaAsset": {
+      "title": "MediaAsset",
+      "description": "Uploaded media audio or image file",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string" },
+        "name": { "type": "string" },
+        "url": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "type", "name", "url", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/classrooms/{classroomId}": {
+      "schema": { "$ref": "#/entities/classroom" },
+      "description": "Classrooms collection"
+    },
+    "/topics/{topicId}": {
+      "schema": { "$ref": "#/entities/topic" },
+      "description": "Topics collection"
+    },
+    "/lessons/{lessonId}": {
+      "schema": { "$ref": "#/entities/lesson" },
+      "description": "Lessons collection"
+    },
+    "/exercises/{exerciseId}": {
+      "schema": { "$ref": "#/entities/exercise" },
+      "description": "Exercises collection"
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/user" },
+      "description": "Users collection"
+    },
+    "/errors/{errorId}": {
+      "schema": { "$ref": "#/entities/errorLog" },
+      "description": "Error logs collection"
+    },
+    "/media/{mediaId}": {
+      "schema": { "$ref": "#/entities/mediaAsset" },
+      "description": "Media library assets collection"
+    }
+  }
+}

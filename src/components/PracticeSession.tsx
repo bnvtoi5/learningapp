@@ -20,32 +20,49 @@ import {
   ThumbsDown,
   ThumbsUp
 } from 'lucide-react';
-import { Exercise, DifficultyLevel } from '../types';
+import { Exercise, DifficultyLevel, ErrorLog, User } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import { soundManager, triggerHaptic, speakText } from '../utils/audio';
+import { ListeningAudioPlayer } from './ListeningAudioPlayer';
+import { InteractiveMatchingBoard } from './InteractiveMatchingBoard';
 
 interface PracticeSessionProps {
   exercises: Exercise[];
+  errors?: ErrorLog[];
   onComplete: (results: { exerciseId: string; isCorrect: boolean }[]) => void;
   onExit: () => void;
   onErrorOccurred: (exercise: Exercise, userAnswer: string, correctAnswer: string) => void;
   onSuccessExercise: (exercise: Exercise) => void;
   title?: string;
   canViewExplanations?: boolean;
+  currentUser?: User | null;
 }
 
 export const PracticeSession: React.FC<PracticeSessionProps> = ({
   exercises,
+  errors = [],
   onComplete,
   onExit,
   onErrorOccurred,
   onSuccessExercise,
   title = 'Phiên luyện tập',
   canViewExplanations = true,
+  currentUser,
 }) => {
   const { settings, getThemeClasses, getTypographyClasses } = useTheme();
   const theme = getThemeClasses();
   const typo = getTypographyClasses();
+
+  // Helper to find matching error for the current user
+  const findMatchingActiveError = (exerciseId: string) => {
+    return errors.find(e => {
+      if (e.exerciseId !== exerciseId) return false;
+      if (currentUser?.role === 'student') {
+        return e.userId === currentUser.id || (e.studentName && (e.studentName === currentUser.fullName || e.studentName === currentUser.username));
+      }
+      return true;
+    });
+  };
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isChecked, setIsChecked] = useState(false);
@@ -64,6 +81,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
   // Matching
   const [matchedPairs, setMatchedPairs] = useState<{ [left: string]: string }>({});
   const [selectedLeft, setSelectedLeft] = useState<string | null>(null);
+  const [matchingMistakesCount, setMatchingMistakesCount] = useState(0);
 
   // Active Recall: Anagram letters
   const [assembledLetters, setAssembledLetters] = useState<string[]>([]);
@@ -111,6 +129,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
     setSelectedErrorType('');
     setMatchedPairs({});
     setSelectedLeft(null);
+    setMatchingMistakesCount(0);
     setShowHint(false);
     setShowTranscript(false);
     setIsCardFlipped(false);
@@ -215,13 +234,36 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
         }
 
         case 'fill_blank':
-        case 'translation':
-        case 'mixed_practice': {
+        case 'translation': {
           const cleanedUser = textAnswer.trim().toLowerCase().replace(/[.,!?;:]/g, '');
           const cleanedTarget = (currentEx.correctText || '').trim().toLowerCase().replace(/[.,!?;:]/g, '');
           correct = cleanedUser === cleanedTarget;
           userAnsStr = textAnswer.trim() || 'Chưa nhập';
           correctAnsStr = currentEx.correctText || '';
+          break;
+        }
+
+        case 'mixed_practice': {
+          if (currentEx.options && currentEx.options.length > 0) {
+            const targetOptions = currentEx.correctOptions || [0];
+            const sortedSelected = [...selectedOptions].sort();
+            const sortedTarget = [...targetOptions].sort();
+            correct = JSON.stringify(sortedSelected) === JSON.stringify(sortedTarget);
+            userAnsStr = selectedOptions.map(idx => currentEx.options?.[idx] || idx).join(', ') || 'Chưa chọn';
+            correctAnsStr = targetOptions.map(idx => currentEx.options?.[idx] || idx).join(', ');
+          } else if (currentEx.matchingPairs && currentEx.matchingPairs.length > 0) {
+            const pairs = currentEx.matchingPairs || [];
+            const isAllMatched = pairs.length > 0 && pairs.every(p => matchedPairs[p.left] === p.right);
+            correct = isAllMatched;
+            userAnsStr = Object.entries(matchedPairs).map(([l, r]) => `${l} → ${r}`).join('; ');
+            correctAnsStr = pairs.map(p => `${p.left} → ${p.right}`).join('; ');
+          } else {
+            const cleanedUser = textAnswer.trim().toLowerCase().replace(/[.,!?;:]/g, '');
+            const cleanedTarget = (currentEx.correctText || '').trim().toLowerCase().replace(/[.,!?;:]/g, '');
+            correct = cleanedUser === cleanedTarget;
+            userAnsStr = textAnswer.trim() || 'Chưa nhập';
+            correctAnsStr = currentEx.correctText || '';
+          }
           break;
         }
 
@@ -246,8 +288,8 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
         case 'matching': {
           const pairs = currentEx.matchingPairs || [];
           const isAllMatched = pairs.length > 0 && pairs.every(p => matchedPairs[p.left] === p.right);
-          correct = isAllMatched;
-          userAnsStr = Object.entries(matchedPairs).map(([l, r]) => `${l} → ${r}`).join('; ');
+          correct = isAllMatched && matchingMistakesCount === 0;
+          userAnsStr = Object.entries(matchedPairs).map(([l, r]) => `${l} → ${r}`).join('; ') + (matchingMistakesCount > 0 ? ` (${matchingMistakesCount} lần ghép sai)` : '');
           correctAnsStr = pairs.map(p => `${p.left} → ${p.right}`).join('; ');
           break;
         }
@@ -374,6 +416,28 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
 
       {/* Main Question Card */}
       <div className={`${theme.card} p-5 rounded-2xl border ${theme.border} space-y-4`}>
+        {/* Active Error / Penalty Notice Banner */}
+        {(() => {
+          const activeError = findMatchingActiveError(currentEx.id);
+          if (!activeError || activeError.resolved) return null;
+          return (
+            <div className="p-3 rounded-xl bg-rose-100 dark:bg-rose-500/15 border border-rose-300 dark:border-rose-500/30 text-xs text-rose-950 dark:text-rose-100 flex items-center justify-between gap-2 shadow-xs">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                <div>
+                  <span className="font-bold text-rose-900 dark:text-rose-300">Câu này đang trong Sổ lỗi!</span>
+                  <p className="text-[11px] text-rose-950 dark:text-neutral-200 font-medium mt-0.5">
+                    Mức phạt: Cần làm đúng <strong className="text-rose-900 dark:text-rose-300 font-bold">{activeError.requiredSuccessCount || 2}</strong> lần liên tiếp. Hiện tại: <strong className="text-rose-900 dark:text-rose-300 font-bold">{activeError.currentSuccessCount || 0}/{activeError.requiredSuccessCount || 2}</strong> (Đã thử lại {activeError.retryAttempts || 0} lượt).
+                  </p>
+                </div>
+              </div>
+              <span className="text-[10px] px-2.5 py-1 rounded-lg bg-rose-200 dark:bg-rose-500/30 border border-rose-300 dark:border-rose-500/40 text-rose-900 dark:text-rose-200 font-bold whitespace-nowrap">
+                Đang phạt ôn lại
+              </span>
+            </div>
+          );
+        })()}
+
         {/* Badges bar */}
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-inherit pb-3">
           <div className="flex items-center gap-1.5 flex-wrap">
@@ -416,6 +480,24 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
               <div className="pt-2 border-t border-inherit text-xs text-amber-500">
                 <span className="font-semibold">🔍 Dẫn chứng: </span>
                 <span>"{currentEx.evidenceRegion}"</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Listening Audio Track Player with Seek Bar & Speed Selector */}
+        {currentEx.type === 'listening' && (
+          <div className="space-y-3 pt-1">
+            <ListeningAudioPlayer
+              audioUrl={currentEx.audioUrl}
+              audioText={currentEx.audioText}
+              title={currentEx.vocabWord ? `Bài nghe: ${currentEx.vocabWord}` : 'Băng ghi âm bài nghe (TOEIC Audio Track)'}
+            />
+
+            {currentEx.audioPredictionHint && (
+              <div className="p-2.5 rounded-xl bg-sky-500/10 border border-sky-500/20 text-xs text-sky-400 flex items-center gap-2">
+                <Sparkles className="w-4 h-4 shrink-0" />
+                <span><strong>Gợi ý nghe (Prediction):</strong> {currentEx.audioPredictionHint}</span>
               </div>
             )}
           </div>
@@ -637,8 +719,8 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
           </div>
         )}
 
-        {/* 5. MULTIPLE CHOICE / COLLOCATION / TRUE_FALSE / READING */}
-        {(currentEx.type === 'multiple_choice' || currentEx.type === 'collocation' || currentEx.type === 'true_false' || currentEx.type === 'image_identify' || currentEx.type === 'reading' || currentEx.type === 'listening') && (
+        {/* 5. MULTIPLE CHOICE / COLLOCATION / TRUE_FALSE / READING / MIXED PRACTICE OPTIONS */}
+        {(currentEx.type === 'multiple_choice' || currentEx.type === 'collocation' || currentEx.type === 'true_false' || currentEx.type === 'image_identify' || currentEx.type === 'reading' || currentEx.type === 'listening' || (currentEx.type === 'mixed_practice' && currentEx.options && currentEx.options.length > 0)) && (
           <div className="space-y-2 pt-1">
             {(currentEx.type === 'true_false' ? ['Đúng (True)', 'Sai (False)'] : currentEx.options || []).map((option, idx) => {
               const isSelected = selectedOptions.includes(idx);
@@ -681,8 +763,8 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
           </div>
         )}
 
-        {/* 6. FILL BLANK / TRANSLATION / MIXED PRACTICE */}
-        {(currentEx.type === 'fill_blank' || currentEx.type === 'translation' || currentEx.type === 'mixed_practice') && (
+        {/* 6. FILL BLANK / TRANSLATION / MIXED PRACTICE TEXT */}
+        {(currentEx.type === 'fill_blank' || currentEx.type === 'translation' || (currentEx.type === 'mixed_practice' && !currentEx.options?.length && !currentEx.matchingPairs?.length)) && (
           <div className="space-y-2 pt-1">
             <input
               id="input-text-answer"
@@ -766,62 +848,18 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
           </div>
         )}
 
-        {/* 9. MATCHING */}
-        {currentEx.type === 'matching' && (
-          <div className="space-y-3 pt-1">
-            <div className="grid grid-cols-2 gap-2">
-              {/* Left Column */}
-              <div className="space-y-2">
-                <span className={`text-[10px] font-bold uppercase ${theme.textMuted} block`}>Cột A</span>
-                {currentEx.matchingPairs?.map(pair => {
-                  const isMatched = !!matchedPairs[pair.left];
-                  const isSelected = selectedLeft === pair.left;
-                  return (
-                    <button
-                      key={pair.id}
-                      disabled={isChecked || isMatched}
-                      onClick={() => setSelectedLeft(pair.left)}
-                      className={`w-full p-2.5 rounded-xl border text-left text-xs transition-all ${
-                        isMatched 
-                          ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500 opacity-60'
-                          : isSelected 
-                            ? 'border-emerald-500 bg-emerald-500/15 text-emerald-500 font-bold' 
-                            : `${theme.card} ${theme.border}`
-                      }`}
-                    >
-                      {pair.left}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Right Column */}
-              <div className="space-y-2">
-                <span className={`text-[10px] font-bold uppercase ${theme.textMuted} block`}>Cột B</span>
-                {currentEx.matchingPairs?.map(pair => {
-                  const isMatched = Object.values(matchedPairs).includes(pair.right);
-                  return (
-                    <button
-                      key={pair.id}
-                      disabled={isChecked || isMatched || !selectedLeft}
-                      onClick={() => {
-                        if (selectedLeft) {
-                          setMatchedPairs(prev => ({ ...prev, [selectedLeft]: pair.right }));
-                          setSelectedLeft(null);
-                        }
-                      }}
-                      className={`w-full p-2.5 rounded-xl border text-left text-xs transition-all ${
-                        isMatched 
-                          ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500 opacity-60'
-                          : `${theme.card} ${theme.border} hover:border-emerald-500`
-                      }`}
-                    >
-                      {pair.right}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+        {/* 9. MATCHING & MIXED PRACTICE MATCHING */}
+        {(currentEx.type === 'matching' || (currentEx.type === 'mixed_practice' && currentEx.matchingPairs && currentEx.matchingPairs.length > 0)) && (
+          <div className="pt-1">
+            <InteractiveMatchingBoard
+              pairs={currentEx.matchingPairs || []}
+              disabled={isChecked}
+              onPairsMatched={(matchedMap, mistakesCount) => {
+                setMatchedPairs(matchedMap);
+                setMatchingMistakesCount(mistakesCount);
+              }}
+              explanation={isChecked ? currentEx.explanation : undefined}
+            />
           </div>
         )}
 
@@ -862,33 +900,82 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
           )
         ) : (
           <div className={`p-4 rounded-xl border space-y-3 animate-in fade-in duration-200 ${
-            isCorrect ? 'border-emerald-500/50 bg-emerald-500/10' : 'border-rose-500/50 bg-rose-500/10'
+            isCorrect ? 'border-emerald-500/50 bg-emerald-500/10 text-neutral-900 dark:text-neutral-100' : 'border-rose-500/50 bg-rose-500/10 text-neutral-900 dark:text-neutral-100'
           }`}>
             <div className="flex items-center gap-2">
               {isCorrect ? (
                 <>
-                  <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
-                  <span className="font-bold text-xs text-emerald-500">Chính xác! Làm rất tốt.</span>
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <span className="font-bold text-xs text-emerald-700 dark:text-emerald-300">Chính xác! Làm rất tốt.</span>
                 </>
               ) : (
                 <>
-                  <XCircle className="w-5 h-5 text-rose-500 shrink-0" />
-                  <span className="font-bold text-xs text-rose-500">Chưa chính xác (Đã lưu vào Sổ lỗi)</span>
+                  <XCircle className="w-5 h-5 text-rose-600 dark:text-rose-400 shrink-0" />
+                  <span className="font-bold text-xs text-rose-700 dark:text-rose-300">Chưa chính xác (Đã lưu vào Sổ lỗi)</span>
                 </>
               )}
             </div>
 
+            {/* Error penalty notification */}
+            {(() => {
+              const activeError = findMatchingActiveError(currentEx.id);
+              if (!activeError) return null;
+              const req = activeError.requiredSuccessCount || 2;
+              if (isCorrect) {
+                const nextSuccess = (activeError.currentSuccessCount || 0) + 1;
+                if (nextSuccess >= req) {
+                  return (
+                    <div className="p-2.5 rounded-lg bg-emerald-100 dark:bg-emerald-500/20 border border-emerald-300 dark:border-emerald-500/30 text-emerald-950 dark:text-emerald-200 text-xs font-semibold flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      <span>🎉 Xuất sắc! Bạn đã hoàn thành câu lỗi sai này ({req}/{req} lần đúng bắt buộc). Lỗi sẽ được gỡ khỏi sổ lỗi!</span>
+                    </div>
+                  );
+                }
+                return (
+                  <div className="p-2.5 rounded-lg bg-emerald-100 dark:bg-emerald-500/15 border border-emerald-300 dark:border-emerald-500/30 text-emerald-950 dark:text-emerald-200 text-xs font-semibold flex items-center gap-2">
+                    <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    <span>Làm đúng lần {nextSuccess}/{req}! Cần đúng thêm {req - nextSuccess} lần nữa để hoàn thành bài phạt này.</span>
+                  </div>
+                );
+              }
+              return (
+                <div className="p-2.5 rounded-lg bg-rose-100 dark:bg-rose-500/20 border border-rose-300 dark:border-rose-500/30 text-rose-950 dark:text-rose-200 text-xs font-semibold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                  <span>Chưa đạt! Lượt thử thứ {(activeError.retryAttempts || 0) + 1}. Tiến độ đúng liên tiếp sẽ tính lại từ đầu.</span>
+                </div>
+              );
+            })()}
+
             {/* Target text / Correct answer preview */}
             {!isCorrect && (currentEx.correctText || currentEx.vocabWord) && (
               <div className="text-xs space-y-1">
-                <span className="font-bold text-emerald-500">Đáp án chuẩn: </span>
-                <span className="font-semibold">{currentEx.vocabWord || currentEx.correctText}</span>
+                <span className="font-bold text-emerald-700 dark:text-emerald-400">Đáp án chuẩn: </span>
+                <span className="font-bold text-neutral-900 dark:text-neutral-100">{currentEx.vocabWord || currentEx.correctText}</span>
+              </div>
+            )}
+
+            {/* Transcript for listening */}
+            {currentEx.type === 'listening' && currentEx.transcript && (
+              <div className="pt-1 text-xs border-t border-inherit/40 space-y-1.5">
+                <button
+                  type="button"
+                  onClick={() => setShowTranscript(!showTranscript)}
+                  className="text-sky-700 dark:text-sky-400 font-bold flex items-center gap-1.5 hover:underline cursor-pointer"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>{showTranscript ? 'Ẩn lời thoại (Transcript)' : 'Xem lời thoại (Transcript) bài nghe'}</span>
+                </button>
+                {showTranscript && (
+                  <div className="p-3 rounded-xl bg-sky-100/80 dark:bg-sky-500/10 border border-sky-300 dark:border-sky-500/30 text-sky-950 dark:text-sky-200 text-xs italic font-serif leading-relaxed">
+                    "{currentEx.transcript}"
+                  </div>
+                )}
               </div>
             )}
 
             {/* Explanation (respects teacher permission) */}
             {canViewExplanations && currentEx.explanation && (
-              <div className="text-xs leading-relaxed pt-1 border-t border-inherit/40">
+              <div className="text-xs leading-relaxed pt-1 border-t border-inherit/40 text-neutral-900 dark:text-neutral-100">
                 <span className="font-bold">Giải thích: </span>
                 <span>{currentEx.explanation}</span>
               </div>
@@ -900,7 +987,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
                 <button
                   id="btn-retry-question"
                   onClick={handleRetryCurrent}
-                  className={`py-2.5 px-3 rounded-xl border ${theme.border} text-xs font-semibold flex items-center gap-1`}
+                  className={`py-2.5 px-3.5 rounded-xl border ${theme.border} ${theme.card} hover:${theme.highlight} text-neutral-900 dark:text-neutral-100 text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer`}
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                   <span>Thử lại câu này</span>

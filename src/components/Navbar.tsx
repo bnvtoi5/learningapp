@@ -90,7 +90,12 @@ export const Navbar: React.FC<NavbarProps> = ({
       },
       { id: 'manager', label: 'Quản lý kho', icon: FolderKanban },
       { id: 'builder', label: 'Soạn bài', icon: PlusCircle },
-      { id: 'errors', label: 'Sổ lỗi', icon: AlertTriangle, badge: errorCount > 0 ? errorCount : undefined },
+      { 
+        id: 'errors', 
+        label: 'Sổ lỗi & Phạt', 
+        icon: AlertTriangle, 
+        badge: errorCount > 0 ? errorCount : undefined 
+      },
       { id: 'progress', label: 'Tiến độ', icon: BarChart2 }
     );
   } else {

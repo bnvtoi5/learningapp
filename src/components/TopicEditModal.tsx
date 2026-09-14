@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, BookOpen } from 'lucide-react';
-import { Topic, SkillCategory } from '../types';
+import { X, Save, BookOpen, AlertCircle, School } from 'lucide-react';
+import { Topic, SkillCategory, Classroom } from '../types';
 import { useTheme } from '../context/ThemeContext';
+import { loadClassrooms } from '../utils/storage';
 
 interface TopicEditModalProps {
   topic: Topic | null;
@@ -9,6 +10,9 @@ interface TopicEditModalProps {
   onClose: () => void;
   onSave: (saved: Topic) => void;
   isCreate?: boolean;
+  classrooms?: Classroom[];
+  defaultClassroomId?: string;
+  onNavigateToClassManager?: () => void;
 }
 
 export const TopicEditModal: React.FC<TopicEditModalProps> = ({
@@ -17,38 +21,54 @@ export const TopicEditModal: React.FC<TopicEditModalProps> = ({
   onClose,
   onSave,
   isCreate = false,
+  classrooms: propClassrooms,
+  defaultClassroomId,
+  onNavigateToClassManager,
 }) => {
   const { getThemeClasses } = useTheme();
   const theme = getThemeClasses();
+
+  // Always ensure fresh classrooms from prop or local storage
+  const classrooms = (propClassrooms && propClassrooms.length > 0) ? propClassrooms : loadClassrooms();
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [subject, setSubject] = useState('Tiếng Anh');
   const [primarySkill, setPrimarySkill] = useState<SkillCategory>('vocabulary');
+  const [selectedClassId, setSelectedClassId] = useState<string>('');
 
   useEffect(() => {
     if (!isOpen) return;
+    const available = (propClassrooms && propClassrooms.length > 0) ? propClassrooms : loadClassrooms();
+    const fallbackId = defaultClassroomId || available[0]?.id || '';
     if (topic && !isCreate) {
       setTitle(topic.title);
       setDescription(topic.description || '');
       setSubject(topic.subject || 'Tiếng Anh');
       setPrimarySkill(topic.primarySkill || 'vocabulary');
+      setSelectedClassId(topic.classroomId || fallbackId);
     } else {
       setTitle('');
       setDescription('');
       setSubject('Tiếng Anh');
       setPrimarySkill('vocabulary');
+      setSelectedClassId(fallbackId);
     }
-  }, [topic, isOpen, isCreate]);
+  }, [topic, isOpen, isCreate, defaultClassroomId, propClassrooms]);
 
   if (!isOpen) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
+    if (!selectedClassId) {
+      alert('Vui lòng chọn Lớp học cho chủ đề này!');
+      return;
+    }
 
     onSave({
       id: topic && !isCreate ? topic.id : ('topic_' + Date.now()),
+      classroomId: selectedClassId,
       title: title.trim(),
       description: description.trim(),
       subject: subject.trim() || 'Tiếng Anh',
@@ -57,6 +77,8 @@ export const TopicEditModal: React.FC<TopicEditModalProps> = ({
     });
     onClose();
   };
+
+  const hasClassrooms = classrooms.length > 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-150">
@@ -67,6 +89,7 @@ export const TopicEditModal: React.FC<TopicEditModalProps> = ({
             <h3 className="font-bold text-sm">{isCreate ? 'Tạo chủ đề mới' : 'Chỉnh sửa chủ đề'}</h3>
           </div>
           <button
+            id="btn-close-topic-modal"
             onClick={onClose}
             className={`p-1.5 rounded-lg ${theme.highlight} hover:opacity-80`}
           >
@@ -75,16 +98,66 @@ export const TopicEditModal: React.FC<TopicEditModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="p-4 space-y-3.5">
+          {!hasClassrooms ? (
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-500 text-xs space-y-2">
+              <div className="flex items-center gap-1.5 font-bold">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>Chưa có Lớp học nào trong hệ thống!</span>
+              </div>
+              <p className="text-[11px]">
+                Quy trình chuẩn là: <strong>Tạo Lớp</strong> → <strong>Tạo Chủ đề</strong> → <strong>Tạo Bài học</strong> → <strong>Tạo Câu hỏi</strong>.
+              </p>
+              {onNavigateToClassManager && (
+                <button
+                  type="button"
+                  id="btn-goto-create-class-from-topic"
+                  onClick={() => {
+                    onClose();
+                    onNavigateToClassManager();
+                  }}
+                  className="w-full py-1.5 px-3 rounded-lg bg-amber-500 text-black font-bold text-xs hover:bg-amber-400"
+                >
+                  Đến tab Quản lý Lớp học để tạo lớp ngay
+                </button>
+              )}
+            </div>
+          ) : (
+            <div>
+              <label className={`text-xs font-semibold ${theme.textMuted} block mb-1 flex items-center gap-1`}>
+                <School className="w-3.5 h-3.5 text-emerald-500" />
+                <span>Thuộc Lớp học * (Bắt buộc):</span>
+              </label>
+              <select
+                id="select-topic-classroom"
+                required
+                value={selectedClassId}
+                onChange={e => setSelectedClassId(e.target.value)}
+                className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-sm font-semibold border ${theme.border} focus:border-emerald-500`}
+              >
+                {classrooms.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} {c.code ? `(${c.code})` : ''}
+                  </option>
+                ))}
+              </select>
+              <span className={`text-[11px] ${theme.textMuted} mt-1 block`}>
+                Chủ đề sẽ được gán và hiển thị cho học sinh thuộc lớp này.
+              </span>
+            </div>
+          )}
+
           <div>
             <label className={`text-xs font-semibold ${theme.textMuted} block mb-1`}>
               Tên chủ đề *:
             </label>
             <input
+              id="input-topic-title"
               type="text"
               required
+              placeholder="VD: Thì Quá khứ đơn và Hiện tại hoàn thành"
               value={title}
               onChange={e => setTitle(e.target.value)}
-              className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-sm font-semibold`}
+              className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-sm font-semibold border ${theme.border}`}
             />
           </div>
 
@@ -94,10 +167,11 @@ export const TopicEditModal: React.FC<TopicEditModalProps> = ({
                 Môn học:
               </label>
               <input
+                id="input-topic-subject"
                 type="text"
                 value={subject}
                 onChange={e => setSubject(e.target.value)}
-                className={`w-full p-2 rounded-xl ${theme.inputBg} text-xs`}
+                className={`w-full p-2 rounded-xl ${theme.inputBg} text-xs border ${theme.border}`}
               />
             </div>
 
@@ -106,9 +180,10 @@ export const TopicEditModal: React.FC<TopicEditModalProps> = ({
                 Kỹ năng trọng tâm:
               </label>
               <select
+                id="select-topic-skill"
                 value={primarySkill}
                 onChange={e => setPrimarySkill(e.target.value as SkillCategory)}
-                className={`w-full p-2 rounded-xl ${theme.inputBg} text-xs capitalize`}
+                className={`w-full p-2 rounded-xl ${theme.inputBg} text-xs capitalize border ${theme.border}`}
               >
                 <option value="vocabulary">Từ vựng</option>
                 <option value="grammar">Ngữ pháp</option>
@@ -116,7 +191,7 @@ export const TopicEditModal: React.FC<TopicEditModalProps> = ({
                 <option value="listening">Luyện nghe</option>
                 <option value="speaking">Luyện nói</option>
                 <option value="writing">Luyện viết</option>
-                <option value="mixed">Tổng hợp</option>
+                <option value="mixed">Tổng hợp (Mixed)</option>
               </select>
             </div>
           </div>
@@ -126,16 +201,19 @@ export const TopicEditModal: React.FC<TopicEditModalProps> = ({
               Mô tả ngắn:
             </label>
             <textarea
+              id="input-topic-desc"
               rows={2}
+              placeholder="Mô tả mục tiêu của chủ đề bài học..."
               value={description}
               onChange={e => setDescription(e.target.value)}
-              className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-xs`}
+              className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-xs border ${theme.border}`}
             />
           </div>
 
           <div className="pt-2 flex justify-end gap-2">
             <button
               type="button"
+              id="btn-cancel-topic"
               onClick={onClose}
               className={`px-3 py-1.5 rounded-xl border ${theme.border} text-xs font-medium`}
             >
@@ -143,7 +221,9 @@ export const TopicEditModal: React.FC<TopicEditModalProps> = ({
             </button>
             <button
               type="submit"
-              className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5"
+              id="btn-save-topic"
+              disabled={!hasClassrooms}
+              className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold flex items-center gap-1.5"
             >
               <Save className="w-3.5 h-3.5" />
               <span>Lưu</span>

@@ -56,6 +56,7 @@ export interface Exercise {
   question: string; // Nội dung câu hỏi / đề bài
   instruction?: string; // Hướng dẫn làm bài
   context?: string; // Đoạn văn bài đọc (CHỈ dùng cho bài Reading hoặc kịch bản hội thoại)
+  audioUrl?: string; // URL hoặc data:audio của file âm thanh đính kèm
   audioText?: string; // Đoạn văn bản cho bài nghe (dùng TTS đọc)
   audioPredictionHint?: string; // Gợi ý dự đoán trước khi nghe
   transcript?: string; // Transcript sau khi nghe
@@ -89,6 +90,21 @@ export interface LessonPhase {
   description: string;
 }
 
+export interface LessonSlide {
+  id: string;
+  title: string; // Tiêu đề trang bài giảng (VD: Trang 1: Công thức, Trang 2: Dấu hiệu nhận biết,...)
+  contentHtml: string; // Nội dung rich HTML được thiết kế (bảng, căn chỉnh, font, màu, khung ngữ pháp,...)
+}
+
+export interface MediaAsset {
+  id: string;
+  type: 'image' | 'audio';
+  name: string;
+  url: string; // Base64 data URL or audio/image URL
+  size?: number;
+  createdAt: number;
+}
+
 export interface Lesson {
   id: string;
   topicId: string;
@@ -96,22 +112,26 @@ export interface Lesson {
   description: string;
   knowledgeSummary?: string; // Tóm tắt kiến thức / công thức cốt lõi
   examples?: { original: string; meaning: string; note?: string }[];
+  slides?: LessonSlide[]; // Danh sách các trang bài giảng nhiều slide
   order: number;
 }
 
 export interface Topic {
   id: string;
+  classroomId: string; // BẮT BUỘC: Mỗi chủ đề phải thuộc về một lớp học cụ thể
   title: string;
   description: string;
   subject: string; // Môn học: Tiếng Anh, Toán, Ngữ Văn,...
   primarySkill: SkillCategory;
   createdAt: number;
-  classroomId?: string; // Tùy chọn: thuộc lớp học cụ thể (hoặc undefined nếu dùng cho tất cả lớp)
 }
 
 export interface ErrorLog {
   id: string;
   exerciseId: string;
+  userId?: string; // ID học sinh sở hữu lỗi này
+  studentName?: string; // Tên học sinh
+  classroomId?: string; // Lớp học của học sinh
   exerciseType: ExerciseType;
   skill: SkillCategory;
   question: string;
@@ -119,9 +139,13 @@ export interface ErrorLog {
   correctAnswer: string;
   errorType: string;
   explanation: string;
-  failedCount: number;
+  failedCount: number; // Tổng số lần làm sai
   lastFailedAt: number;
   resolved: boolean;
+  resolvedAt?: number;
+  retryAttempts: number; // Tổng số lượt thử lại đã thực hiện
+  currentSuccessCount: number; // Số lần làm đúng liên tiếp hiện tại
+  requiredSuccessCount: number; // Số lần làm đúng bắt buộc (trừng phạt) để gỡ lỗi hoàn toàn
 }
 
 export interface UserStats {
@@ -176,4 +200,5 @@ export interface AppSettings {
   soundEnabled: boolean;
   hapticEnabled: boolean;
   autoSpeak: boolean;
+  defaultPenaltyCount?: number; // Số lần làm đúng bắt buộc để hoàn thành lỗi sai (mặc định: 2)
 }

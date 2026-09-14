@@ -58,7 +58,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const studentClass = classrooms.find(c => c.id === currentUser?.classroomId);
 
   const totalQuestions = exercises.length;
-  const activeErrors = errors.filter(e => !e.resolved);
+  const userErrors = currentUser?.role === 'student'
+    ? errors.filter(e => e.userId === currentUser.id || (e.studentName && (e.studentName === currentUser.fullName || e.studentName === currentUser.username)))
+    : errors;
+  const activeErrors = userErrors.filter(e => !e.resolved);
   const accuracyRate = stats.totalCompleted > 0 
     ? Math.round((stats.totalCorrect / stats.totalCompleted) * 100) 
     : 0;
@@ -157,7 +160,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
             )}
 
-            {canAccessErrors && (
+            {isAdmin ? (
+              <button
+                id="btn-admin-errors"
+                onClick={() => onNavigateTab('errors')}
+                className={`px-4 py-2.5 rounded-xl font-medium text-sm flex items-center justify-center gap-2 border ${theme.border} ${theme.highlight} transition-transform active:scale-[0.98]`}
+              >
+                <AlertCircle className="w-4 h-4 text-rose-500" />
+                <span>Sổ lỗi & Phạt ({errors.filter(e => !e.resolved).length})</span>
+              </button>
+            ) : canAccessErrors ? (
               <button
                 id="btn-review-errors"
                 disabled={activeErrors.length === 0}
@@ -167,7 +179,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <AlertCircle className="w-4 h-4 text-rose-500" />
                 <span>Ôn lỗi ({activeErrors.length})</span>
               </button>
-            )}
+            ) : null}
 
             {isAdmin && (
               <button
@@ -207,15 +219,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div className={`text-[11px] ${theme.textMuted} mt-0.5`}>{stats.totalCorrect} câu đúng</div>
         </div>
 
-        <div className={`${theme.card} p-3.5 rounded-xl text-center border ${theme.border}`}>
+        <div 
+          className={`${theme.card} p-3.5 rounded-xl text-center border ${theme.border} cursor-pointer hover:border-rose-500/40 transition-colors`}
+          onClick={() => onNavigateTab('errors')}
+        >
           <div className={`text-xs ${theme.textMuted} mb-1 flex items-center justify-center gap-1`}>
             <AlertCircle className="w-3.5 h-3.5 text-rose-500" />
-            <span>Cần sửa</span>
+            <span>{isAdmin ? 'Lỗi học sinh' : 'Cần sửa'}</span>
           </div>
           <div className={`text-xl sm:text-2xl font-bold tracking-tight ${activeErrors.length > 0 ? 'text-rose-500' : ''}`}>
             {activeErrors.length}
           </div>
-          <div className={`text-[11px] ${theme.textMuted} mt-0.5`}>Lỗi chưa sửa</div>
+          <div className={`text-[11px] ${theme.textMuted} mt-0.5`}>{isAdmin ? 'Đang bị phạt' : 'Lỗi chưa sửa'}</div>
         </div>
       </div>
 

@@ -29,6 +29,11 @@ import {
   resolveError, 
   deleteError, 
   recordExerciseResult,
+  recordErrorRetrySuccess,
+  updateErrorPenalty,
+  resetErrorProgress,
+  bulkDeleteErrors,
+  bulkResetResolvedErrors,
   getLastActiveLessonId,
   setLastActiveLessonId,
   loadUsers,
@@ -41,7 +46,8 @@ import {
   updateClassroom as storageUpdateClassroom,
   deleteClassroom as storageDeleteClassroom,
   getCurrentUser,
-  setCurrentUser as storageSetCurrentUser
+  setCurrentUser as storageSetCurrentUser,
+  syncDatabaseWithCloud
 } from './utils/storage';
 
 import { Navbar } from './components/Navbar';
@@ -56,6 +62,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { AuthScreen } from './components/AuthScreen';
 import { PendingApprovalScreen } from './components/PendingApprovalScreen';
 import { AdminPortal } from './components/AdminPortal';
+import { AdminErrorManager } from './components/AdminErrorManager';
 
 function MainApp() {
   const { getThemeClasses } = useTheme();
@@ -113,6 +120,10 @@ function MainApp() {
 
   useEffect(() => {
     reloadAllData();
+    // Sync with Firebase Cloud Database
+    syncDatabaseWithCloud(() => {
+      reloadAllData();
+    }).catch(err => console.warn('Cloud sync on launch:', err));
   }, []);
 
   // Sync current user status if changed in users list
@@ -247,7 +258,10 @@ function MainApp() {
     let targetExercises: Exercise[] = [];
 
     if (isErrorReview) {
-      const unresolvedErrorIds = errors.filter(e => !e.resolved).map(e => e.exerciseId);
+      const studentErrors = currentUser?.role === 'student'
+        ? errors.filter(e => !e.resolved && (e.userId === currentUser.id || (e.studentName && (e.studentName === currentUser.fullName || e.studentName === currentUser.username))))
+        : errors.filter(e => !e.resolved);
+      const unresolvedErrorIds = studentErrors.map(e => e.exerciseId);
       targetExercises = exercises.filter(e => unresolvedErrorIds.includes(e.id));
       setPracticeTitle('Ôn tập câu làm sai');
     } else if (lessonId) {
@@ -273,13 +287,25 @@ function MainApp() {
   };
 
   const handleErrorOccurred = (exercise: Exercise, userAnswer: string, correctAnswer: string) => {
-    recordError(exercise, userAnswer, correctAnswer);
+    recordError(exercise, userAnswer, correctAnswer, currentUser);
     setErrors(loadErrors());
   };
 
   const handleSuccessExercise = (exercise: Exercise) => {
     recordExerciseResult(exercise.skill, true);
+    recordErrorRetrySuccess(exercise.id, currentUser);
     setStats(loadStats());
+    setErrors(loadErrors());
+  };
+
+  const handleUpdateErrorPenalty = (errorId: string, penaltyCount: number) => {
+    updateErrorPenalty(errorId, penaltyCount);
+    setErrors(loadErrors());
+  };
+
+  const handleResetErrorProgress = (errorId: string) => {
+    resetErrorProgress(errorId);
+    setErrors(loadErrors());
   };
 
   // Topic Handlers
@@ -362,14 +388,53 @@ function MainApp() {
     setErrors(loadErrors());
   };
 
-  const handleStartReviewSession = (targetErrorIds?: string[]) => {
+  const handleBulkDeleteErrors = (errorIds: string[]) => {
+    bulkDeleteErrors(errorIds);
+    setErrors(loadErrors());
+  };
+
+  const handleBulkResetErrors = (errorIds: string[]) => {
+    bulkResetResolvedErrors(errorIds);
+    setErrors(loadErrors());
+  };
+
+  const handleStartReviewSession = (targetIds?: string[]) => {
     let targetExs: Exercise[] = [];
-    if (targetErrorIds && targetErrorIds.length > 0) {
-      const errExIds = errors.filter(e => targetErrorIds.includes(e.id)).map(e => e.exerciseId);
-      targetExs = exercises.filter(e => errExIds.includes(e.id));
+    if (targetIds && targetIds.length > 0) {
+      const resolvedExerciseIds = new Set<string>();
+      targetIds.forEach(id => {
+        if (exercises.some(e => e.id === id)) {
+          resolvedExerciseIds.add(id);
+        }
+        const err = errors.find(e => e.id === id || e.exerciseId === id);
+        if (err) {
+          resolvedExerciseIds.add(err.exerciseId);
+        }
+      });
+      targetExs = exercises.filter(e => resolvedExerciseIds.has(e.id));
     } else {
-      const activeIds = errors.filter(e => !e.resolved).map(e => e.exerciseId);
+      const studentErrors = currentUser?.role === 'student'
+        ? errors.filter(e => !e.resolved && (e.userId === currentUser.id || (e.studentName && (e.studentName === currentUser.fullName || e.studentName === currentUser.username))))
+        : errors.filter(e => !e.resolved);
+      const activeIds = studentErrors.map(e => e.exerciseId);
       targetExs = exercises.filter(e => activeIds.includes(e.id));
+    }
+
+    // Fallback: If exercises were not in catalog, reconstruct cleanly from error log
+    if (targetExs.length === 0 && targetIds && targetIds.length > 0) {
+      const matchedErrors = errors.filter(e => targetIds.includes(e.id) || targetIds.includes(e.exerciseId));
+      if (matchedErrors.length > 0) {
+        targetExs = matchedErrors.map(err => ({
+          id: err.exerciseId,
+          lessonId: 'review',
+          skill: err.skill,
+          difficulty: 'guided' as const,
+          type: (err.exerciseType || 'fill_blank') as any,
+          question: err.question,
+          correctText: err.correctAnswer,
+          explanation: err.explanation,
+        }));
+      }
     }
 
     if (targetExs.length === 0) {
@@ -432,6 +497,8 @@ function MainApp() {
         <main className="min-h-screen p-4 sm:p-6 flex flex-col justify-start">
           <PracticeSession
             exercises={activePracticeExercises}
+            errors={errors}
+            currentUser={currentUser}
             title={practiceTitle}
             canViewExplanations={
               currentUser.role === 'admin' || 
@@ -452,7 +519,11 @@ function MainApp() {
             currentTab={currentTab}
             setCurrentTab={tab => setCurrentTab(tab)}
             openSettings={() => setIsSettingsOpen(true)}
-            errorCount={errors.filter(e => !e.resolved).length}
+            errorCount={
+              currentUser.role === 'student'
+                ? errors.filter(e => !e.resolved && (e.userId === currentUser.id || (e.studentName && (e.studentName === currentUser.fullName || e.studentName === currentUser.username)))).length
+                : errors.filter(e => !e.resolved).length
+            }
             currentUser={currentUser}
             currentClassroom={currentClassroom}
             pendingCount={pendingCount}
@@ -493,10 +564,12 @@ function MainApp() {
                   setCurrentTab('builder');
                 }}
                 onSaveTopic={handleSaveTopic}
+                onSaveLesson={handleSaveLesson}
                 onDeleteTopic={handleDeleteTopic}
                 onDeleteLesson={handleDeleteLesson}
                 currentUser={currentUser}
                 classrooms={classrooms}
+                onNavigateToClassManager={() => setCurrentTab('admin')}
               />
             )}
 
@@ -506,12 +579,17 @@ function MainApp() {
                 users={users}
                 classrooms={classrooms}
                 topics={topics}
+                errors={errors}
                 onUpdateUser={handleUpdateUser}
                 onDeleteUser={handleDeleteUser}
                 onCreateClassroom={handleCreateClassroom}
                 onUpdateClassroom={handleUpdateClassroom}
                 onDeleteClassroom={handleDeleteClassroom}
                 onUpdateTopic={handleUpdateTopic}
+                onUpdateErrorPenalty={handleUpdateErrorPenalty}
+                onResetErrorProgress={handleResetErrorProgress}
+                onResolveError={handleResolveError}
+                onDeleteError={handleDeleteError}
               />
             )}
 
@@ -521,6 +599,8 @@ function MainApp() {
                 topics={topics}
                 lessons={lessons}
                 exercises={exercises}
+                classrooms={classrooms}
+                onNavigateToClassManager={() => setCurrentTab('admin')}
                 onStartPractice={handleStartPractice}
                 onOpenCreateModal={(type, contextId) => {
                   setBuilderContext({ type, targetId: contextId });
@@ -535,14 +615,46 @@ function MainApp() {
               />
             )}
 
-            {/* Error Notebook (Filtered by student permissions) */}
-            {currentTab === 'errors' && (currentUser.role === 'admin' || currentUser.permissions?.canAccessErrorNotebook !== false) && (
-              <ErrorReview
-                errors={errors}
-                onStartReviewSession={handleStartReviewSession}
-                onResolveError={handleResolveError}
-                onDeleteError={handleDeleteError}
-              />
+            {/* Error Notebook / Admin Error Management */}
+            {currentTab === 'errors' && (
+              currentUser.role === 'admin' ? (
+                <div className="space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pb-1">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-xl font-bold tracking-tight">Sổ lỗi học sinh & Phạt làm lại</h2>
+                        <span className="px-2 py-0.5 rounded text-xs font-semibold bg-rose-500/10 text-rose-500 border border-rose-500/20">
+                          {errors.filter(e => !e.resolved).length} lỗi đang phạt
+                        </span>
+                      </div>
+                      <p className={`text-xs ${theme.textMuted} mt-0.5`}>
+                        Theo dõi danh sách bài làm sai của toàn bộ học sinh theo lớp, điều chỉnh mức phạt và quản lý tiến độ hoàn thành.
+                      </p>
+                    </div>
+                  </div>
+
+                  <AdminErrorManager
+                    errors={errors}
+                    users={users}
+                    classrooms={classrooms}
+                    onUpdateErrorPenalty={handleUpdateErrorPenalty}
+                    onResetErrorProgress={handleResetErrorProgress}
+                    onResolveError={handleResolveError}
+                    onDeleteError={handleDeleteError}
+                    onBulkDeleteErrors={handleBulkDeleteErrors}
+                    onBulkResetErrors={handleBulkResetErrors}
+                  />
+                </div>
+              ) : currentUser.permissions?.canAccessErrorNotebook !== false ? (
+                <ErrorReview
+                  errors={errors}
+                  currentUser={currentUser}
+                  onNavigateToAdminErrors={() => setCurrentTab('admin')}
+                  onStartReviewSession={handleStartReviewSession}
+                  onResolveError={handleResolveError}
+                  onDeleteError={handleDeleteError}
+                />
+              ) : null
             )}
 
             {/* Progress View (Filtered by student permissions) */}
@@ -551,7 +663,11 @@ function MainApp() {
                 stats={stats}
                 exercises={exercises}
                 errors={errors}
+                currentUser={currentUser}
+                classrooms={classrooms}
+                users={users}
                 onStartSkillPractice={handleStartSkillPractice}
+                onNavigateToErrors={() => setCurrentTab('errors')}
               />
             )}
 
@@ -560,6 +676,8 @@ function MainApp() {
               <ExerciseBuilder
                 topics={topics}
                 lessons={lessons}
+                classrooms={classrooms}
+                onNavigateToClassManager={() => setCurrentTab('admin')}
                 initialContext={builderContext}
                 onSaveTopic={handleSaveTopic}
                 onSaveLesson={handleSaveLesson}

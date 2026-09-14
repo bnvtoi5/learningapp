@@ -7,6 +7,8 @@ import {
   Layers, 
   HelpCircle, 
   CheckCircle2, 
+  CheckCircle,
+  X,
   Sparkles, 
   FileText,
   Volume2,
@@ -15,7 +17,9 @@ import {
   Grid,
   Check,
   Zap,
-  RotateCcw
+  RotateCcw,
+  School,
+  AlertCircle
 } from 'lucide-react';
 import { 
   Topic, 
@@ -24,13 +28,19 @@ import {
   ExerciseType, 
   SkillCategory, 
   DifficultyLevel,
-  MatchingPair 
+  MatchingPair,
+  Classroom,
+  MediaAsset
 } from '../types';
 import { useTheme } from '../context/ThemeContext';
+import { loadClassrooms } from '../utils/storage';
+import { MediaLibraryModal } from './MediaLibraryModal';
 
 interface ExerciseBuilderProps {
   topics?: Topic[];
   lessons?: Lesson[];
+  classrooms?: Classroom[];
+  onNavigateToClassManager?: () => void;
   initialContext?: {
     type: 'topic' | 'lesson' | 'exercise';
     targetId?: string;
@@ -64,6 +74,8 @@ const EXERCISE_TYPES: { type: ExerciseType; label: string; desc: string }[] = [
 export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
   topics = [],
   lessons = [],
+  classrooms: propClassrooms,
+  onNavigateToClassManager,
   initialContext,
   onSaveTopic,
   onSaveLesson,
@@ -74,6 +86,9 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
   const theme = getThemeClasses();
   const typo = getTypographyClasses();
 
+  // Ensure classrooms are always available (from props or local storage)
+  const classrooms = (propClassrooms && propClassrooms.length > 0) ? propClassrooms : loadClassrooms();
+
   // Active form section tab
   const [activeTab, setActiveTab] = useState<'exercise' | 'lesson' | 'topic'>(
     initialContext?.type || (topics.length === 0 ? 'topic' : 'exercise')
@@ -81,10 +96,19 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
   const [statusBanner, setStatusBanner] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   // Topic Form
+  const [targetClassroomId, setTargetClassroomId] = useState<string>(classrooms?.[0]?.id || '');
   const [topicTitle, setTopicTitle] = useState('');
   const [topicDesc, setTopicDesc] = useState('');
   const [topicSubject, setTopicSubject] = useState('Tiếng Anh');
   const [topicSkill, setTopicSkill] = useState<SkillCategory>('vocabulary');
+
+  useEffect(() => {
+    if (classrooms.length > 0) {
+      if (!targetClassroomId || !classrooms.some(c => c.id === targetClassroomId)) {
+        setTargetClassroomId(classrooms[0].id);
+      }
+    }
+  }, [classrooms, targetClassroomId]);
 
   // Lesson Form
   const [targetTopicId, setTargetTopicId] = useState<string>(topics?.[0]?.id || '');
@@ -123,11 +147,32 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
   ]);
 
   // Audio / Listening
+  const [audioUrl, setAudioUrl] = useState('');
   const [audioText, setAudioText] = useState('');
   const [predictionHint, setPredictionHint] = useState('');
   const [transcript, setTranscript] = useState('');
   const [readingQuestionType, setReadingQuestionType] = useState('Main Idea');
   const [evidenceRegion, setEvidenceRegion] = useState('');
+  const [isMediaModalOpen, setIsMediaModalOpen] = useState(false);
+
+  const handleAddMatchingPair = () => {
+    setMatchingPairs(prev => [
+      ...prev,
+      { id: 'p_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6), left: '', right: '' },
+    ]);
+  };
+
+  const handleRemoveMatchingPair = (index: number) => {
+    setMatchingPairs(prev => prev.filter((_, idx) => idx !== index));
+  };
+
+  const handleUpdateMatchingPair = (index: number, field: 'left' | 'right', value: string) => {
+    setMatchingPairs(prev => {
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: value };
+      return next;
+    });
+  };
 
   // Handle initial context passed from navigation
   useEffect(() => {
@@ -237,57 +282,53 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
 
       case 'matching':
         setExSkill('vocabulary');
-        setExQuestion('Ghép từ tiếng Anh ở cột trái với nghĩa tương ứng ở cột phải:');
+        setExQuestion('Ghép các cặp từ tương ứng:');
         setMatchingPairs([
-          { id: '1', left: 'friendly', right: 'thân thiện' },
-          { id: '2', left: 'helpful', right: 'hay giúp đỡ' },
-          { id: '3', left: 'classmate', right: 'bạn cùng lớp' },
+          { id: '1', left: '', right: '' },
+          { id: '2', left: '', right: '' },
         ]);
-        setExExplanation('friendly = thân thiện; helpful = hay giúp đỡ; classmate = bạn cùng lớp.');
+        setExExplanation('');
         break;
 
       case 'error_correction':
         setExSkill('grammar');
         setExQuestion('Tìm lỗi sai và sửa lại câu sau:');
-        setExWrongSentence('She go to school every day.');
-        setExCorrectText('She goes to school every day.');
+        setExWrongSentence('');
+        setExCorrectText('');
         setExErrorType('Subject-verb agreement');
-        setExExplanation('Chủ ngữ "She" ngôi thứ ba số ít cần chia "goes".');
+        setExExplanation('');
         break;
 
       case 'translation':
         setExSkill('writing');
-        setExQuestion('Dịch câu sau sang tiếng Anh: "Nam đang học bài trong phòng."');
-        setExKeywords('Nam, study, in the room');
-        setExCorrectText('Nam is studying in the room');
-        setExExplanation('Thì hiện tại tiếp diễn: S + is/am/are + V-ing.');
+        setExQuestion('');
+        setExKeywords('');
+        setExCorrectText('');
+        setExExplanation('');
         break;
 
       case 'reading':
         setExSkill('reading');
         // Reading context is ONLY set here!
-        setExContext('Anna lives in a quiet village near Da Lat. Every morning, she wakes up at 5:30 to water the flowers in her garden before going to school. Her favorite flower is the purple hydrangea.');
-        setExQuestion('What is the main topic of the passage?');
+        setExContext('');
+        setExQuestion('');
         setReadingQuestionType('Main Idea');
-        setEvidenceRegion('Anna lives in a quiet village near Da Lat. Every morning, she wakes up at 5:30...');
-        setOptions([
-          'Anna\'s morning routine in her village',
-          'How to grow hydrangeas',
-          'The history of Da Lat',
-          'Anna\'s school exams'
-        ]);
+        setEvidenceRegion('');
+        setOptions(['', '', '', '']);
         setCorrectOptionIdx(0);
-        setExExplanation('Toàn bộ đoạn văn mô tả thói quen buổi sáng thức dậy chăm sóc vườn của Anna.');
+        setExExplanation('');
         break;
 
       case 'listening':
         setExSkill('listening');
-        setExQuestion('What time does the class start?');
-        setAudioText('Good morning students. Please remember that our class begins at eight o clock sharp.');
-        setTranscript('Good morning students. Please remember that our class begins at eight o\'clock sharp.');
-        setOptions(['7:30 AM', '8:00 AM', '8:30 AM', '9:00 AM']);
-        setCorrectOptionIdx(1);
-        setExExplanation('Người nói thông báo: "...our class begins at eight o\'clock sharp".');
+        setExQuestion('');
+        setAudioUrl('');
+        setAudioText('');
+        setTranscript('');
+        setPredictionHint('');
+        setOptions(['', '', '', '']);
+        setCorrectOptionIdx(0);
+        setExExplanation('');
         break;
     }
   };
@@ -332,9 +373,10 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
     } else if (exType === 'sentence_builder') {
       newExercise.scrambledWords = (exCorrectText.trim() || vocabWord.trim()).split(/\s+/);
     } else if (exType === 'listening') {
-      newExercise.audioText = audioText.trim();
-      newExercise.audioPredictionHint = predictionHint.trim();
-      newExercise.transcript = transcript.trim();
+      newExercise.audioUrl = audioUrl.trim() || undefined;
+      newExercise.audioText = audioText.trim() || undefined;
+      newExercise.audioPredictionHint = predictionHint.trim() || undefined;
+      newExercise.transcript = transcript.trim() || undefined;
       newExercise.options = options.filter(o => o.trim().length > 0);
       newExercise.correctOptions = [correctOptionIdx];
     }
@@ -343,20 +385,35 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
     setStatusBanner({ type: 'success', text: 'Đã lưu câu hỏi bài tập thành công!' });
     // Clear question for next
     setExQuestion('');
+    setAudioUrl('');
+    setAudioText('');
+    setTranscript('');
+    setPredictionHint('');
+    setOptions(['', '', '', '']);
+    setCorrectOptionIdx(0);
     setVocabWord('');
     setVocabMeaning('');
     setClozeLetters('');
     setExCorrectText('');
     setExContext('');
+    setMatchingPairs([
+      { id: '1', left: '', right: '' },
+      { id: '2', left: '', right: '' },
+    ]);
   };
 
   // Submit Topic
   const handleSubmitTopic = (e: React.FormEvent) => {
     e.preventDefault();
     if (!topicTitle.trim()) return;
+    if (!targetClassroomId) {
+      alert('Vui lòng chọn hoặc tạo Lớp học trước khi tạo chủ đề!');
+      return;
+    }
 
     const newTopic: Topic = {
       id: 'topic_' + Date.now(),
+      classroomId: targetClassroomId,
       title: topicTitle.trim(),
       description: topicDesc.trim(),
       subject: topicSubject.trim() || 'Tiếng Anh',
@@ -703,11 +760,11 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
             </div>
           )}
 
-          {/* Options for Multiple Choice / Collocation */}
-          {(exType === 'multiple_choice' || exType === 'collocation' || exType === 'reading' || exType === 'image_identify') && (
+          {/* Options for Multiple Choice / Collocation / Reading / Listening */}
+          {(exType === 'multiple_choice' || exType === 'collocation' || exType === 'reading' || exType === 'image_identify' || exType === 'listening') && (
             <div className="space-y-2">
               <label className={`text-xs font-semibold ${theme.textMuted} block`}>
-                Các phương án lựa chọn & Đánh dấu đáp án đúng:
+                Các phương án lựa chọn (A, B, C, D) & Đánh dấu đáp án đúng *:
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {options.map((opt, idx) => (
@@ -731,6 +788,149 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
                       placeholder={`Lựa chọn ${String.fromCharCode(65 + idx)}`}
                       className={`flex-1 p-2 rounded-xl ${theme.inputBg} text-xs`}
                     />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Listening Audio Configuration */}
+          {exType === 'listening' && (
+            <div className="p-4 rounded-xl border border-sky-500/30 bg-sky-500/5 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-sky-400 flex items-center gap-1.5">
+                  <Volume2 className="w-4 h-4" />
+                  <span>Cài đặt âm thanh bài nghe (TOEIC Listening)</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsMediaModalOpen(true)}
+                  className="px-2.5 py-1 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer shadow-xs"
+                >
+                  <Volume2 className="w-3.5 h-3.5" />
+                  <span>Kho Media / Tải lên MP3</span>
+                </button>
+              </div>
+
+              <div>
+                <label className={`text-xs font-semibold ${theme.textMuted} block mb-1`}>
+                  File âm thanh / Audio URL (hoặc chọn từ Kho Media ở trên):
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={audioUrl}
+                    onChange={e => setAudioUrl(e.target.value)}
+                    placeholder="https://... hoặc data:audio/... (hoặc bấm Kho Media để tải file)"
+                    className={`flex-1 p-2.5 rounded-xl ${theme.inputBg} text-xs font-mono`}
+                  />
+                  {audioUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setAudioUrl('')}
+                      className="px-2 py-1 rounded-lg border border-rose-500/30 text-rose-400 text-xs hover:bg-rose-500/10 cursor-pointer"
+                    >
+                      Xóa
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className={`text-xs font-semibold ${theme.textMuted} block mb-1`}>
+                  Hoặc nhập văn bản cho giọng đọc AI (TTS) đọc (nếu không dùng file mp3):
+                </label>
+                <textarea
+                  rows={2}
+                  value={audioText}
+                  onChange={e => setAudioText(e.target.value)}
+                  placeholder="Nhập đoạn văn bản tiếng Anh để hệ thống tự phát âm giọng chuẩn..."
+                  className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-xs`}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className={`text-xs font-semibold ${theme.textMuted} block mb-1`}>
+                    Gợi ý trước khi nghe (Prediction Hint):
+                  </label>
+                  <input
+                    type="text"
+                    value={predictionHint}
+                    onChange={e => setPredictionHint(e.target.value)}
+                    placeholder="VD: Để ý mốc thời gian diễn ra cuộc hẹn..."
+                    className={`w-full p-2 rounded-xl ${theme.inputBg} text-xs`}
+                  />
+                </div>
+                <div>
+                  <label className={`text-xs font-semibold ${theme.textMuted} block mb-1`}>
+                    Transcript (Lời thoại hiển thị khi đối chiếu):
+                  </label>
+                  <input
+                    type="text"
+                    value={transcript}
+                    onChange={e => setTranscript(e.target.value)}
+                    placeholder="Lời thoại bài nghe..."
+                    className={`w-full p-2 rounded-xl ${theme.inputBg} text-xs`}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Dynamic Matching Pairs Setup */}
+          {exType === 'matching' && (
+            <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-bold text-emerald-400 block">
+                    Thiết kế các cặp nối (Cột A ➔ Cột B):
+                  </span>
+                  <span className={`text-[10px] ${theme.textMuted}`}>
+                    Cột B sẽ được tự động xáo trộn ngẫu nhiên khi học sinh làm bài để luyện tập.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAddMatchingPair}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer shadow-xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Thêm cặp nối</span>
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {matchingPairs.map((pair, idx) => (
+                  <div key={pair.id || idx} className="flex items-center gap-2">
+                    <span className="text-xs font-mono font-bold w-5 text-center text-neutral-400">
+                      {idx + 1}.
+                    </span>
+                    <input
+                      type="text"
+                      value={pair.left}
+                      onChange={e => handleUpdateMatchingPair(idx, 'left', e.target.value)}
+                      placeholder={`Cột A #${idx + 1} (Từ/Cụm từ)`}
+                      className={`flex-1 p-2 rounded-xl ${theme.inputBg} text-xs`}
+                    />
+                    <span className="text-emerald-500 font-bold">➔</span>
+                    <input
+                      type="text"
+                      value={pair.right}
+                      onChange={e => handleUpdateMatchingPair(idx, 'right', e.target.value)}
+                      placeholder={`Cột B #${idx + 1} (Nghĩa/Đáp án)`}
+                      className={`flex-1 p-2 rounded-xl ${theme.inputBg} text-xs`}
+                    />
+                    {matchingPairs.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveMatchingPair(idx)}
+                        className="p-1.5 rounded-lg border border-rose-500/30 text-rose-400 hover:bg-rose-500/10 cursor-pointer"
+                        title="Xóa cặp này"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -830,9 +1030,14 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
                 onChange={e => setTargetTopicId(e.target.value)}
                 className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-xs font-medium`}
               >
-                {topics.map(t => (
-                  <option key={t.id} value={t.id}>{t.title} ({t.subject})</option>
-                ))}
+                {topics.map(t => {
+                  const cName = classrooms.find(c => c.id === t.classroomId)?.name;
+                  return (
+                    <option key={t.id} value={t.id}>
+                      {cName ? `[${cName}] ` : ''}{t.title} ({t.subject})
+                    </option>
+                  );
+                })}
               </select>
             )}
           </div>
@@ -880,7 +1085,7 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
           <div className="pt-2">
             <button
               type="submit"
-              className="w-full py-3 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-sm flex items-center justify-center gap-1.5"
+              className="w-full py-3 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-sm flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Save className="w-4 h-4" />
               <span>Tạo bài học</span>
@@ -894,6 +1099,48 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
       {/* ============================================================== */}
       {activeTab === 'topic' && (
         <form onSubmit={handleSubmitTopic} className={`${theme.card} p-5 rounded-2xl border ${theme.border} space-y-4`}>
+          {/* Classroom Selection */}
+          <div>
+            <label className={`text-xs font-semibold ${theme.textMuted} block mb-1 flex items-center gap-1.5`}>
+              <School className="w-3.5 h-3.5 text-emerald-500" />
+              <span>Thuộc Lớp học * (Bắt buộc):</span>
+            </label>
+            {classrooms.length === 0 ? (
+              <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs text-amber-400 space-y-2">
+                <div className="flex items-center gap-1.5 font-bold">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>Chưa có lớp học nào trong hệ thống!</span>
+                </div>
+                <p className="text-[11px]">
+                  Quy trình chuẩn: Vui lòng vào tab Quản lý Lớp học để tạo lớp trước khi tạo chủ đề!
+                </p>
+                {onNavigateToClassManager && (
+                  <button
+                    type="button"
+                    onClick={onNavigateToClassManager}
+                    className="py-1 px-2.5 rounded-lg bg-amber-500 text-black font-bold text-xs hover:bg-amber-400 cursor-pointer"
+                  >
+                    Đến tab Quản lý Lớp học ngay
+                  </button>
+                )}
+              </div>
+            ) : (
+              <select
+                id="select-builder-topic-class"
+                required
+                value={targetClassroomId}
+                onChange={e => setTargetClassroomId(e.target.value)}
+                className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-xs font-semibold border ${theme.border}`}
+              >
+                {classrooms.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} {c.code ? `(${c.code})` : ''}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
           <div>
             <label className={`text-xs font-semibold ${theme.textMuted} block mb-1`}>
               Tên chủ đề *:
@@ -1011,6 +1258,23 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
           </div>
         </form>
       )}
+
+      {/* Media Library Modal for selecting/uploading audio files */}
+      <MediaLibraryModal
+        isOpen={isMediaModalOpen}
+        initialTab="audio"
+        onClose={() => setIsMediaModalOpen(false)}
+        onSelectAsset={(asset: MediaAsset) => {
+          if (asset.type === 'audio') {
+            if (asset.url) {
+              setAudioUrl(asset.url);
+            } else if (asset.name) {
+              setAudioText(asset.name);
+            }
+          }
+          setIsMediaModalOpen(false);
+        }}
+      />
     </div>
   );
 };
