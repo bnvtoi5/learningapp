@@ -326,9 +326,21 @@ function MainApp() {
       setPracticeTitle('Phiên luyện tập');
     }
 
-    // Sort by order when practice is in a specific lesson
+    // Order when practice is in a specific lesson
     if (lessonId) {
-      targetExercises.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      const targetLesson = lessons.find(l => l.id === lessonId);
+      if (targetLesson?.shuffleExercises) {
+        // Teacher configured shuffle: randomize question order uniformly using Fisher-Yates
+        const shuffled = [...targetExercises];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        targetExercises = shuffled;
+      } else {
+        // Default: strictly maintain designed order
+        targetExercises.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      }
     }
 
     if (targetExercises.length === 0) {

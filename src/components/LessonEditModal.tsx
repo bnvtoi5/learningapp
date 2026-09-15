@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, Layers } from 'lucide-react';
+import { X, Save, Layers, Shuffle } from 'lucide-react';
 import { Lesson } from '../types';
 import { useTheme } from '../context/ThemeContext';
 
@@ -29,6 +29,7 @@ export const LessonEditModal: React.FC<LessonEditModalProps> = ({
   const [description, setDescription] = useState('');
   const [knowledgeSummary, setKnowledgeSummary] = useState('');
   const [isHidden, setIsHidden] = useState<boolean>(false);
+  const [shuffleExercises, setShuffleExercises] = useState<boolean>(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -37,11 +38,13 @@ export const LessonEditModal: React.FC<LessonEditModalProps> = ({
       setDescription(lesson.description || '');
       setKnowledgeSummary(lesson.knowledgeSummary || '');
       setIsHidden(!!lesson.isHidden);
+      setShuffleExercises(!!lesson.shuffleExercises);
     } else {
       setTitle('');
       setDescription('');
       setKnowledgeSummary('');
       setIsHidden(false);
+      setShuffleExercises(false);
     }
   }, [lesson, isOpen, isCreate]);
 
@@ -61,6 +64,7 @@ export const LessonEditModal: React.FC<LessonEditModalProps> = ({
       order: lesson && !isCreate ? lesson.order : (existingLessonsCount + 1),
       slides: lesson && !isCreate ? lesson.slides : undefined,
       isHidden,
+      shuffleExercises,
     });
     onClose();
   };
@@ -138,6 +142,35 @@ export const LessonEditModal: React.FC<LessonEditModalProps> = ({
                 className="sr-only peer"
               />
               <div className="w-9 h-5 bg-neutral-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
+            </label>
+          </div>
+
+          {/* Shuffle Setting: Shuffle exercises when student practices */}
+          <div className={`p-3 rounded-xl border ${shuffleExercises ? 'border-indigo-500/40 bg-indigo-500/10' : 'border-neutral-500/20 bg-neutral-500/5'} flex items-center justify-between`}>
+            <div className="flex items-center gap-2.5">
+              <div className={`p-2 rounded-lg ${shuffleExercises ? 'bg-indigo-500/20 text-indigo-400' : 'bg-neutral-500/10 text-neutral-400'}`}>
+                <Shuffle className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-xs font-semibold block">
+                  {shuffleExercises ? 'Đang bật xáo trộn câu hỏi (Shuffle: BẬT)' : 'Thứ tự câu hỏi: Mặc định theo thiết kế'}
+                </span>
+                <span className={`text-[11px] ${theme.textMuted}`}>
+                  {shuffleExercises 
+                    ? 'Tự động đảo ngẫu nhiên thứ tự các câu hỏi khi học sinh làm bài' 
+                    : 'Phát cho học sinh theo đúng thứ tự sắp xếp trong kho'}
+                </span>
+              </div>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                id="checkbox-lesson-shuffle"
+                type="checkbox"
+                checked={shuffleExercises}
+                onChange={e => setShuffleExercises(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-neutral-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
             </label>
           </div>
 

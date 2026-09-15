@@ -23,7 +23,8 @@ import {
   Eye,
   EyeOff,
   ListPlus,
-  CheckSquare
+  CheckSquare,
+  Shuffle
 } from 'lucide-react';
 import { 
   Topic, 
@@ -180,6 +181,7 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
   const [exIsHidden, setExIsHidden] = useState(false);
   const [topicIsHidden, setTopicIsHidden] = useState(false);
   const [lessonIsHidden, setLessonIsHidden] = useState(false);
+  const [lessonShuffleExercises, setLessonShuffleExercises] = useState(false);
   const [comprehensionMode, setComprehensionMode] = useState<'multiple_sub' | 'passage_cloze'>('multiple_sub');
   const [passageClozeText, setPassageClozeText] = useState('');
   const [subQuestions, setSubQuestions] = useState<SubQuestion[]>([]);
@@ -545,6 +547,7 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
       knowledgeSummary: lessonKnowledge.trim() || undefined,
       order: lessons.filter(l => l.topicId === targetTopicId).length + 1,
       isHidden: lessonIsHidden,
+      shuffleExercises: lessonShuffleExercises,
     };
 
     onSaveLesson(newLesson);
@@ -553,6 +556,7 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
     setLessonDesc('');
     setLessonKnowledge('');
     setLessonIsHidden(false);
+    setLessonShuffleExercises(false);
     setStatusBanner({
       type: 'success',
       text: `Đã tạo bài học "${newLesson.title}" thành công! Bây giờ bạn có thể thêm câu hỏi vào bài này.`
@@ -1508,6 +1512,21 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
             <label htmlFor="checkbox-hide-lesson" className="text-xs font-medium cursor-pointer select-none flex items-center gap-1.5">
               {lessonIsHidden ? <EyeOff className="w-3.5 h-3.5 text-amber-500" /> : <Eye className="w-3.5 h-3.5 text-sky-500" />}
               <span>Ẩn bài học này đối với học sinh (chỉ giáo viên thấy)</span>
+            </label>
+          </div>
+
+          {/* Lesson Shuffle Exercises Toggle */}
+          <div className="flex items-center gap-2 p-3 rounded-xl border border-dashed border-indigo-500/30 bg-indigo-500/5">
+            <input
+              id="checkbox-builder-lesson-shuffle"
+              type="checkbox"
+              checked={lessonShuffleExercises}
+              onChange={e => setLessonShuffleExercises(e.target.checked)}
+              className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+            />
+            <label htmlFor="checkbox-builder-lesson-shuffle" className="text-xs font-medium cursor-pointer select-none flex items-center gap-1.5 text-indigo-400">
+              <Shuffle className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Xáo trộn câu hỏi khi phát cho học sinh (mặc định tắt - phát đúng thứ tự sắp xếp)</span>
             </label>
           </div>
 

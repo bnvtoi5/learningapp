@@ -143,6 +143,7 @@ export interface Lesson {
   slides?: LessonSlide[]; // Danh sách các trang bài giảng nhiều slide
   order: number;
   isHidden?: boolean; // Trạng thái ẩn đối với học sinh
+  shuffleExercises?: boolean; // Xáo trộn ngẫu nhiên thứ tự câu hỏi khi phát cho học sinh (Mặc định: false - giữ nguyên thứ tự thiết kế)
 }
 
 export interface Topic {

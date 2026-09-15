@@ -25,6 +25,7 @@ import {
   Eye,
   EyeOff,
   GripVertical,
+  Shuffle,
   X
 } from 'lucide-react';
 import { 
@@ -836,6 +837,11 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                                 <EyeOff className="w-2.5 h-2.5" /> Ẩn với HS
                               </span>
                             )}
+                            {lesson.shuffleExercises && (
+                              <span className="text-[9px] px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-400 font-bold inline-flex items-center gap-0.5 mb-0.5" title="Xáo trộn ngẫu nhiên câu hỏi khi phát cho học sinh">
+                                <Shuffle className="w-2.5 h-2.5" /> Xáo trộn
+                              </span>
+                            )}
                           </div>
                           <span className={`text-xs block truncate ${lesson.isHidden ? 'opacity-65' : ''}`}>
                             <span className="text-[10px] text-neutral-400 mr-1 font-mono">#{lessonIdx + 1}</span>
@@ -930,6 +936,25 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
 
                 {activeLesson && (
                   <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                    <button
+                      id="btn-manager-toggle-shuffle"
+                      type="button"
+                      onClick={() => onUpdateLesson({ ...activeLesson, shuffleExercises: !activeLesson.shuffleExercises })}
+                      className={`px-2.5 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+                        activeLesson.shuffleExercises
+                          ? 'border-indigo-500/60 bg-indigo-500/15 text-indigo-400 font-bold shadow-xs'
+                          : `border-inherit ${theme.badgeBg} text-neutral-400 hover:text-indigo-400`
+                      }`}
+                      title={activeLesson.shuffleExercises 
+                        ? 'Đang bật xáo trộn ngẫu nhiên thứ tự câu hỏi khi phát cho học sinh (Bấm để chuyển về giữ nguyên thứ tự thiết kế)' 
+                        : 'Đang giữ nguyên thứ tự câu hỏi như thiết kế (Bấm để bật xáo trộn ngẫu nhiên khi phát cho học sinh)'}
+                    >
+                      <Shuffle className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">
+                        {activeLesson.shuffleExercises ? 'Xáo trộn: BẬT' : 'Xáo trộn: TẮT'}
+                      </span>
+                    </button>
+
                     <button
                       id="btn-manager-view-lecture"
                       type="button"

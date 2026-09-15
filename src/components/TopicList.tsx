@@ -21,7 +21,8 @@ import {
   EyeOff,
   ArrowLeft,
   Folder,
-  FolderOpen
+  FolderOpen,
+  Shuffle
 } from 'lucide-react';
 import { Topic, Lesson, Exercise, SkillCategory, User, Classroom } from '../types';
 import { useTheme } from '../context/ThemeContext';
@@ -554,6 +555,12 @@ export const TopicList: React.FC<TopicListProps> = ({
                               <span>Ẩn với HS</span>
                             </span>
                           )}
+                          {lesson.shuffleExercises && (
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-400 border border-indigo-500/30 flex items-center gap-1" title="Câu hỏi được xáo trộn ngẫu nhiên khi phát cho học sinh">
+                              <Shuffle className="w-3 h-3" />
+                              <span>Xáo trộn</span>
+                            </span>
+                          )}
                         </div>
                         <span className={`text-[11px] ${theme.textMuted} block`}>
                           {lessonExercises.length} câu hỏi luyện tập
@@ -594,6 +601,22 @@ export const TopicList: React.FC<TopicListProps> = ({
                             title={lesson.isHidden ? 'Bài học đang ẩn với học sinh - Bấm để hiển thị' : 'Bài học đang hiển thị - Bấm để ẩn'}
                           >
                             {lesson.isHidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          </button>
+
+                          <button
+                            id={`btn-toggle-shuffle-lesson-${lesson.id}`}
+                            type="button"
+                            onClick={() => onSaveLesson?.({ ...lesson, shuffleExercises: !lesson.shuffleExercises })}
+                            className={`p-1.5 rounded-lg border transition-colors cursor-pointer shrink-0 ${
+                              lesson.shuffleExercises 
+                                ? 'border-indigo-500/60 bg-indigo-500/15 text-indigo-400 font-bold' 
+                                : `${theme.border} hover:border-indigo-400 text-neutral-400 hover:text-indigo-400`
+                            }`}
+                            title={lesson.shuffleExercises 
+                              ? 'Đang bật xáo trộn ngẫu nhiên câu hỏi khi học sinh làm bài - Bấm để chuyển về giữ nguyên thứ tự thiết kế' 
+                              : 'Đang phát theo đúng thứ tự câu hỏi như thiết kế - Bấm để bật xáo trộn ngẫu nhiên cho học sinh'}
+                          >
+                            <Shuffle className="w-3.5 h-3.5" />
                           </button>
 
                           <button
