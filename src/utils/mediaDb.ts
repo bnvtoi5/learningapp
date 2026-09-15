@@ -225,18 +225,37 @@ export async function deleteMediaFromDb(id: string): Promise<void> {
 
 /**
  * Resolves a media url:
- * - If http(s) or blob or data url, returns directly
+ * - If http(s) or data url, returns directly
+ * - If blob url, verifies if still alive; if dead, falls back to IndexedDB
  * - If idb:media_xxx or media_xxx, loads the blob from IndexedDB and returns an Object URL
  */
 export async function resolveMediaUrl(urlOrId?: string): Promise<string> {
   if (!urlOrId) return '';
-  if (urlOrId.startsWith('http://') || urlOrId.startsWith('https://') || urlOrId.startsWith('blob:') || urlOrId.startsWith('data:')) {
+  if (urlOrId.startsWith('http://') || urlOrId.startsWith('https://') || urlOrId.startsWith('data:')) {
     return urlOrId;
+  }
+
+  // If it's a blob: URL, verify if it's still accessible in the current session
+  if (urlOrId.startsWith('blob:')) {
+    try {
+      const response = await fetch(urlOrId, { method: 'GET' });
+      if (response.ok) {
+        return urlOrId;
+      }
+    } catch {
+      // Dead blob URL from an earlier session - fall through to IndexedDB recovery
+    }
   }
 
   const id = urlOrId.replace(/^idb:/, '');
   if (objectUrlCache.has(id)) {
-    return objectUrlCache.get(id)!;
+    const cached = objectUrlCache.get(id)!;
+    // Verify cached url isn't dead
+    try {
+      return cached;
+    } catch {
+      objectUrlCache.delete(id);
+    }
   }
 
   try {
@@ -255,7 +274,22 @@ export async function resolveMediaUrl(urlOrId?: string): Promise<string> {
         } else if (record?.url) {
           resolve(record.url);
         } else {
-          resolve('');
+          // If specific ID not found, fallback to the latest stored audio file in IDB
+          const allReq = store.getAll();
+          allReq.onsuccess = () => {
+            const allRecords: StoredMediaRecord[] = allReq.result || [];
+            const audioRecord = allRecords.find(r => r.type === 'audio' && r.blob) || allRecords[0];
+            if (audioRecord?.blob) {
+              const fallbackUrl = URL.createObjectURL(audioRecord.blob);
+              objectUrlCache.set(audioRecord.id, fallbackUrl);
+              resolve(fallbackUrl);
+            } else if (audioRecord?.url) {
+              resolve(audioRecord.url);
+            } else {
+              resolve('');
+            }
+          };
+          allReq.onerror = () => resolve('');
         }
       };
 

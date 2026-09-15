@@ -19,7 +19,11 @@ import {
   Zap,
   RotateCcw,
   School,
-  AlertCircle
+  AlertCircle,
+  Eye,
+  EyeOff,
+  ListPlus,
+  CheckSquare
 } from 'lucide-react';
 import { 
   Topic, 
@@ -30,7 +34,9 @@ import {
   DifficultyLevel,
   MatchingPair,
   Classroom,
-  MediaAsset
+  MediaAsset,
+  SubQuestion,
+  SubQuestionType
 } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import { loadClassrooms } from '../utils/storage';
@@ -162,12 +168,47 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
 
   // Audio / Listening
   const [audioUrl, setAudioUrl] = useState('');
+  const [audioTitle, setAudioTitle] = useState('');
   const [audioText, setAudioText] = useState('');
   const [predictionHint, setPredictionHint] = useState('');
   const [transcript, setTranscript] = useState('');
   const [readingQuestionType, setReadingQuestionType] = useState('Main Idea');
   const [evidenceRegion, setEvidenceRegion] = useState('');
   const [isMediaModalOpen, setIsMediaModalOpen] = useState(false);
+
+  // Exercise Visibility & Extended Comprehension
+  const [exIsHidden, setExIsHidden] = useState(false);
+  const [topicIsHidden, setTopicIsHidden] = useState(false);
+  const [lessonIsHidden, setLessonIsHidden] = useState(false);
+  const [comprehensionMode, setComprehensionMode] = useState<'multiple_sub' | 'passage_cloze'>('multiple_sub');
+  const [passageClozeText, setPassageClozeText] = useState('');
+  const [subQuestions, setSubQuestions] = useState<SubQuestion[]>([]);
+
+  const handleAddSubQuestion = (type: SubQuestionType = 'multiple_choice') => {
+    const newSub: SubQuestion = {
+      id: 'sub_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      type,
+      prompt: '',
+      options: type === 'multiple_choice' ? ['', '', '', ''] : undefined,
+      correctOptionIdx: 0,
+      correctTrueFalse: true,
+      correctText: '',
+      explanation: '',
+    };
+    setSubQuestions(prev => [...prev, newSub]);
+  };
+
+  const handleRemoveSubQuestion = (index: number) => {
+    setSubQuestions(prev => prev.filter((_, idx) => idx !== index));
+  };
+
+  const handleUpdateSubQuestion = (index: number, updates: Partial<SubQuestion>) => {
+    setSubQuestions(prev => {
+      const next = [...prev];
+      next[index] = { ...next[index], ...updates };
+      return next;
+    });
+  };
 
   const handleAddMatchingPair = () => {
     setMatchingPairs(prev => [
@@ -209,6 +250,23 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
     setExContext(''); // ALWAYS reset context so it never leaks between types
     if (newType === 'vocab_cloze' || newType === 'flashcard_recall' || newType === 'listen_spell' || newType === 'anagram') {
       setExSkill('vocabulary');
+    }
+    if (newType === 'reading' || newType === 'listening') {
+      setExSkill(newType);
+      setComprehensionMode('multiple_sub');
+      setSubQuestions(prev => {
+        if (prev.length > 0) return prev;
+        return [{
+          id: 'sub_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+          type: 'multiple_choice',
+          prompt: '',
+          options: ['', '', '', ''],
+          correctOptionIdx: 0,
+          correctTrueFalse: true,
+          correctText: '',
+          explanation: '',
+        }];
+      });
     }
   };
 
@@ -328,8 +386,15 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
         setExQuestion('');
         setReadingQuestionType('Main Idea');
         setEvidenceRegion('');
-        setOptions(['', '', '', '']);
-        setCorrectOptionIdx(0);
+        setComprehensionMode('multiple_sub');
+        setSubQuestions([{
+          id: 'sub_' + Date.now(),
+          type: 'multiple_choice',
+          prompt: '',
+          options: ['', '', '', ''],
+          correctOptionIdx: 0,
+          explanation: ''
+        }]);
         setExExplanation('');
         break;
 
@@ -337,11 +402,19 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
         setExSkill('listening');
         setExQuestion('');
         setAudioUrl('');
+        setAudioTitle('');
         setAudioText('');
         setTranscript('');
         setPredictionHint('');
-        setOptions(['', '', '', '']);
-        setCorrectOptionIdx(0);
+        setComprehensionMode('multiple_sub');
+        setSubQuestions([{
+          id: 'sub_' + Date.now(),
+          type: 'multiple_choice',
+          prompt: '',
+          options: ['', '', '', ''],
+          correctOptionIdx: 0,
+          explanation: ''
+        }]);
         setExExplanation('');
         break;
     }
@@ -361,7 +434,7 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
       type: exType,
       skill: exSkill,
       difficulty: exDifficulty,
-      question: exQuestion.trim() || (vocabMeaning ? `Nghĩa: ${vocabMeaning}` : 'Câu hỏi:'),
+      question: exQuestion.trim() || (comprehensionMode === 'passage_cloze' ? 'Nghe/Đọc và điền từ thích hợp vào chỗ trống' : (vocabMeaning ? `Nghĩa: ${vocabMeaning}` : 'Câu hỏi:')),
       instruction: exInstruction.trim() || undefined,
       // Strictly ONLY attach context if it is reading or speaking
       context: (exType === 'reading' || exType === 'speaking') && exContext.trim() ? exContext.trim() : undefined,
@@ -372,9 +445,17 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
       vocabMeaning: vocabMeaning.trim() || undefined,
       phonetic: phonetic.trim() || undefined,
       clozeLetters: clozeLetters.trim() || undefined,
+      isHidden: exIsHidden,
     };
 
-    if (exType === 'multiple_choice' || exType === 'collocation' || exType === 'image_identify' || exType === 'reading') {
+    // Extended reading / listening: Multiple sub-questions or cloze passage
+    if ((exType === 'reading' || exType === 'listening') && comprehensionMode === 'multiple_sub') {
+      newExercise.subQuestions = subQuestions.filter(q => q.prompt.trim().length > 0);
+    } else if ((exType === 'reading' || exType === 'listening') && comprehensionMode === 'passage_cloze') {
+      newExercise.passageClozeText = passageClozeText.trim();
+    }
+
+    if (exType === 'multiple_choice' || exType === 'collocation' || exType === 'image_identify') {
       newExercise.options = options.filter(o => o.trim().length > 0);
       newExercise.correctOptions = [correctOptionIdx];
     } else if (exType === 'true_false') {
@@ -388,11 +469,10 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
       newExercise.scrambledWords = (exCorrectText.trim() || vocabWord.trim()).split(/\s+/);
     } else if (exType === 'listening') {
       newExercise.audioUrl = audioUrl.trim() || undefined;
+      newExercise.audioTitle = audioTitle.trim() || undefined;
       newExercise.audioText = audioText.trim() || undefined;
       newExercise.audioPredictionHint = predictionHint.trim() || undefined;
       newExercise.transcript = transcript.trim() || undefined;
-      newExercise.options = options.filter(o => o.trim().length > 0);
-      newExercise.correctOptions = [correctOptionIdx];
     }
 
     onSaveExercise(newExercise);
@@ -400,9 +480,13 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
     // Clear question for next
     setExQuestion('');
     setAudioUrl('');
+    setAudioTitle('');
     setAudioText('');
     setTranscript('');
     setPredictionHint('');
+    setPassageClozeText('');
+    setSubQuestions([]);
+    setComprehensionMode('single');
     setOptions(['', '', '', '']);
     setCorrectOptionIdx(0);
     setVocabWord('');
@@ -432,6 +516,7 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
       description: topicDesc.trim(),
       subject: topicSubject.trim() || 'Tiếng Anh',
       primarySkill: topicSkill,
+      isHidden: topicIsHidden,
       createdAt: Date.now(),
     };
 
@@ -439,6 +524,7 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
     setTargetTopicId(newTopic.id);
     setTopicTitle('');
     setTopicDesc('');
+    setTopicIsHidden(false);
     setStatusBanner({
       type: 'success',
       text: `Đã tạo chủ đề "${newTopic.title}" thành công! Bây giờ bạn có thể tiếp tục tạo bài học đầu tiên.`
@@ -458,6 +544,7 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
       description: lessonDesc.trim(),
       knowledgeSummary: lessonKnowledge.trim() || undefined,
       order: lessons.filter(l => l.topicId === targetTopicId).length + 1,
+      isHidden: lessonIsHidden,
     };
 
     onSaveLesson(newLesson);
@@ -465,6 +552,7 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
     setLessonTitle('');
     setLessonDesc('');
     setLessonKnowledge('');
+    setLessonIsHidden(false);
     setStatusBanner({
       type: 'success',
       text: `Đã tạo bài học "${newLesson.title}" thành công! Bây giờ bạn có thể thêm câu hỏi vào bài này.`
@@ -670,6 +758,21 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
             </div>
           </div>
 
+          {/* Exercise Visibility Toggle */}
+          <div className="flex items-center gap-2 p-3 rounded-xl border border-dashed border-inherit bg-inherit">
+            <input
+              id="checkbox-hide-exercise"
+              type="checkbox"
+              checked={exIsHidden}
+              onChange={e => setExIsHidden(e.target.checked)}
+              className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+            />
+            <label htmlFor="checkbox-hide-exercise" className="text-xs font-medium cursor-pointer select-none flex items-center gap-1.5">
+              {exIsHidden ? <EyeOff className="w-3.5 h-3.5 text-amber-500" /> : <Eye className="w-3.5 h-3.5 text-emerald-500" />}
+              <span>Ẩn câu hỏi này đối với học sinh (chỉ giáo viên thấy)</span>
+            </label>
+          </div>
+
           {/* Active Recall / Vocab Section */}
           {(exType === 'vocab_cloze' || exType === 'flashcard_recall' || exType === 'listen_spell' || exType === 'anagram') && (
             <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5 space-y-3">
@@ -774,47 +877,13 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
             </div>
           )}
 
-          {/* Options for Multiple Choice / Collocation / Reading / Listening */}
-          {(exType === 'multiple_choice' || exType === 'collocation' || exType === 'reading' || exType === 'image_identify' || exType === 'listening') && (
-            <div className="space-y-2">
-              <label className={`text-xs font-semibold ${theme.textMuted} block`}>
-                Các phương án lựa chọn (A, B, C, D) & Đánh dấu đáp án đúng *:
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {options.map((opt, idx) => (
-                  <div key={idx} className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      name="correct-opt-choice"
-                      checked={correctOptionIdx === idx}
-                      onChange={() => setCorrectOptionIdx(idx)}
-                      className="text-emerald-500"
-                    />
-                    <span className="text-xs font-bold w-4">{String.fromCharCode(65 + idx)}.</span>
-                    <input
-                      type="text"
-                      value={opt}
-                      onChange={e => {
-                        const next = [...options];
-                        next[idx] = e.target.value;
-                        setOptions(next);
-                      }}
-                      placeholder={`Lựa chọn ${String.fromCharCode(65 + idx)}`}
-                      className={`flex-1 p-2 rounded-xl ${theme.inputBg} text-xs`}
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* Listening Audio Configuration */}
           {exType === 'listening' && (
             <div className="p-4 rounded-xl border border-sky-500/30 bg-sky-500/5 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-sky-400 flex items-center gap-1.5">
                   <Volume2 className="w-4 h-4" />
-                  <span>Cài đặt âm thanh bài nghe (TOEIC Listening)</span>
+                  <span>Cài đặt âm thanh bài nghe</span>
                 </span>
                 <button
                   type="button"
@@ -824,6 +893,19 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
                   <Volume2 className="w-3.5 h-3.5" />
                   <span>Kho Media / Tải lên MP3</span>
                 </button>
+              </div>
+
+              <div>
+                <label className={`text-xs font-semibold ${theme.textMuted} block mb-1`}>
+                  Tên hiển thị bài nghe (Tùy chỉnh tiêu đề khung phát):
+                </label>
+                <input
+                  type="text"
+                  value={audioTitle}
+                  onChange={e => setAudioTitle(e.target.value)}
+                  placeholder="VD: Hội thoại bài nghe Unit 2, Conversation at the airport..."
+                  className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-xs`}
+                />
               </div>
 
               <div>
@@ -888,6 +970,324 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
                     className={`w-full p-2 rounded-xl ${theme.inputBg} text-xs`}
                   />
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Comprehension Mode Selector for Reading & Listening */}
+          {(exType === 'reading' || exType === 'listening') && (
+            <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-500/5 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-bold text-emerald-400 block">
+                    Thiết lập Đề bài & Phương án trả lời ({exType === 'listening' ? 'Bài Nghe' : 'Đọc Hiểu'}):
+                  </span>
+                  <span className={`text-[11px] ${theme.textMuted}`}>
+                    Hỗ trợ thiết kế nhiều câu hỏi con (hoặc 1 câu trắc nghiệm đơn/đúng sai/điền từ), hoặc nghe/đọc điền từ khuyết
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setComprehensionMode('multiple_sub');
+                    if (subQuestions.length === 0) {
+                      handleAddSubQuestion('multiple_choice');
+                    }
+                  }}
+                  className={`p-2.5 rounded-xl border text-left text-xs transition-all cursor-pointer ${
+                    comprehensionMode === 'multiple_sub'
+                      ? 'border-emerald-500 bg-emerald-500/20 text-emerald-300 font-bold'
+                      : `${theme.card} ${theme.border} hover:border-emerald-500/50`
+                  }`}
+                >
+                  <div className="font-semibold">Nhiều câu hỏi con (hoặc 1 câu đơn)</div>
+                  <div className={`text-[10px] ${theme.textMuted} font-normal mt-0.5`}>Trắc nghiệm, Đúng/Sai, Điền từ, Info Gap</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setComprehensionMode('passage_cloze')}
+                  className={`p-2.5 rounded-xl border text-left text-xs transition-all cursor-pointer ${
+                    comprehensionMode === 'passage_cloze'
+                      ? 'border-emerald-500 bg-emerald-500/20 text-emerald-300 font-bold'
+                      : `${theme.card} ${theme.border} hover:border-emerald-500/50`
+                  }`}
+                >
+                  <div className="font-semibold">Nghe/Đọc điền từ khuyết</div>
+                  <div className={`text-[10px] ${theme.textMuted} font-normal mt-0.5`}>Điền khuyết trực tiếp vào đoạn văn [...]</div>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* MODE 1: Standard Multiple Choice Options */}
+          {(exType === 'multiple_choice' || exType === 'collocation' || exType === 'image_identify') && (
+            <div className="space-y-2">
+              <label className={`text-xs font-semibold ${theme.textMuted} block`}>
+                Các phương án lựa chọn (A, B, C, D) & Đánh dấu đáp án đúng *:
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {options.map((opt, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="correct-opt-choice"
+                      checked={correctOptionIdx === idx}
+                      onChange={() => setCorrectOptionIdx(idx)}
+                      className="text-emerald-500"
+                    />
+                    <span className="text-xs font-bold w-4">{String.fromCharCode(65 + idx)}.</span>
+                    <input
+                      type="text"
+                      value={opt}
+                      onChange={e => {
+                        const next = [...options];
+                        next[idx] = e.target.value;
+                        setOptions(next);
+                      }}
+                      placeholder={`Lựa chọn ${String.fromCharCode(65 + idx)}`}
+                      className={`flex-1 p-2 rounded-xl ${theme.inputBg} text-xs`}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* MODE 2: Multiple Sub-questions (Multiple choice, True/False, Fill blank, Information Gap) */}
+          {(exType === 'reading' || exType === 'listening') && comprehensionMode === 'multiple_sub' && (
+            <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <span className="text-xs font-bold text-emerald-400 block">
+                    Danh sách các câu hỏi con ({subQuestions.length} câu):
+                  </span>
+                  <span className={`text-[10px] ${theme.textMuted}`}>
+                    Hỗ trợ các loại: Trắc nghiệm (Multiple Choice), Đúng/Sai (True/False), Điền từ (Fill-in), và Information Gap
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleAddSubQuestion('multiple_choice')}
+                    className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer shadow-xs"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>+ Trắc nghiệm</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleAddSubQuestion('true_false')}
+                    className="px-2 py-1 rounded-lg bg-teal-600 hover:bg-teal-500 text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer shadow-xs"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>+ Đúng / Sai</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleAddSubQuestion('fill_blank')}
+                    className="px-2 py-1 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer shadow-xs"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>+ Điền từ</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleAddSubQuestion('info_gap')}
+                    className="px-2 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer shadow-xs"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>+ Info Gap</span>
+                  </button>
+                </div>
+              </div>
+
+              {subQuestions.length === 0 ? (
+                <div className="p-4 rounded-xl border border-dashed border-inherit text-center text-xs text-neutral-400">
+                  Chưa có câu hỏi con nào. Nhấn các nút trên để thêm câu hỏi trắc nghiệm, đúng/sai, điền khuyết hoặc information gap.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {subQuestions.map((subQ, idx) => (
+                    <div key={subQ.id || idx} className={`p-3.5 rounded-xl border ${theme.border} ${theme.card} space-y-3 shadow-xs`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 font-bold text-xs flex items-center justify-center">
+                            {idx + 1}
+                          </span>
+                          <select
+                            value={subQ.type}
+                            onChange={e => {
+                              const newType = e.target.value as SubQuestionType;
+                              handleUpdateSubQuestion(idx, {
+                                type: newType,
+                                options: newType === 'multiple_choice' ? (subQ.options?.length ? subQ.options : ['', '', '', '']) : undefined,
+                                correctTrueFalse: newType === 'true_false' ? true : undefined,
+                              });
+                            }}
+                            className={`p-1.5 rounded-lg ${theme.inputBg} text-xs font-semibold border ${theme.border}`}
+                          >
+                            <option value="multiple_choice">Trắc nghiệm (Multiple Choice)</option>
+                            <option value="true_false">Đúng / Sai (True / False)</option>
+                            <option value="fill_blank">Điền khuyết (Fill in the blank)</option>
+                            <option value="info_gap">Information Gap / Completion</option>
+                          </select>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveSubQuestion(idx)}
+                          className="p-1 rounded-lg text-rose-400 hover:bg-rose-500/10 cursor-pointer"
+                          title="Xóa câu hỏi con này"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      {/* Prompt */}
+                      <div>
+                        <input
+                          type="text"
+                          value={subQ.prompt}
+                          onChange={e => handleUpdateSubQuestion(idx, { prompt: e.target.value })}
+                          placeholder={
+                            subQ.type === 'info_gap'
+                              ? 'VD: The species mentioned in the talk are: ...'
+                              : subQ.type === 'true_false'
+                              ? 'VD: The speaker agrees with the proposed budget plan.'
+                              : `Nội dung câu hỏi con #${idx + 1}...`
+                          }
+                          className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-xs font-medium border ${theme.border}`}
+                        />
+                      </div>
+
+                      {/* Type-specific inputs */}
+                      {subQ.type === 'multiple_choice' && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                          {(subQ.options || ['', '', '', '']).map((opt, oIdx) => (
+                            <div key={oIdx} className="flex items-center gap-1.5">
+                              <input
+                                type="radio"
+                                name={`subq_correct_${idx}`}
+                                checked={subQ.correctOptionIdx === oIdx}
+                                onChange={() => handleUpdateSubQuestion(idx, { correctOptionIdx: oIdx })}
+                                className="text-emerald-500"
+                              />
+                              <span className="text-xs font-bold w-4 text-neutral-400">{String.fromCharCode(65 + oIdx)}.</span>
+                              <input
+                                type="text"
+                                value={opt}
+                                onChange={e => {
+                                  const opts = [...(subQ.options || ['', '', '', ''])];
+                                  opts[oIdx] = e.target.value;
+                                  handleUpdateSubQuestion(idx, { options: opts });
+                                }}
+                                placeholder={`Lựa chọn ${String.fromCharCode(65 + oIdx)}`}
+                                className={`flex-1 p-1.5 rounded-lg ${theme.inputBg} text-xs`}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {subQ.type === 'true_false' && (
+                        <div className="flex items-center gap-3 pt-1">
+                          <span className={`text-xs ${theme.textMuted}`}>Đáp án chuẩn:</span>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateSubQuestion(idx, { correctTrueFalse: true })}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer border ${
+                              subQ.correctTrueFalse === true
+                                ? 'bg-emerald-600 text-white border-emerald-500'
+                                : `${theme.inputBg} ${theme.border} text-neutral-400`
+                            }`}
+                          >
+                            Đúng (True)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateSubQuestion(idx, { correctTrueFalse: false })}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer border ${
+                              subQ.correctTrueFalse === false
+                                ? 'bg-rose-600 text-white border-rose-500'
+                                : `${theme.inputBg} ${theme.border} text-neutral-400`
+                            }`}
+                          >
+                            Sai (False)
+                          </button>
+                        </div>
+                      )}
+
+                      {(subQ.type === 'fill_blank' || subQ.type === 'info_gap') && (
+                        <div className="space-y-1.5 pt-1">
+                          <label className={`text-[11px] font-semibold ${theme.textMuted} block`}>
+                            {subQ.type === 'info_gap'
+                              ? 'Từ hoặc cụm thông tin cần tìm trong bài để điền (Hỗ trợ nhiều đáp án phân tách bằng dấu / hoặc |):'
+                              : 'Đáp án chính xác cần điền (Hỗ trợ nhiều đáp án phân tách bằng dấu / hoặc |):'}
+                          </label>
+                          <input
+                            type="text"
+                            value={subQ.correctText || ''}
+                            onChange={e => handleUpdateSubQuestion(idx, { correctText: e.target.value })}
+                            placeholder="VD: whales / dolphins hoặc 15 minutes"
+                            className={`w-full p-2 rounded-lg ${theme.inputBg} text-xs font-semibold border ${theme.border}`}
+                          />
+                        </div>
+                      )}
+
+                      {/* Explanation */}
+                      <div>
+                        <input
+                          type="text"
+                          value={subQ.explanation || ''}
+                          onChange={e => handleUpdateSubQuestion(idx, { explanation: e.target.value })}
+                          placeholder="Giải thích ngắn gọn cho câu này (tùy chọn)..."
+                          className={`w-full p-1.5 rounded-lg ${theme.inputBg} text-[11px] text-neutral-400`}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* MODE 3: Passage Cloze / Dictation */}
+          {(exType === 'reading' || exType === 'listening') && comprehensionMode === 'passage_cloze' && (
+            <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-bold text-emerald-400 block">
+                    Đoạn văn luyện nghe/đọc điền từ khuyết (Passage Cloze / Dictation):
+                  </span>
+                  <span className={`text-[11px] ${theme.textMuted}`}>
+                    Đặt từ cần điền trong ngoặc vuông <strong>[từ_khuyết]</strong>. Học sinh sẽ thấy ô trống để điền.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPassageClozeText(prev => prev ? `${prev} [từ_khuyết]` : 'The species mentioned in the talk are [whales] and [dolphins].');
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer shadow-xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Chèn mẫu [từ]</span>
+                </button>
+              </div>
+
+              <textarea
+                rows={5}
+                value={passageClozeText}
+                onChange={e => setPassageClozeText(e.target.value)}
+                placeholder="Ví dụ: The species mentioned in the talk are [whales] and [dolphins]. They migrate over [5000] kilometers every year."
+                className={`w-full p-3 rounded-xl ${theme.inputBg} text-xs font-mono border ${theme.border} leading-relaxed`}
+              />
+
+              <div className="p-2.5 rounded-xl bg-sky-500/10 border border-sky-500/20 text-[11px] text-sky-400">
+                💡 <strong>Hướng dẫn:</strong> Mỗi từ trong cặp ngoặc vuông <code>[...]</code> sẽ tự động biến thành 1 ô nhập dữ liệu cho học sinh khi làm bài. Ví dụ: "The company was founded in [1998] by [two brothers]."
               </div>
             </div>
           )}
@@ -1096,6 +1496,21 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
             />
           </div>
 
+          {/* Lesson Visibility Toggle */}
+          <div className="flex items-center gap-2 p-3 rounded-xl border border-dashed border-inherit bg-inherit">
+            <input
+              id="checkbox-hide-lesson"
+              type="checkbox"
+              checked={lessonIsHidden}
+              onChange={e => setLessonIsHidden(e.target.checked)}
+              className="w-4 h-4 rounded text-sky-600 focus:ring-sky-500 cursor-pointer"
+            />
+            <label htmlFor="checkbox-hide-lesson" className="text-xs font-medium cursor-pointer select-none flex items-center gap-1.5">
+              {lessonIsHidden ? <EyeOff className="w-3.5 h-3.5 text-amber-500" /> : <Eye className="w-3.5 h-3.5 text-sky-500" />}
+              <span>Ẩn bài học này đối với học sinh (chỉ giáo viên thấy)</span>
+            </label>
+          </div>
+
           <div className="pt-2">
             <button
               type="submit"
@@ -1244,6 +1659,21 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
             />
           </div>
 
+          {/* Topic Visibility Toggle */}
+          <div className="flex items-center gap-2 p-3 rounded-xl border border-dashed border-inherit bg-inherit">
+            <input
+              id="checkbox-hide-topic"
+              type="checkbox"
+              checked={topicIsHidden}
+              onChange={e => setTopicIsHidden(e.target.checked)}
+              className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+            />
+            <label htmlFor="checkbox-hide-topic" className="text-xs font-medium cursor-pointer select-none flex items-center gap-1.5">
+              {topicIsHidden ? <EyeOff className="w-3.5 h-3.5 text-amber-500" /> : <Eye className="w-3.5 h-3.5 text-emerald-500" />}
+              <span>Ẩn chủ đề này đối với học sinh (chỉ giáo viên thấy)</span>
+            </label>
+          </div>
+
           <div className="pt-2">
             <button
               type="submit"
@@ -1309,10 +1739,11 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
         onClose={() => setIsMediaModalOpen(false)}
         onSelectAsset={(asset: MediaAsset) => {
           if (asset.type === 'audio') {
-            if (asset.url) {
-              setAudioUrl(asset.url);
-            } else if (asset.name) {
-              setAudioText(asset.name);
+            // Use durable idb: identifier so audio survives page reloads
+            const storageId = `idb:${asset.id}`;
+            setAudioUrl(storageId);
+            if (asset.name && !audioTitle) {
+              setAudioTitle(asset.name.replace(/\.[^/.]+$/, ''));
             }
           }
           setIsMediaModalOpen(false);

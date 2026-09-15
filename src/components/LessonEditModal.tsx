@@ -28,6 +28,7 @@ export const LessonEditModal: React.FC<LessonEditModalProps> = ({
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [knowledgeSummary, setKnowledgeSummary] = useState('');
+  const [isHidden, setIsHidden] = useState<boolean>(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -35,10 +36,12 @@ export const LessonEditModal: React.FC<LessonEditModalProps> = ({
       setTitle(lesson.title);
       setDescription(lesson.description || '');
       setKnowledgeSummary(lesson.knowledgeSummary || '');
+      setIsHidden(!!lesson.isHidden);
     } else {
       setTitle('');
       setDescription('');
       setKnowledgeSummary('');
+      setIsHidden(false);
     }
   }, [lesson, isOpen, isCreate]);
 
@@ -49,12 +52,15 @@ export const LessonEditModal: React.FC<LessonEditModalProps> = ({
     if (!title.trim()) return;
 
     onSave({
+      ...(lesson && !isCreate ? lesson : {}),
       id: lesson && !isCreate ? lesson.id : ('lesson_' + Date.now()),
       topicId: lesson && !isCreate ? lesson.topicId : (targetTopicId || ''),
       title: title.trim(),
       description: description.trim(),
       knowledgeSummary: knowledgeSummary.trim() || undefined,
       order: lesson && !isCreate ? lesson.order : (existingLessonsCount + 1),
+      slides: lesson && !isCreate ? lesson.slides : undefined,
+      isHidden,
     });
     onClose();
   };
@@ -112,6 +118,27 @@ export const LessonEditModal: React.FC<LessonEditModalProps> = ({
               placeholder="Quy tắc ngữ pháp hoặc ghi chú trọng tâm..."
               className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-xs`}
             />
+          </div>
+
+          {/* Visibility Setting: Hide from students */}
+          <div className={`p-3 rounded-xl border ${isHidden ? 'border-amber-500/30 bg-amber-500/5' : 'border-neutral-500/20 bg-neutral-500/5'} flex items-center justify-between`}>
+            <div>
+              <span className="text-xs font-semibold block">
+                {isHidden ? 'Đang ẩn bài học với học sinh' : 'Hiển thị bài học với học sinh'}
+              </span>
+              <span className={`text-[11px] ${theme.textMuted}`}>
+                {isHidden ? 'Chỉ giáo viên thấy bài học này, học sinh sẽ không thấy' : 'Học sinh trong lớp có thể nhìn thấy bài học này'}
+              </span>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isHidden}
+                onChange={e => setIsHidden(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-neutral-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
+            </label>
           </div>
 
           <div className="pt-2 flex justify-end gap-2">

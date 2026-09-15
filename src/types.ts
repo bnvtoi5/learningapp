@@ -47,6 +47,19 @@ export interface WritingRequirement {
   met?: boolean;
 }
 
+export type SubQuestionType = 'multiple_choice' | 'true_false' | 'fill_blank' | 'info_gap';
+
+export interface SubQuestion {
+  id: string;
+  type: SubQuestionType;
+  prompt: string; // Đề bài / Câu hỏi con (VD: "The species mentioned in paragraph 1:" hoặc "What is the primary factor...?")
+  options?: string[]; // Cho multiple_choice
+  correctOptionIdx?: number; // Cho multiple_choice (0, 1, 2, 3)
+  correctTrueFalse?: boolean; // Cho true_false (true = Đúng, false = Sai)
+  correctText?: string; // Cho fill_blank & info_gap (hỗ trợ nhiều đáp án phân tách bởi | hoặc /)
+  explanation?: string;
+}
+
 export interface Exercise {
   id: string;
   lessonId: string;
@@ -56,10 +69,16 @@ export interface Exercise {
   question: string; // Nội dung câu hỏi / đề bài
   instruction?: string; // Hướng dẫn làm bài
   context?: string; // Đoạn văn bài đọc (CHỈ dùng cho bài Reading hoặc kịch bản hội thoại)
-  audioUrl?: string; // URL hoặc data:audio của file âm thanh đính kèm
+  audioUrl?: string; // URL hoặc data:audio hoặc idb:xxx của file âm thanh đính kèm
+  audioTitle?: string; // Tên hiển thị tùy chỉnh của audio track bài nghe
   audioText?: string; // Đoạn văn bản cho bài nghe (dùng TTS đọc)
   audioPredictionHint?: string; // Gợi ý dự đoán trước khi nghe
   transcript?: string; // Transcript sau khi nghe
+  isHidden?: boolean; // Trạng thái ẩn đối với học sinh
+
+  // Luyện nghe / Đọc hiểu mở rộng:
+  subQuestions?: SubQuestion[]; // Nhiều câu hỏi con cho Reading & Listening
+  passageClozeText?: string; // Đoạn văn bản nghe điền từ khuyết thiếu (cú pháp [từ_khuyết])
 
   // Active Recall & Từ vựng:
   vocabWord?: string; // Từ vựng mục tiêu (VD: friendly)
@@ -82,6 +101,7 @@ export interface Exercise {
   modelSample?: string; // Bài mẫu tham khảo
   readingQuestionType?: string; // Main idea, Detail, Inference, Reason,...
   evidenceRegion?: string; // Vùng thông tin trong bài đọc giải thích câu trả lời
+  order?: number; // Thứ tự hiển thị trong bài học
 }
 
 export interface LessonPhase {
@@ -122,6 +142,7 @@ export interface Lesson {
   examples?: { original: string; meaning: string; note?: string }[];
   slides?: LessonSlide[]; // Danh sách các trang bài giảng nhiều slide
   order: number;
+  isHidden?: boolean; // Trạng thái ẩn đối với học sinh
 }
 
 export interface Topic {
@@ -132,6 +153,8 @@ export interface Topic {
   subject: string; // Môn học: Tiếng Anh, Toán, Ngữ Văn,...
   primarySkill: SkillCategory;
   createdAt: number;
+  order?: number; // Thứ tự hiển thị của Chủ đề / Unit
+  isHidden?: boolean; // Trạng thái ẩn đối với học sinh
 }
 
 export interface ErrorLog {

@@ -16,7 +16,12 @@ import {
   Flame,
   Lock,
   School,
-  FileText
+  FileText,
+  Eye,
+  EyeOff,
+  ArrowLeft,
+  Folder,
+  FolderOpen
 } from 'lucide-react';
 import { Topic, Lesson, Exercise, SkillCategory, User, Classroom } from '../types';
 import { useTheme } from '../context/ThemeContext';
@@ -89,6 +94,7 @@ export const TopicList: React.FC<TopicListProps> = ({
   });
 
   const [selectedClassFilter, setSelectedClassFilter] = useState<string>('all');
+  const [visibilityFilter, setVisibilityFilter] = useState<'all' | 'visible' | 'hidden'>('all');
   const isAdmin = currentUser?.role === 'admin';
   const perms = currentUser?.permissions;
 
@@ -101,19 +107,26 @@ export const TopicList: React.FC<TopicListProps> = ({
   };
 
   // Filter topics based on role:
-  // - Admin: can view "All" or filter by a specific classroom
-  // - Student: STRICTLY sees ONLY topics assigned to their own classroom
+  // - Admin: can view "All" or filter by classroom & visibility
+  // - Student: STRICTLY sees ONLY non-hidden topics assigned to their own classroom
   const availableTopics = topics.filter(t => {
     if (isAdmin) {
-      if (selectedClassFilter === 'all') return true;
-      return t.classroomId === selectedClassFilter;
+      // Class filter
+      if (selectedClassFilter !== 'all' && t.classroomId !== selectedClassFilter) {
+        return false;
+      }
+      // Visibility filter
+      if (visibilityFilter === 'visible' && t.isHidden) return false;
+      if (visibilityFilter === 'hidden' && !t.isHidden) return false;
+      return true;
     }
-    // Student: must match student's classroomId
+    // Student: must NOT be hidden
+    if (t.isHidden) return false;
     if (currentUser?.classroomId) {
-      return t.classroomId === currentUser.classroomId;
+      return !t.classroomId || t.classroomId === currentUser.classroomId;
     }
-    return false; // Student without classroom cannot see unassigned or other classes' topics
-  });
+    return true;
+  }).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
   const filteredTopics = availableTopics.filter(t => 
     t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -122,7 +135,10 @@ export const TopicList: React.FC<TopicListProps> = ({
 
   const currentTopic = availableTopics.find(t => t.id === selectedTopicId) || null;
   const currentLessons = currentTopic 
-    ? lessons.filter(l => l.topicId === currentTopic.id).sort((a, b) => a.order - b.order)
+    ? lessons
+        .filter(l => l.topicId === currentTopic.id)
+        .filter(l => isAdmin ? true : !l.isHidden)
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
     : [];
 
   const studentClass = classrooms.find(c => c.id === currentUser?.classroomId);
@@ -217,6 +233,42 @@ export const TopicList: React.FC<TopicListProps> = ({
               );
             })}
           </div>
+
+          {/* Visibility Quick Filter for Teacher */}
+          <div className="pt-2 border-t border-inherit flex items-center gap-2">
+            <span className={`text-[11px] font-semibold ${theme.textMuted}`}>Trạng thái hiển thị:</span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setVisibilityFilter('all')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors cursor-pointer ${
+                  visibilityFilter === 'all' ? 'bg-emerald-600 text-white' : `${theme.highlight} ${theme.textMuted}`
+                }`}
+              >
+                Tất cả
+              </button>
+              <button
+                type="button"
+                onClick={() => setVisibilityFilter('visible')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer ${
+                  visibilityFilter === 'visible' ? 'bg-emerald-600 text-white' : `${theme.highlight} ${theme.textMuted}`
+                }`}
+              >
+                <Eye className="w-3 h-3" />
+                <span>Đang hiện</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setVisibilityFilter('hidden')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer ${
+                  visibilityFilter === 'hidden' ? 'bg-amber-600 text-white' : `${theme.highlight} ${theme.textMuted}`
+                }`}
+              >
+                <EyeOff className="w-3 h-3" />
+                <span>Đang ẩn ({topics.filter(t => t.isHidden).length})</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -296,11 +348,13 @@ export const TopicList: React.FC<TopicListProps> = ({
                   <div
                     key={topic.id}
                     id={`topic-item-${topic.id}`}
-                    className={`${theme.card} p-4 rounded-xl hover:border-emerald-500/50 transition-all flex flex-col justify-between group border ${theme.border}`}
+                    className={`${theme.card} p-4 rounded-xl hover:border-emerald-500/50 transition-all flex flex-col justify-between group border ${
+                      topic.isHidden ? 'border-dashed border-amber-500/40 bg-amber-500/5' : theme.border
+                    }`}
                   >
                     <div>
                       <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-500">
                             {topic.subject} • {topic.primarySkill}
                           </span>
@@ -309,10 +363,30 @@ export const TopicList: React.FC<TopicListProps> = ({
                               {topicClass.code}
                             </span>
                           )}
+                          {topic.isHidden && (
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-500 border border-amber-500/30 flex items-center gap-1">
+                              <EyeOff className="w-3 h-3" />
+                              <span>Ẩn với HS</span>
+                            </span>
+                          )}
                         </div>
 
                         {isAdmin && (
                           <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100">
+                            <button
+                              id={`btn-toggle-hide-topic-${topic.id}`}
+                              type="button"
+                              onClick={e => {
+                                e.stopPropagation();
+                                onSaveTopic?.({ ...topic, isHidden: !topic.isHidden });
+                              }}
+                              title={topic.isHidden ? 'Chủ đề đang ẩn - Bấm để hiển thị với học sinh' : 'Chủ đề đang hiển thị - Bấm để ẩn'}
+                              className={`p-1 rounded cursor-pointer transition-colors ${
+                                topic.isHidden ? 'text-amber-400 hover:text-amber-300' : 'text-neutral-400 hover:text-emerald-400'
+                              }`}
+                            >
+                              {topic.isHidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                            </button>
                             <button
                               id={`btn-delete-topic-${topic.id}`}
                               type="button"
@@ -369,8 +443,34 @@ export const TopicList: React.FC<TopicListProps> = ({
       {/* Selected Topic Lessons View */}
       {currentTopic && (
         <div className="space-y-4">
+          {/* Breadcrumb Navigation: Folder navigation back to Topics */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              id="btn-back-to-topics"
+              type="button"
+              onClick={() => onSelectTopic(null)}
+              className={`px-3 py-1.5 rounded-xl border ${theme.border} ${theme.badgeBg} hover:border-emerald-500 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs`}
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Quay lại danh sách Chủ đề</span>
+            </button>
+            <span className={`text-xs ${theme.textMuted}`}>/</span>
+            <span className="text-xs font-bold text-emerald-500 truncate flex items-center gap-1">
+              <FolderOpen className="w-3.5 h-3.5" />
+              <span>{currentTopic.title}</span>
+            </span>
+            {currentTopic.isHidden && (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-500 border border-amber-500/30 flex items-center gap-1 sm:ml-auto">
+                <EyeOff className="w-3 h-3" />
+                <span>Chủ đề này đang ẩn với học sinh</span>
+              </span>
+            )}
+          </div>
+
           {/* Topic header banner */}
-          <div className={`${theme.card} p-4 rounded-xl border-l-4 border-l-emerald-500 border ${theme.border}`}>
+          <div className={`${theme.card} p-4 rounded-xl border-l-4 border-l-emerald-500 border ${
+            currentTopic.isHidden ? 'border-dashed border-amber-500/40 bg-amber-500/5' : theme.border
+          }`}>
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <span className="text-[11px] font-semibold text-emerald-500 uppercase tracking-wider">
@@ -385,9 +485,21 @@ export const TopicList: React.FC<TopicListProps> = ({
               {isAdmin && (
                 <div className="flex items-center gap-2">
                   <button
+                    id="btn-toggle-current-topic-hide"
+                    type="button"
+                    onClick={() => onSaveTopic?.({ ...currentTopic, isHidden: !currentTopic.isHidden })}
+                    className={`px-3 py-2 rounded-xl text-xs font-semibold border flex items-center gap-1.5 transition-colors cursor-pointer ${
+                      currentTopic.isHidden ? 'border-amber-500/40 text-amber-400 hover:bg-amber-500/10' : `${theme.border} text-neutral-300 hover:border-emerald-500`
+                    }`}
+                  >
+                    {currentTopic.isHidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    <span>{currentTopic.isHidden ? 'Đang ẩn với HS' : 'Đang hiện với HS'}</span>
+                  </button>
+
+                  <button
                     id="btn-add-lesson-to-topic"
                     onClick={() => onOpenCreateModal('lesson', currentTopic.id)}
-                    className="px-3 py-2 rounded-xl text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm flex items-center gap-1"
+                    className="px-3 py-2 rounded-xl text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm flex items-center gap-1 cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>Tạo bài học mới</span>
@@ -417,7 +529,7 @@ export const TopicList: React.FC<TopicListProps> = ({
           ) : (
             <div className="space-y-2.5">
               {currentLessons.map((lesson, idx) => {
-                const lessonExercises = exercises.filter(e => e.lessonId === lesson.id);
+                const lessonExercises = exercises.filter(e => e.lessonId === lesson.id && (isAdmin ? true : !e.isHidden));
                 const canPractice = isAdmin || (perms?.canPractice !== false);
                 const canViewTheory = isAdmin || (perms?.canViewTheory !== false);
 
@@ -425,34 +537,44 @@ export const TopicList: React.FC<TopicListProps> = ({
                   <div
                     key={lesson.id}
                     id={`lesson-card-${lesson.id}`}
-                    className={`${theme.card} p-3 sm:p-4 rounded-xl border ${theme.border} flex flex-col sm:flex-row sm:items-center justify-between gap-3`}
+                    className={`${theme.card} p-3 sm:p-4 rounded-xl border ${
+                      lesson.isHidden ? 'border-dashed border-amber-500/40 bg-amber-500/5' : theme.border
+                    } flex flex-col sm:flex-row sm:items-center justify-between gap-3`}
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
                       <span className="w-6 h-6 rounded-full bg-emerald-500/10 text-emerald-500 text-xs font-bold flex items-center justify-center shrink-0">
                         {idx + 1}
                       </span>
                       <div className="min-w-0">
-                        <h4 className="text-sm sm:text-base font-semibold truncate">{lesson.title}</h4>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="text-sm sm:text-base font-semibold truncate">{lesson.title}</h4>
+                          {lesson.isHidden && (
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-500/15 text-amber-500 border border-amber-500/30 flex items-center gap-1">
+                              <EyeOff className="w-3 h-3" />
+                              <span>Ẩn với HS</span>
+                            </span>
+                          )}
+                        </div>
                         <span className={`text-[11px] ${theme.textMuted} block`}>
                           {lessonExercises.length} câu hỏi luyện tập
                         </span>
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <div className="flex flex-wrap items-center gap-1.5 shrink-0">
                       {/* 1. Nút Xem bài giảng (khi nhấn vào sẽ thấy toàn bộ kiến thức cốt lõi & slide bài giảng) */}
                       {canViewTheory && (
                         <button
                           id={`btn-view-lecture-${lesson.id}`}
                           type="button"
                           onClick={() => setSelectedLectureLesson(lesson)}
-                          className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-sky-500/40 text-sky-400 hover:bg-sky-500/10 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
-                          title="Xem bài giảng và kiến thức cốt lõi"
+                          className="px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-sky-500/40 text-sky-500 hover:bg-sky-500/10 flex items-center gap-1 transition-colors cursor-pointer shrink-0"
+                          title="Xem bài giảng lý thuyết & kiến thức cốt lõi"
                         >
                           <BookOpen className="w-3.5 h-3.5" />
-                          <span>Xem bài giảng</span>
+                          <span className="hidden sm:inline">Bài giảng</span>
                           {lesson.slides && lesson.slides.length > 0 && (
-                            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-sky-500/20 text-sky-300 font-bold">
+                            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-sky-500/20 text-sky-400 font-bold">
                               {lesson.slides.length}
                             </span>
                           )}
@@ -463,24 +585,36 @@ export const TopicList: React.FC<TopicListProps> = ({
                       {isAdmin && (
                         <>
                           <button
+                            id={`btn-toggle-hide-lesson-${lesson.id}`}
+                            type="button"
+                            onClick={() => onSaveLesson?.({ ...lesson, isHidden: !lesson.isHidden })}
+                            className={`p-1.5 rounded-lg border transition-colors cursor-pointer shrink-0 ${
+                              lesson.isHidden ? 'border-amber-500/40 text-amber-500 hover:bg-amber-500/10' : `${theme.border} hover:border-emerald-500 text-neutral-400 hover:text-emerald-500`
+                            }`}
+                            title={lesson.isHidden ? 'Bài học đang ẩn với học sinh - Bấm để hiển thị' : 'Bài học đang hiển thị - Bấm để ẩn'}
+                          >
+                            {lesson.isHidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          </button>
+
+                          <button
                             id={`btn-edit-lesson-content-${lesson.id}`}
                             type="button"
                             onClick={() => setSelectedEditorLesson(lesson)}
-                            className="px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 flex items-center gap-1 transition-colors cursor-pointer shrink-0"
-                            title="Soạn bài / Sửa nội dung bài học"
+                            className="px-2 py-1.5 rounded-lg text-xs font-semibold border border-amber-500/40 text-amber-500 hover:bg-amber-500/10 flex items-center gap-1 transition-colors cursor-pointer shrink-0"
+                            title="Soạn nội dung bài học"
                           >
                             <Sparkles className="w-3.5 h-3.5" />
-                            <span className="hidden md:inline">Soạn bài</span>
+                            <span className="hidden lg:inline">Soạn bài</span>
                           </button>
 
                           <button
                             id={`btn-add-exercise-to-lesson-${lesson.id}`}
                             onClick={() => onOpenCreateModal('exercise', lesson.id)}
-                            className={`p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg text-xs font-medium border ${theme.border} hover:${theme.highlight} flex items-center gap-1 cursor-pointer shrink-0`}
+                            className={`p-1.5 sm:px-2 sm:py-1.5 rounded-lg text-xs font-medium border ${theme.border} hover:${theme.highlight} flex items-center gap-1 cursor-pointer shrink-0`}
                             title="Thêm câu hỏi luyện tập"
                           >
                             <Plus className="w-3.5 h-3.5" />
-                            <span className="hidden md:inline">Thêm câu</span>
+                            <span className="hidden lg:inline">Thêm câu</span>
                           </button>
 
                           <button
@@ -508,8 +642,8 @@ export const TopicList: React.FC<TopicListProps> = ({
                           id={`btn-start-practice-lesson-${lesson.id}`}
                           disabled={lessonExercises.length === 0}
                           onClick={() => onStartPractice(lesson.id)}
-                          className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs flex items-center gap-1.5 disabled:opacity-40 cursor-pointer shrink-0"
-                          title="Bắt đầu luyện bài này"
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs flex items-center gap-1 disabled:opacity-40 cursor-pointer shrink-0"
+                          title="Bắt đầu luyện tập bài này"
                         >
                           <Play className="w-3.5 h-3.5 fill-current" />
                           <span>Luyện bài</span>

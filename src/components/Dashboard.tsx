@@ -105,14 +105,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // Filtered topics for Admin (strictly belongs to selected class)
   const adminClassTopics = selectedClassId 
-    ? topics.filter(t => t.classroomId === selectedClassId)
+    ? topics.filter(t => t.classroomId === selectedClassId).sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
     : [];
 
-  // Data for Student (HS) - Strictly scoped to student's own class and stats
+  // Data for Student (HS) - Strictly scoped to student's own class, stats, and non-hidden
   const studentClass = classrooms.find(c => c.id === currentUser?.classroomId);
-  const studentTopics = topics.filter(t => currentUser?.classroomId && t.classroomId === currentUser.classroomId);
-  const studentLessons = lessons.filter(l => studentTopics.some(t => t.id === l.topicId));
-  const studentExercises = exercises.filter(e => studentLessons.some(l => l.id === e.lessonId));
+  const studentTopics = topics
+    .filter(t => {
+      if (t.isHidden) return false;
+      if (currentUser?.classroomId) {
+        return !t.classroomId || t.classroomId === currentUser.classroomId;
+      }
+      return true;
+    })
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const studentLessons = lessons
+    .filter(l => !l.isHidden && studentTopics.some(t => t.id === l.topicId))
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const studentExercises = exercises.filter(e => !e.isHidden && studentLessons.some(l => l.id === e.lessonId));
   const studentExerciseIds = new Set(studentExercises.map(e => e.id));
 
   // Filter out any errors from past classes if student was promoted or moved
@@ -622,8 +632,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {studentTopics.slice(0, 6).map(topic => {
-                  const topicLessons = lessons.filter(l => l.topicId === topic.id);
-                  const topicExercises = exercises.filter(e => topicLessons.some(l => l.id === e.lessonId));
+                  const topicLessons = lessons.filter(l => l.topicId === topic.id && !l.isHidden);
+                  const topicExercises = exercises.filter(e => !e.isHidden && topicLessons.some(l => l.id === e.lessonId));
 
                   return (
                     <div

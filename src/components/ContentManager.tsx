@@ -7,6 +7,7 @@ import {
   Play, 
   ChevronRight, 
   ChevronDown, 
+  ChevronUp,
   BookOpen, 
   Layers, 
   HelpCircle,
@@ -21,6 +22,9 @@ import {
   MoveRight,
   CheckSquare,
   Square,
+  Eye,
+  EyeOff,
+  GripVertical,
   X
 } from 'lucide-react';
 import { 
@@ -57,6 +61,10 @@ interface ContentManagerProps {
   onDeleteLesson: (lessonId: string) => void;
   onUpdateExercise: (exercise: Exercise) => void;
   onDeleteExercise: (exerciseId: string) => void;
+  // Reorder handlers
+  onReorderTopics?: (orderedTopics: Topic[]) => void;
+  onReorderLessons?: (orderedLessons: Lesson[]) => void;
+  onReorderExercises?: (orderedExercises: Exercise[]) => void;
   // Bulk action handlers
   onBulkDeleteTopics?: (topicIds: string[]) => void;
   onBulkMoveTopics?: (topicIds: string[], targetClassroomId: string) => void;
@@ -103,6 +111,9 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
   onDeleteLesson,
   onUpdateExercise,
   onDeleteExercise,
+  onReorderTopics,
+  onReorderLessons,
+  onReorderExercises,
   onBulkDeleteTopics,
   onBulkMoveTopics,
   onBulkDuplicateTopics,
@@ -129,6 +140,16 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
   const [selectedLessonIds, setSelectedLessonIds] = useState<string[]>([]);
   const [selectedExerciseIds, setSelectedExerciseIds] = useState<string[]>([]);
 
+  // Drag and drop states for Topic, Lesson, and Exercise
+  const [draggedTopicId, setDraggedTopicId] = useState<string | null>(null);
+  const [dragOverTopicId, setDragOverTopicId] = useState<string | null>(null);
+
+  const [draggedLessonId, setDraggedLessonId] = useState<string | null>(null);
+  const [dragOverLessonId, setDragOverLessonId] = useState<string | null>(null);
+
+  const [draggedExerciseId, setDraggedExerciseId] = useState<string | null>(null);
+  const [dragOverExerciseId, setDragOverExerciseId] = useState<string | null>(null);
+
   // Bulk Action Modal State
   const [bulkModal, setBulkModal] = useState<{
     isOpen: boolean;
@@ -140,17 +161,17 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
     contentType: 'topic',
   });
 
-  // Filter topics by selected 2-tier class
+  // Filter topics by selected 2-tier class and sort by order
   const filteredTopics = useMemo(() => {
+    let list = topics;
     if (selectedClassFilter !== 'all') {
-      return topics.filter(t => t.classroomId === selectedClassFilter);
-    }
-    if (selectedClassName !== 'all') {
+      list = topics.filter(t => t.classroomId === selectedClassFilter);
+    } else if (selectedClassName !== 'all') {
       const classList = getClassroomsByName(classrooms, selectedClassName);
       const classIdSet = new Set(classList.map(c => c.id));
-      return topics.filter(t => classIdSet.has(t.classroomId));
+      list = topics.filter(t => classIdSet.has(t.classroomId));
     }
-    return topics;
+    return [...list].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   }, [topics, classrooms, selectedClassName, selectedClassFilter]);
 
   const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
@@ -193,13 +214,23 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
     return classrooms.length;
   }, [classrooms, selectedClassName, selectedClassFilter]);
 
-  // Current active topic & its lessons
+  // Current active topic & its lessons, sorted by order
   const activeTopic = filteredTopics.find(t => t.id === selectedTopicId) || filteredTopics[0] || null;
-  const currentLessons = activeTopic ? lessons.filter(l => l.topicId === activeTopic.id) : [];
+  const currentLessons = useMemo(() => {
+    if (!activeTopic) return [];
+    return lessons
+      .filter(l => l.topicId === activeTopic.id)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  }, [lessons, activeTopic]);
   
-  // Set default active lesson if not set
+  // Set default active lesson if not set, sorted by order
   const activeLesson = currentLessons.find(l => l.id === selectedLessonId) || currentLessons[0] || null;
-  const currentExercises = activeLesson ? exercises.filter(e => e.lessonId === activeLesson.id) : [];
+  const currentExercises = useMemo(() => {
+    if (!activeLesson) return [];
+    return exercises
+      .filter(e => e.lessonId === activeLesson.id)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  }, [exercises, activeLesson]);
 
   // Filtered exercises by search
   const filteredExercises = currentExercises.filter(ex => {
@@ -212,6 +243,134 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
       (ex.correctText && ex.correctText.toLowerCase().includes(q))
     );
   });
+
+  // Visibility Toggles
+  const handleToggleTopicVisibility = (topic: Topic, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    onUpdateTopic({ ...topic, isHidden: !topic.isHidden });
+  };
+
+  const handleToggleLessonVisibility = (lesson: Lesson, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    onUpdateLesson({ ...lesson, isHidden: !lesson.isHidden });
+  };
+
+  const handleToggleExerciseVisibility = (exercise: Exercise, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    onUpdateExercise({ ...exercise, isHidden: !exercise.isHidden });
+  };
+
+  const handleBulkToggleVisibility = (type: 'topic' | 'lesson' | 'exercise', makeHidden: boolean) => {
+    if (type === 'topic') {
+      selectedTopicIds.forEach(id => {
+        const t = topics.find(item => item.id === id);
+        if (t) onUpdateTopic({ ...t, isHidden: makeHidden });
+      });
+      setSelectedTopicIds([]);
+    } else if (type === 'lesson') {
+      selectedLessonIds.forEach(id => {
+        const l = lessons.find(item => item.id === id);
+        if (l) onUpdateLesson({ ...l, isHidden: makeHidden });
+      });
+      setSelectedLessonIds([]);
+    } else if (type === 'exercise') {
+      selectedExerciseIds.forEach(id => {
+        const ex = exercises.find(item => item.id === id);
+        if (ex) onUpdateExercise({ ...ex, isHidden: makeHidden });
+      });
+      setSelectedExerciseIds([]);
+    }
+  };
+
+  // Reorder Handlers - Topics
+  const handleTopicDragStart = (e: React.DragEvent, id: string) => {
+    e.dataTransfer.setData('text/plain', id);
+    setDraggedTopicId(id);
+  };
+
+  const handleTopicDrop = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    setDragOverTopicId(null);
+    if (!draggedTopicId || draggedTopicId === targetId || !onReorderTopics) return;
+    const items = [...filteredTopics];
+    const fromIndex = items.findIndex(t => t.id === draggedTopicId);
+    const toIndex = items.findIndex(t => t.id === targetId);
+    if (fromIndex < 0 || toIndex < 0) return;
+    const [moved] = items.splice(fromIndex, 1);
+    items.splice(toIndex, 0, moved);
+    onReorderTopics(items);
+    setDraggedTopicId(null);
+  };
+
+  const handleMoveTopic = (index: number, direction: 'up' | 'down') => {
+    if (!onReorderTopics) return;
+    const targetIdx = direction === 'up' ? index - 1 : index + 1;
+    if (targetIdx < 0 || targetIdx >= filteredTopics.length) return;
+    const items = [...filteredTopics];
+    const [moved] = items.splice(index, 1);
+    items.splice(targetIdx, 0, moved);
+    onReorderTopics(items);
+  };
+
+  // Reorder Handlers - Lessons
+  const handleLessonDragStart = (e: React.DragEvent, id: string) => {
+    e.dataTransfer.setData('text/plain', id);
+    setDraggedLessonId(id);
+  };
+
+  const handleLessonDrop = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    setDragOverLessonId(null);
+    if (!draggedLessonId || draggedLessonId === targetId || !onReorderLessons) return;
+    const items = [...currentLessons];
+    const fromIndex = items.findIndex(l => l.id === draggedLessonId);
+    const toIndex = items.findIndex(l => l.id === targetId);
+    if (fromIndex < 0 || toIndex < 0) return;
+    const [moved] = items.splice(fromIndex, 1);
+    items.splice(toIndex, 0, moved);
+    onReorderLessons(items);
+    setDraggedLessonId(null);
+  };
+
+  const handleMoveLesson = (index: number, direction: 'up' | 'down') => {
+    if (!onReorderLessons) return;
+    const targetIdx = direction === 'up' ? index - 1 : index + 1;
+    if (targetIdx < 0 || targetIdx >= currentLessons.length) return;
+    const items = [...currentLessons];
+    const [moved] = items.splice(index, 1);
+    items.splice(targetIdx, 0, moved);
+    onReorderLessons(items);
+  };
+
+  // Reorder Handlers - Exercises
+  const handleExerciseDragStart = (e: React.DragEvent, id: string) => {
+    e.dataTransfer.setData('text/plain', id);
+    setDraggedExerciseId(id);
+  };
+
+  const handleExerciseDrop = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    setDragOverExerciseId(null);
+    if (!draggedExerciseId || draggedExerciseId === targetId || !onReorderExercises) return;
+    const items = [...currentExercises];
+    const fromIndex = items.findIndex(ex => ex.id === draggedExerciseId);
+    const toIndex = items.findIndex(ex => ex.id === targetId);
+    if (fromIndex < 0 || toIndex < 0) return;
+    const [moved] = items.splice(fromIndex, 1);
+    items.splice(toIndex, 0, moved);
+    onReorderExercises(items);
+    setDraggedExerciseId(null);
+  };
+
+  const handleMoveExercise = (index: number, direction: 'up' | 'down') => {
+    if (!onReorderExercises) return;
+    const targetIdx = direction === 'up' ? index - 1 : index + 1;
+    if (targetIdx < 0 || targetIdx >= currentExercises.length) return;
+    const items = [...currentExercises];
+    const [moved] = items.splice(index, 1);
+    items.splice(targetIdx, 0, moved);
+    onReorderExercises(items);
+  };
 
   // Bulk Selection Helpers
   const toggleSelectTopic = (id: string, e: React.MouseEvent) => {
@@ -427,15 +586,26 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
               </div>
 
               <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-                {filteredTopics.map(topic => {
+                {filteredTopics.map((topic, topicIdx) => {
                   const isSelected = activeTopic?.id === topic.id;
                   const isChecked = selectedTopicIds.includes(topic.id);
+                  const isDragOver = dragOverTopicId === topic.id;
                   const topicLessons = lessons.filter(l => l.topicId === topic.id);
                   const topicClass = classrooms.find(c => c.id === topic.classroomId);
                   return (
                     <div
                       key={topic.id}
+                      draggable={true}
+                      onDragStart={(e) => handleTopicDragStart(e, topic.id)}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setDragOverTopicId(topic.id);
+                      }}
+                      onDragLeave={() => setDragOverTopicId(null)}
+                      onDrop={(e) => handleTopicDrop(e, topic.id)}
                       className={`p-2.5 rounded-xl border transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                        isDragOver ? 'ring-2 ring-emerald-500 border-emerald-500' : ''
+                      } ${
                         isChecked
                           ? 'border-emerald-500 bg-emerald-500/15 text-emerald-500 font-semibold'
                           : isSelected 
@@ -448,32 +618,83 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                         setSelectedLessonId(firstL?.id || null);
                       }}
                     >
-                      <button
-                        type="button"
-                        onClick={(e) => toggleSelectTopic(topic.id, e)}
-                        className="p-1 text-emerald-500 hover:scale-110 transition-transform cursor-pointer shrink-0"
-                        title={isChecked ? 'Bỏ chọn chủ đề này' : 'Chọn chủ đề này'}
-                      >
-                        {isChecked ? (
-                          <CheckSquare className="w-4 h-4 text-emerald-500" />
-                        ) : (
-                          <Square className="w-4 h-4 opacity-40 hover:opacity-100" />
-                        )}
-                      </button>
+                      {/* Drag Handle & Checkbox */}
+                      <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+                        <div 
+                          className="cursor-grab active:cursor-grabbing p-0.5 text-neutral-400 hover:text-emerald-400"
+                          title="Kéo thả để đổi thứ tự chủ đề"
+                        >
+                          <GripVertical className="w-3.5 h-3.5" />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => toggleSelectTopic(topic.id, e)}
+                          className="p-1 text-emerald-500 hover:scale-110 transition-transform cursor-pointer shrink-0"
+                          title={isChecked ? 'Bỏ chọn chủ đề này' : 'Chọn chủ đề này'}
+                        >
+                          {isChecked ? (
+                            <CheckSquare className="w-4 h-4 text-emerald-500" />
+                          ) : (
+                            <Square className="w-4 h-4 opacity-40 hover:opacity-100" />
+                          )}
+                        </button>
+                      </div>
 
                       <div className="min-w-0 flex-1">
-                        {topicClass && (
-                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-teal-500/15 text-teal-400 font-medium inline-block mb-0.5">
-                            {topicClass.name}
-                          </span>
-                        )}
-                        <span className="text-xs block truncate">{topic.title}</span>
+                        <div className="flex items-center gap-1 flex-wrap">
+                          {topicClass && (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-teal-500/15 text-teal-400 font-medium inline-block mb-0.5">
+                              {topicClass.name}
+                            </span>
+                          )}
+                          {topic.isHidden && (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-400 font-bold inline-flex items-center gap-0.5 mb-0.5">
+                              <EyeOff className="w-2.5 h-2.5" /> Ẩn với HS
+                            </span>
+                          )}
+                        </div>
+                        <span className={`text-xs block truncate ${topic.isHidden ? 'opacity-65' : ''}`}>
+                          <span className="text-[10px] text-neutral-400 mr-1 font-mono">#{topicIdx + 1}</span>
+                          {topic.title}
+                        </span>
                         <span className={`text-[10px] ${theme.textMuted} block`}>
                           {topic.subject} • {topicLessons.length} bài
                         </span>
                       </div>
 
-                      <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+                      {/* Reorder Arrows & Actions */}
+                      <div className="flex items-center gap-0.5 shrink-0" onClick={e => e.stopPropagation()}>
+                        <div className="flex flex-col">
+                          <button
+                            type="button"
+                            disabled={topicIdx === 0}
+                            onClick={() => handleMoveTopic(topicIdx, 'up')}
+                            className="p-0.5 hover:text-emerald-400 disabled:opacity-20 disabled:cursor-not-allowed cursor-pointer"
+                            title="Di chuyển lên"
+                          >
+                            <ChevronUp className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={topicIdx === filteredTopics.length - 1}
+                            onClick={() => handleMoveTopic(topicIdx, 'down')}
+                            className="p-0.5 hover:text-emerald-400 disabled:opacity-20 disabled:cursor-not-allowed cursor-pointer"
+                            title="Di chuyển xuống"
+                          >
+                            <ChevronDown className="w-3 h-3" />
+                          </button>
+                        </div>
+
+                        {/* Quick visibility toggle */}
+                        <button
+                          type="button"
+                          onClick={(e) => handleToggleTopicVisibility(topic, e)}
+                          className={`p-1 rounded ${topic.isHidden ? 'bg-amber-500/20 text-amber-400' : `${theme.highlight} hover:text-emerald-400 text-neutral-400`}`}
+                          title={topic.isHidden ? 'Đang ẩn với học sinh (Bấm để hiện)' : 'Đang hiện với học sinh (Bấm để ẩn)'}
+                        >
+                          {topic.isHidden ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                        </button>
+
                         <button
                           onClick={() => setEditingTopic(topic)}
                           className={`p-1 rounded ${theme.highlight} hover:text-sky-500`}
@@ -559,14 +780,25 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                 </div>
               ) : (
                 <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-                  {currentLessons.map(lesson => {
+                  {currentLessons.map((lesson, lessonIdx) => {
                     const isSelected = activeLesson?.id === lesson.id;
                     const isChecked = selectedLessonIds.includes(lesson.id);
+                    const isDragOver = dragOverLessonId === lesson.id;
                     const lessonExs = exercises.filter(e => e.lessonId === lesson.id);
                     return (
                       <div
                         key={lesson.id}
+                        draggable={true}
+                        onDragStart={(e) => handleLessonDragStart(e, lesson.id)}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          setDragOverLessonId(lesson.id);
+                        }}
+                        onDragLeave={() => setDragOverLessonId(null)}
+                        onDrop={(e) => handleLessonDrop(e, lesson.id)}
                         className={`p-2.5 rounded-xl border transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                          isDragOver ? 'ring-2 ring-sky-500 border-sky-500' : ''
+                        } ${
                           isChecked
                             ? 'border-sky-500 bg-sky-500/15 text-sky-500 font-semibold'
                             : isSelected 
@@ -575,27 +807,78 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                         }`}
                         onClick={() => setSelectedLessonId(lesson.id)}
                       >
-                        <button
-                          type="button"
-                          onClick={(e) => toggleSelectLesson(lesson.id, e)}
-                          className="p-1 text-sky-500 hover:scale-110 transition-transform cursor-pointer shrink-0"
-                          title={isChecked ? 'Bỏ chọn bài học này' : 'Chọn bài học này'}
-                        >
-                          {isChecked ? (
-                            <CheckSquare className="w-4 h-4 text-sky-500" />
-                          ) : (
-                            <Square className="w-4 h-4 opacity-40 hover:opacity-100" />
-                          )}
-                        </button>
+                        {/* Drag Handle & Checkbox */}
+                        <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+                          <div 
+                            className="cursor-grab active:cursor-grabbing p-0.5 text-neutral-400 hover:text-sky-400"
+                            title="Kéo thả để đổi thứ tự bài học"
+                          >
+                            <GripVertical className="w-3.5 h-3.5" />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => toggleSelectLesson(lesson.id, e)}
+                            className="p-1 text-sky-500 hover:scale-110 transition-transform cursor-pointer shrink-0"
+                            title={isChecked ? 'Bỏ chọn bài học này' : 'Chọn bài học này'}
+                          >
+                            {isChecked ? (
+                              <CheckSquare className="w-4 h-4 text-sky-500" />
+                            ) : (
+                              <Square className="w-4 h-4 opacity-40 hover:opacity-100" />
+                            )}
+                          </button>
+                        </div>
 
                         <div className="min-w-0 flex-1">
-                          <span className="text-xs block truncate">{lesson.title}</span>
+                          <div className="flex items-center gap-1 flex-wrap">
+                            {lesson.isHidden && (
+                              <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-400 font-bold inline-flex items-center gap-0.5 mb-0.5">
+                                <EyeOff className="w-2.5 h-2.5" /> Ẩn với HS
+                              </span>
+                            )}
+                          </div>
+                          <span className={`text-xs block truncate ${lesson.isHidden ? 'opacity-65' : ''}`}>
+                            <span className="text-[10px] text-neutral-400 mr-1 font-mono">#{lessonIdx + 1}</span>
+                            {lesson.title}
+                          </span>
                           <span className={`text-[10px] ${theme.textMuted} block`}>
                             {lessonExs.length} câu hỏi
                           </span>
                         </div>
 
-                        <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+                        {/* Reorder Arrows & Actions */}
+                        <div className="flex items-center gap-0.5 shrink-0" onClick={e => e.stopPropagation()}>
+                          <div className="flex flex-col">
+                            <button
+                              type="button"
+                              disabled={lessonIdx === 0}
+                              onClick={() => handleMoveLesson(lessonIdx, 'up')}
+                              className="p-0.5 hover:text-sky-400 disabled:opacity-20 disabled:cursor-not-allowed cursor-pointer"
+                              title="Di chuyển lên"
+                            >
+                              <ChevronUp className="w-3 h-3" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={lessonIdx === currentLessons.length - 1}
+                              onClick={() => handleMoveLesson(lessonIdx, 'down')}
+                              className="p-0.5 hover:text-sky-400 disabled:opacity-20 disabled:cursor-not-allowed cursor-pointer"
+                              title="Di chuyển xuống"
+                            >
+                              <ChevronDown className="w-3 h-3" />
+                            </button>
+                          </div>
+
+                          {/* Quick visibility toggle */}
+                          <button
+                            type="button"
+                            onClick={(e) => handleToggleLessonVisibility(lesson, e)}
+                            className={`p-1 rounded ${lesson.isHidden ? 'bg-amber-500/20 text-amber-400' : `${theme.highlight} hover:text-sky-400 text-neutral-400`}`}
+                            title={lesson.isHidden ? 'Đang ẩn với học sinh (Bấm để hiện)' : 'Đang hiện với học sinh (Bấm để ẩn)'}
+                          >
+                            {lesson.isHidden ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                          </button>
+
                           <button
                             onClick={() => setEditingLesson(lesson)}
                             className={`p-1 rounded ${theme.highlight} hover:text-sky-500`}
@@ -631,8 +914,8 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
           <div className="md:col-span-2 space-y-4">
             <div className={`${theme.card} p-5 rounded-2xl border ${theme.border} space-y-4`}>
               {/* Header & Controls */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-inherit pb-4">
-                <div className="min-w-0">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-inherit pb-4">
+                <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="text-base font-bold truncate">
                       {activeLesson ? activeLesson.title : 'Chọn bài học'}
@@ -758,10 +1041,21 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                   {filteredExercises.map((ex, idx) => {
                     const typeLabel = TYPE_NAMES[ex.type] || ex.type;
                     const isExChecked = selectedExerciseIds.includes(ex.id);
+                    const isDragOver = dragOverExerciseId === ex.id;
                     return (
                       <div
                         key={ex.id}
+                        draggable={true}
+                        onDragStart={(e) => handleExerciseDragStart(e, ex.id)}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          setDragOverExerciseId(ex.id);
+                        }}
+                        onDragLeave={() => setDragOverExerciseId(null)}
+                        onDrop={(e) => handleExerciseDrop(e, ex.id)}
                         className={`p-4 rounded-xl border transition-all space-y-2 ${
+                          isDragOver ? 'ring-2 ring-emerald-500 border-emerald-500' : ''
+                        } ${
                           isExChecked
                             ? 'border-emerald-500 bg-emerald-500/10 shadow-sm'
                             : `${theme.border} ${theme.highlight} hover:border-emerald-500/50`
@@ -770,6 +1064,13 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                         {/* Badges and action buttons */}
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2 flex-wrap">
+                            <div
+                              className="cursor-grab active:cursor-grabbing p-0.5 text-neutral-400 hover:text-emerald-400"
+                              title="Kéo thả để đổi thứ tự câu hỏi"
+                            >
+                              <GripVertical className="w-3.5 h-3.5" />
+                            </div>
+
                             <button
                               type="button"
                               onClick={(e) => toggleSelectExercise(ex.id, e)}
@@ -794,9 +1095,46 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                             <span className="text-[10px] opacity-70">
                               {ex.difficulty}
                             </span>
+                            {ex.isHidden && (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 inline-flex items-center gap-0.5">
+                                <EyeOff className="w-2.5 h-2.5" /> Ẩn với HS
+                              </span>
+                            )}
                           </div>
 
                           <div className="flex items-center gap-1.5 shrink-0">
+                            {/* Reorder Arrows */}
+                            <div className="flex items-center gap-0.5">
+                              <button
+                                type="button"
+                                disabled={idx === 0}
+                                onClick={() => handleMoveExercise(idx, 'up')}
+                                className="p-1 rounded hover:bg-white/10 hover:text-emerald-400 disabled:opacity-20 disabled:cursor-not-allowed cursor-pointer"
+                                title="Chuyển câu hỏi lên trên"
+                              >
+                                <ChevronUp className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={idx === currentExercises.length - 1}
+                                onClick={() => handleMoveExercise(idx, 'down')}
+                                className="p-1 rounded hover:bg-white/10 hover:text-emerald-400 disabled:opacity-20 disabled:cursor-not-allowed cursor-pointer"
+                                title="Chuyển câu hỏi xuống dưới"
+                              >
+                                <ChevronDown className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+
+                            {/* Quick visibility toggle */}
+                            <button
+                              type="button"
+                              onClick={(e) => handleToggleExerciseVisibility(ex, e)}
+                              className={`p-1.5 rounded-lg ${ex.isHidden ? 'bg-amber-500/20 text-amber-400' : `${theme.badgeBg} hover:text-emerald-400 text-neutral-400`} cursor-pointer`}
+                              title={ex.isHidden ? 'Đang ẩn với học sinh (Bấm để hiện)' : 'Đang hiện với học sinh (Bấm để ẩn)'}
+                            >
+                              {ex.isHidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                            </button>
+
                             <button
                               id={`btn-test-exercise-${ex.id}`}
                               onClick={() => onStartPractice(undefined, false, false, ex)}
@@ -834,7 +1172,7 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                         </div>
 
                         {/* Question title */}
-                        <div className="text-xs font-semibold leading-relaxed">
+                        <div className={`text-xs font-semibold leading-relaxed ${ex.isHidden ? 'opacity-70' : ''}`}>
                           {ex.question}
                         </div>
 
@@ -917,6 +1255,24 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
               <>
                 <button
                   type="button"
+                  onClick={() => handleBulkToggleVisibility('topic', true)}
+                  className="px-2.5 py-1.5 rounded-xl bg-amber-600/80 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  title="Ẩn tất cả chủ đề đang chọn với học sinh"
+                >
+                  <EyeOff className="w-3.5 h-3.5" />
+                  <span>Ẩn ({selectedTopicIds.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleBulkToggleVisibility('topic', false)}
+                  className="px-2.5 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  title="Hiện tất cả chủ đề đang chọn với học sinh"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>Hiện ({selectedTopicIds.length})</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => setBulkModal({ isOpen: true, action: 'move', contentType: 'topic' })}
                   className="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
                 >
@@ -947,6 +1303,24 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
               <>
                 <button
                   type="button"
+                  onClick={() => handleBulkToggleVisibility('lesson', true)}
+                  className="px-2.5 py-1.5 rounded-xl bg-amber-600/80 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  title="Ẩn tất cả bài học đang chọn với học sinh"
+                >
+                  <EyeOff className="w-3.5 h-3.5" />
+                  <span>Ẩn ({selectedLessonIds.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleBulkToggleVisibility('lesson', false)}
+                  className="px-2.5 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  title="Hiện tất cả bài học đang chọn với học sinh"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>Hiện ({selectedLessonIds.length})</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => setBulkModal({ isOpen: true, action: 'move', contentType: 'lesson' })}
                   className="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
                 >
@@ -975,6 +1349,24 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
             {/* Action Buttons for Selected Exercises */}
             {selectedExerciseIds.length > 0 && (
               <>
+                <button
+                  type="button"
+                  onClick={() => handleBulkToggleVisibility('exercise', true)}
+                  className="px-2.5 py-1.5 rounded-xl bg-amber-600/80 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  title="Ẩn tất cả câu hỏi đang chọn với học sinh"
+                >
+                  <EyeOff className="w-3.5 h-3.5" />
+                  <span>Ẩn ({selectedExerciseIds.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleBulkToggleVisibility('exercise', false)}
+                  className="px-2.5 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  title="Hiện tất cả câu hỏi đang chọn với học sinh"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>Hiện ({selectedExerciseIds.length})</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => setBulkModal({ isOpen: true, action: 'move', contentType: 'exercise' })}

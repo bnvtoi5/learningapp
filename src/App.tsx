@@ -35,6 +35,9 @@ import {
   bulkMoveExercises,
   bulkDuplicateExercises,
   bulkDeleteExercises,
+  reorderTopics,
+  reorderLessons,
+  reorderExercises,
   loadErrors, 
   saveErrors, 
   loadStats, 
@@ -281,14 +284,14 @@ function MainApp() {
 
     const isStudent = currentUser?.role === 'student';
     const studentTopicIds = isStudent 
-      ? new Set(topics.filter(t => currentUser?.classroomId && t.classroomId === currentUser.classroomId).map(t => t.id))
+      ? new Set(topics.filter(t => !t.isHidden && (!currentUser?.classroomId || t.classroomId === currentUser.classroomId)).map(t => t.id))
       : null;
     const studentLessonIds = isStudent && studentTopicIds
-      ? new Set(lessons.filter(l => studentTopicIds.has(l.topicId)).map(l => l.id))
+      ? new Set(lessons.filter(l => studentTopicIds.has(l.topicId) && !l.isHidden).map(l => l.id))
       : null;
     const studentClassExercises = isStudent && studentLessonIds
-      ? exercises.filter(e => studentLessonIds.has(e.lessonId))
-      : exercises;
+      ? exercises.filter(e => studentLessonIds.has(e.lessonId) && !e.isHidden)
+      : isStudent ? exercises.filter(e => !e.isHidden) : exercises;
     const studentExerciseIds = new Set(studentClassExercises.map(e => e.id));
 
     let targetExercises: Exercise[] = [];
@@ -310,7 +313,7 @@ function MainApp() {
       targetExercises = (isStudent ? studentClassExercises : exercises).filter(e => unresolvedErrorIds.includes(e.id));
       setPracticeTitle('Ôn tập câu làm sai');
     } else if (lessonId) {
-      targetExercises = exercises.filter(e => e.lessonId === lessonId);
+      targetExercises = exercises.filter(e => e.lessonId === lessonId && (isStudent ? !e.isHidden : true));
       const targetLesson = lessons.find(l => l.id === lessonId);
       setPracticeTitle(targetLesson ? `Luyện tập: ${targetLesson.title}` : 'Phiên luyện tập');
       setLastActiveLessonId(lessonId);
@@ -321,6 +324,11 @@ function MainApp() {
     } else {
       targetExercises = studentClassExercises.slice(0, 10);
       setPracticeTitle('Phiên luyện tập');
+    }
+
+    // Sort by order when practice is in a specific lesson
+    if (lessonId) {
+      targetExercises.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
     }
 
     if (targetExercises.length === 0) {
@@ -475,6 +483,25 @@ function MainApp() {
     setExercises(result.exercises);
     setErrors(result.errors);
     showToast(`Đã xóa thành công ${exerciseIds.length} câu hỏi!`, 'info');
+  };
+
+  // Reorder Handlers
+  const handleReorderTopics = (orderedTopics: Topic[]) => {
+    const updated = reorderTopics(orderedTopics);
+    setTopics(updated);
+    showToast('Đã lưu thứ tự hiển thị Chủ đề mới!', 'success');
+  };
+
+  const handleReorderLessons = (orderedLessons: Lesson[]) => {
+    const updated = reorderLessons(orderedLessons);
+    setLessons(updated);
+    showToast('Đã lưu thứ tự hiển thị Bài học mới!', 'success');
+  };
+
+  const handleReorderExercises = (orderedExercises: Exercise[]) => {
+    const updated = reorderExercises(orderedExercises);
+    setExercises(updated);
+    showToast('Đã lưu thứ tự hiển thị Câu hỏi mới!', 'success');
   };
 
   // Error Handlers
@@ -753,6 +780,9 @@ function MainApp() {
                 onBulkMoveExercises={handleBulkMoveExercises}
                 onBulkDuplicateExercises={handleBulkDuplicateExercises}
                 onBulkDeleteExercises={handleBulkDeleteExercises}
+                onReorderTopics={handleReorderTopics}
+                onReorderLessons={handleReorderLessons}
+                onReorderExercises={handleReorderExercises}
               />
             )}
 

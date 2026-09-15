@@ -493,6 +493,54 @@ export function deleteExercise(exerciseId: string) {
   return deleteExerciseCascade(exerciseId);
 }
 
+export function reorderTopics(orderedTopics: Topic[]): Topic[] {
+  const currentTopics = loadTopics();
+  const orderMap = new Map<string, number>();
+  orderedTopics.forEach((t, idx) => orderMap.set(t.id, idx));
+
+  const next = currentTopics.map(t => {
+    if (orderMap.has(t.id)) {
+      return { ...t, order: orderMap.get(t.id)! };
+    }
+    return t;
+  });
+
+  saveTopics(next);
+  return next;
+}
+
+export function reorderLessons(orderedLessons: Lesson[]): Lesson[] {
+  const currentLessons = loadLessons();
+  const orderMap = new Map<string, number>();
+  orderedLessons.forEach((l, idx) => orderMap.set(l.id, idx));
+
+  const next = currentLessons.map(l => {
+    if (orderMap.has(l.id)) {
+      return { ...l, order: orderMap.get(l.id)! };
+    }
+    return l;
+  });
+
+  saveLessons(next);
+  return next;
+}
+
+export function reorderExercises(orderedExercises: Exercise[]): Exercise[] {
+  const currentExercises = loadExercises();
+  const orderMap = new Map<string, number>();
+  orderedExercises.forEach((e, idx) => orderMap.set(e.id, idx));
+
+  const next = currentExercises.map(e => {
+    if (orderMap.has(e.id)) {
+      return { ...e, order: orderMap.get(e.id)! };
+    }
+    return e;
+  });
+
+  saveExercises(next);
+  return next;
+}
+
 // Record exercise result to update statistics
 export function recordExerciseResult(skill: SkillCategory, isCorrect: boolean, currentUser?: User | null) {
   const activeUser = currentUser || getCurrentUser();

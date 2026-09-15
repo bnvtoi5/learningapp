@@ -102,7 +102,45 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
   // Hint toggle
   const [showHint, setShowHint] = useState(false);
 
-  const currentEx = exercises[currentIndex];
+  // Cloze Passage & Sub-questions states
+  const [clozeAnswers, setClozeAnswers] = useState<{ [blankIdx: number]: string }>({});
+  const [subAnswers, setSubAnswers] = useState<{ [subId: string]: string | number | boolean }>({});
+
+  // Filter exercises: students cannot access hidden exercises
+  const availableExercises = React.useMemo(() => {
+    if (currentUser?.role === 'student') {
+      return exercises.filter(ex => !ex.isHidden);
+    }
+    return exercises;
+  }, [exercises, currentUser?.role]);
+
+  const currentEx = availableExercises[currentIndex];
+
+  // Helper to parse cloze text into segments
+  const parseClozePassage = (text: string) => {
+    const regex = /\[(.*?)\]/g;
+    const parts: { type: 'text' | 'blank'; content: string; blankIdx?: number; answer?: string }[] = [];
+    let lastIndex = 0;
+    let blankCounter = 0;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push({ type: 'text', content: text.substring(lastIndex, match.index) });
+      }
+      parts.push({
+        type: 'blank',
+        content: match[0],
+        blankIdx: blankCounter,
+        answer: match[1].trim(),
+      });
+      blankCounter++;
+      lastIndex = regex.lastIndex;
+    }
+    if (lastIndex < text.length) {
+      parts.push({ type: 'text', content: text.substring(lastIndex) });
+    }
+    return parts;
+  };
 
   // Helper to generate missing letter pattern for vocab_cloze
   const generateClozePattern = (word: string, customPattern?: string) => {
@@ -137,6 +175,8 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
     setPredictionNote('');
     setSpokenTranscript('');
     setIsListeningSpeech(false);
+    setClozeAnswers({});
+    setSubAnswers({});
 
     // Sentence builder words
     if (currentEx.type === 'sentence_builder') {
@@ -166,18 +206,36 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
     }
   }, [currentIndex, currentEx, settings.autoSpeak]);
 
+  if (availableExercises.length === 0) {
+    return (
+      <div className={`${theme.card} p-8 rounded-2xl text-center max-w-md mx-auto my-12 border ${theme.border}`}>
+        <AlertCircle className="w-12 h-12 mx-auto text-amber-500 mb-3" />
+        <h3 className="text-xl font-bold mb-2">Chưa có bài tập khả dụng</h3>
+        <p className={`text-xs ${theme.textMuted} mb-5`}>
+          Hiện bài học này chưa có câu hỏi nào hoặc các câu hỏi đang được giáo viên tạm ẩn.
+        </p>
+        <button
+          onClick={onExit}
+          className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-sm cursor-pointer"
+        >
+          Trở về danh sách bài học
+        </button>
+      </div>
+    );
+  }
+
   if (!currentEx) {
     return (
       <div className={`${theme.card} p-8 rounded-2xl text-center max-w-md mx-auto my-12 border ${theme.border}`}>
         <CheckCircle2 className="w-12 h-12 mx-auto text-emerald-500 mb-3" />
         <h3 className="text-xl font-bold mb-2">Hoàn thành phiên học!</h3>
         <p className={`text-xs ${theme.textMuted} mb-5`}>
-          Bạn đã hoàn thành tất cả {exercises.length} câu hỏi trong phiên này.
+          Bạn đã hoàn thành tất cả {availableExercises.length} câu hỏi trong phiên này.
         </p>
         <button
           id="btn-finish-practice-exit"
           onClick={onExit}
-          className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-sm"
+          className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-sm cursor-pointer"
         >
           Trở về trang chính
         </button>
@@ -224,12 +282,73 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
         case 'image_identify':
         case 'reading':
         case 'listening': {
-          const targetOptions = currentEx.correctOptions || [0];
-          const sortedSelected = [...selectedOptions].sort();
-          const sortedTarget = [...targetOptions].sort();
-          correct = JSON.stringify(sortedSelected) === JSON.stringify(sortedTarget);
-          userAnsStr = selectedOptions.map(idx => currentEx.options?.[idx] || idx).join(', ') || 'Chưa chọn';
-          correctAnsStr = targetOptions.map(idx => currentEx.options?.[idx] || idx).join(', ');
+          if (currentEx.passageClozeText) {
+            const tokens = parseClozePassage(currentEx.passageClozeText);
+            const blanks = tokens.filter(t => t.type === 'blank');
+            let allCorrect = true;
+            const userResults: string[] = [];
+            const correctResults: string[] = [];
+
+            blanks.forEach(b => {
+              const rawUser = (clozeAnswers[b.blankIdx!] || '').trim();
+              const userVal = rawUser.toLowerCase().replace(/[.,!?;:]/g, '');
+              const acceptable = (b.answer || '').split(/[/|]/).map(a => a.trim().toLowerCase().replace(/[.,!?;:]/g, ''));
+              const isBlankCorrect = acceptable.includes(userVal);
+              if (!isBlankCorrect) allCorrect = false;
+              userResults.push(`[${b.blankIdx! + 1}] ${rawUser || '(trống)'}`);
+              correctResults.push(`[${b.blankIdx! + 1}] ${b.answer}`);
+            });
+
+            correct = allCorrect && blanks.length > 0;
+            userAnsStr = userResults.join(', ');
+            correctAnsStr = correctResults.join(', ');
+          } else if (currentEx.subQuestions && currentEx.subQuestions.length > 0) {
+            let allSubCorrect = true;
+            const userResults: string[] = [];
+            const correctResults: string[] = [];
+
+            currentEx.subQuestions.forEach((sq, idx) => {
+              let sqCorrect = false;
+              let sqUserStr = '';
+              let sqCorrectStr = '';
+
+              if (sq.type === 'multiple_choice') {
+                const userOpt = subAnswers[sq.id];
+                sqCorrect = typeof userOpt === 'number' && userOpt === sq.correctOptionIdx;
+                sqUserStr = typeof userOpt === 'number' && sq.options?.[userOpt] ? sq.options[userOpt] : 'Chưa chọn';
+                sqCorrectStr = typeof sq.correctOptionIdx === 'number' && sq.options?.[sq.correctOptionIdx] ? sq.options[sq.correctOptionIdx] : '';
+              } else if (sq.type === 'true_false') {
+                const userTf = subAnswers[sq.id];
+                const targetTf = sq.correctTrueFalse ?? true;
+                sqCorrect = userTf === targetTf;
+                sqUserStr = userTf === true ? 'Đúng (True)' : userTf === false ? 'Sai (False)' : 'Chưa chọn';
+                sqCorrectStr = targetTf ? 'Đúng (True)' : 'Sai (False)';
+              } else {
+                // fill_blank or info_gap
+                const rawUser = String(subAnswers[sq.id] || '').trim();
+                const userTxt = rawUser.toLowerCase().replace(/[.,!?;:]/g, '');
+                const validAnswers = (sq.correctText || '').split(/[/|]/).map(a => a.trim().toLowerCase().replace(/[.,!?;:]/g, ''));
+                sqCorrect = validAnswers.includes(userTxt);
+                sqUserStr = rawUser || 'Chưa nhập';
+                sqCorrectStr = sq.correctText || '';
+              }
+
+              if (!sqCorrect) allSubCorrect = false;
+              userResults.push(`Câu ${idx + 1}: ${sqUserStr}`);
+              correctResults.push(`Câu ${idx + 1}: ${sqCorrectStr}`);
+            });
+
+            correct = allSubCorrect && currentEx.subQuestions.length > 0;
+            userAnsStr = userResults.join('; ');
+            correctAnsStr = correctResults.join('; ');
+          } else {
+            const targetOptions = currentEx.correctOptions || [0];
+            const sortedSelected = [...selectedOptions].sort();
+            const sortedTarget = [...targetOptions].sort();
+            correct = JSON.stringify(sortedSelected) === JSON.stringify(sortedTarget);
+            userAnsStr = selectedOptions.map(idx => currentEx.options?.[idx] || idx).join(', ') || 'Chưa chọn';
+            correctAnsStr = targetOptions.map(idx => currentEx.options?.[idx] || idx).join(', ');
+          }
           break;
         }
 
@@ -389,16 +508,16 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
         <div className="flex-1">
           <div className="flex items-center justify-between text-xs mb-1 font-medium">
             <span className={theme.textMuted}>
-              {title} • Câu {currentIndex + 1} / {exercises.length}
+              {title} • Câu {currentIndex + 1} / {availableExercises.length}
             </span>
             <span className="text-emerald-500 font-semibold">
-              {Math.round(((currentIndex + 1) / exercises.length) * 100)}%
+              {Math.round(((currentIndex + 1) / availableExercises.length) * 100)}%
             </span>
           </div>
           <div className={`w-full h-1.5 rounded-full overflow-hidden ${theme.highlight}`}>
             <div 
               className="h-full bg-emerald-500 transition-all duration-300 rounded-full"
-              style={{ width: `${((currentIndex + 1) / exercises.length) * 100}%` }}
+              style={{ width: `${((currentIndex + 1) / availableExercises.length) * 100}%` }}
             />
           </div>
         </div>
@@ -491,7 +610,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
             <ListeningAudioPlayer
               audioUrl={currentEx.audioUrl}
               audioText={currentEx.audioText}
-              title={currentEx.vocabWord ? `Bài nghe: ${currentEx.vocabWord}` : 'Băng ghi âm bài nghe (TOEIC Audio Track)'}
+              title={currentEx.audioTitle || (currentEx.vocabWord ? `Bài nghe: ${currentEx.vocabWord}` : 'Băng ghi âm bài nghe')}
             />
 
             {currentEx.audioPredictionHint && (
@@ -719,8 +838,223 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
           </div>
         )}
 
-        {/* 5. MULTIPLE CHOICE / COLLOCATION / TRUE_FALSE / READING / MIXED PRACTICE OPTIONS */}
-        {(currentEx.type === 'multiple_choice' || currentEx.type === 'collocation' || currentEx.type === 'true_false' || currentEx.type === 'image_identify' || currentEx.type === 'reading' || currentEx.type === 'listening' || (currentEx.type === 'mixed_practice' && currentEx.options && currentEx.options.length > 0)) && (
+        {/* 4b. PASSAGE CLOZE / INFORMATION COMPLETION FOR READING & LISTENING */}
+        {(currentEx.type === 'reading' || currentEx.type === 'listening') && currentEx.passageClozeText && (
+          <div className="p-4 sm:p-5 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 space-y-3">
+            <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+              <span>Đoạn văn điền khuyết: Tìm thông tin và điền từ chính xác vào các chỗ trống bên dưới:</span>
+            </div>
+            <div className="text-sm sm:text-base leading-loose font-serif select-text">
+              {parseClozePassage(currentEx.passageClozeText).map((part, pIdx) => {
+                if (part.type === 'text') {
+                  return <span key={pIdx} className="whitespace-pre-wrap">{part.content}</span>;
+                }
+                const bIdx = part.blankIdx!;
+                const userVal = clozeAnswers[bIdx] || '';
+                const acceptable = (part.answer || '').split(/[/|]/).map(a => a.trim().toLowerCase().replace(/[.,!?;:]/g, ''));
+                const isBlankCorrect = acceptable.includes(userVal.trim().toLowerCase().replace(/[.,!?;:]/g, ''));
+
+                return (
+                  <span key={pIdx} className="inline-flex items-center mx-1.5 my-1 align-middle">
+                    <span className="text-[10px] font-bold text-neutral-400 mr-1">({bIdx + 1})</span>
+                    <input
+                      type="text"
+                      disabled={isChecked}
+                      value={userVal}
+                      onChange={e => setClozeAnswers(prev => ({ ...prev, [bIdx]: e.target.value }))}
+                      placeholder="..."
+                      className={`px-2.5 py-1 rounded-lg border text-sm font-sans font-semibold transition-all outline-none ${
+                        isChecked
+                          ? isBlankCorrect
+                            ? 'border-emerald-500 bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                            : 'border-rose-500 bg-rose-500/20 text-rose-600 dark:text-rose-400'
+                          : `${theme.inputBg} ${theme.border} focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500`
+                      }`}
+                      style={{ width: `${Math.max(80, (part.answer?.length || 5) * 12 + 25)}px` }}
+                    />
+                    {isChecked && !isBlankCorrect && (
+                      <span className="ml-1 px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-[11px] font-mono font-bold">
+                        {part.answer}
+                      </span>
+                    )}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* 4c. SUB-QUESTIONS (MULTIPLE CHOICE, TRUE/FALSE, FILL BLANK, INFORMATION GAP) */}
+        {(currentEx.type === 'reading' || currentEx.type === 'listening') && !currentEx.passageClozeText && currentEx.subQuestions && currentEx.subQuestions.length > 0 && (
+          <div className="space-y-4 pt-1">
+            <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center justify-between">
+              <span>Danh sách các câu hỏi ({currentEx.subQuestions.length} câu):</span>
+              <span className={`text-[11px] ${theme.textMuted} font-normal`}>Đọc/nghe kỹ bài để trả lời</span>
+            </div>
+
+            <div className="space-y-3.5">
+              {currentEx.subQuestions.map((subQ, idx) => {
+                let isSubCorrect = false;
+                if (isChecked) {
+                  if (subQ.type === 'multiple_choice') {
+                    isSubCorrect = subAnswers[subQ.id] === subQ.correctOptionIdx;
+                  } else if (subQ.type === 'true_false') {
+                    isSubCorrect = subAnswers[subQ.id] === (subQ.correctTrueFalse ?? true);
+                  } else {
+                    const cleanUser = String(subAnswers[subQ.id] || '').trim().toLowerCase().replace(/[.,!?;:]/g, '');
+                    const validAnswers = (subQ.correctText || '').split(/[/|]/).map(a => a.trim().toLowerCase().replace(/[.,!?;:]/g, ''));
+                    isSubCorrect = validAnswers.includes(cleanUser);
+                  }
+                }
+
+                return (
+                  <div
+                    key={subQ.id || idx}
+                    className={`p-4 rounded-xl border transition-all ${
+                      isChecked
+                        ? isSubCorrect
+                          ? 'border-emerald-500/50 bg-emerald-500/5'
+                          : 'border-rose-500/50 bg-rose-500/5'
+                        : `${theme.card} ${theme.border}`
+                    }`}
+                  >
+                    <div className="flex items-start gap-2.5 mb-3">
+                      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                        isChecked
+                          ? isSubCorrect ? 'bg-emerald-500 text-white' : 'bg-rose-500 text-white'
+                          : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                      }`}>
+                        {idx + 1}
+                      </span>
+                      <div className="flex-1">
+                        <div className="text-xs sm:text-sm font-semibold leading-relaxed select-text">
+                          {subQ.prompt}
+                        </div>
+                        {subQ.type === 'info_gap' && (
+                          <span className="text-[10px] text-sky-500 font-medium block mt-0.5">
+                            * Information Gap: Đọc và trích xuất thông tin từ bài để điền
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Multiple Choice SubQuestion */}
+                    {subQ.type === 'multiple_choice' && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 pl-8">
+                        {(subQ.options || []).map((opt, optIdx) => {
+                          const isSelected = subAnswers[subQ.id] === optIdx;
+                          const isTarget = subQ.correctOptionIdx === optIdx;
+                          let optStyle = `${theme.card} ${theme.border} hover:border-emerald-500/50`;
+                          if (isChecked) {
+                            if (isTarget) {
+                              optStyle = 'border-emerald-500 bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold';
+                            } else if (isSelected && !isTarget) {
+                              optStyle = 'border-rose-500 bg-rose-500/20 text-rose-600 dark:text-rose-400';
+                            } else {
+                              optStyle = 'opacity-40';
+                            }
+                          } else if (isSelected) {
+                            optStyle = 'border-emerald-500 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold';
+                          }
+
+                          return (
+                            <button
+                              key={optIdx}
+                              type="button"
+                              disabled={isChecked}
+                              onClick={() => setSubAnswers(prev => ({ ...prev, [subQ.id]: optIdx }))}
+                              className={`p-2.5 rounded-lg border text-left text-xs flex items-center gap-2 transition-all cursor-pointer ${optStyle}`}
+                            >
+                              <span className="w-5 h-5 rounded bg-black/10 dark:bg-white/10 flex items-center justify-center font-bold text-[10px]">
+                                {String.fromCharCode(65 + optIdx)}
+                              </span>
+                              <span className="flex-1 truncate">{opt}</span>
+                              {isChecked && isTarget && <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* True / False SubQuestion */}
+                    {subQ.type === 'true_false' && (
+                      <div className="flex items-center gap-3 pt-1 pl-8">
+                        {[
+                          { label: 'Đúng (True)', val: true },
+                          { label: 'Sai (False)', val: false },
+                        ].map(choice => {
+                          const isSelected = subAnswers[subQ.id] === choice.val;
+                          const isTarget = (subQ.correctTrueFalse ?? true) === choice.val;
+                          let btnStyle = `${theme.card} ${theme.border} hover:border-emerald-500/50`;
+                          if (isChecked) {
+                            if (isTarget) {
+                              btnStyle = 'border-emerald-500 bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold';
+                            } else if (isSelected && !isTarget) {
+                              btnStyle = 'border-rose-500 bg-rose-500/20 text-rose-600 dark:text-rose-400';
+                            } else {
+                              btnStyle = 'opacity-40';
+                            }
+                          } else if (isSelected) {
+                            btnStyle = 'border-emerald-500 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold';
+                          }
+
+                          return (
+                            <button
+                              key={String(choice.val)}
+                              type="button"
+                              disabled={isChecked}
+                              onClick={() => setSubAnswers(prev => ({ ...prev, [subQ.id]: choice.val }))}
+                              className={`px-4 py-2 rounded-lg border text-xs font-semibold cursor-pointer transition-all ${btnStyle}`}
+                            >
+                              {choice.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Fill blank or Info Gap SubQuestion */}
+                    {(subQ.type === 'fill_blank' || subQ.type === 'info_gap') && (
+                      <div className="pl-8 space-y-1.5 pt-1">
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            disabled={isChecked}
+                            value={String(subAnswers[subQ.id] || '')}
+                            onChange={e => setSubAnswers(prev => ({ ...prev, [subQ.id]: e.target.value }))}
+                            placeholder={subQ.type === 'info_gap' ? "Gõ thông tin trích xuất từ bài..." : "Nhập từ cần điền..."}
+                            className={`flex-1 p-2.5 rounded-lg text-xs font-semibold border ${
+                              isChecked
+                                ? isSubCorrect
+                                  ? 'border-emerald-500 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                                  : 'border-rose-500 bg-rose-500/15 text-rose-600 dark:text-rose-400'
+                                : `${theme.inputBg} ${theme.border} focus:border-emerald-500`
+                            }`}
+                          />
+                        </div>
+                        {isChecked && !isSubCorrect && (
+                          <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
+                            ✓ Đáp án đúng: <strong>{subQ.correctText}</strong>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* SubQuestion Explanation */}
+                    {isChecked && subQ.explanation && (
+                      <div className="mt-2.5 pl-8 text-[11px] text-amber-500 border-t border-inherit pt-1.5">
+                        💡 <strong>Giải thích:</strong> {subQ.explanation}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* 5. MULTIPLE CHOICE / COLLOCATION / TRUE_FALSE / READING / MIXED PRACTICE OPTIONS (STANDARD SINGLE-QUESTION) */}
+        {!currentEx.passageClozeText && !(currentEx.subQuestions && currentEx.subQuestions.length > 0) && (currentEx.type === 'multiple_choice' || currentEx.type === 'collocation' || currentEx.type === 'true_false' || currentEx.type === 'image_identify' || currentEx.type === 'reading' || currentEx.type === 'listening' || (currentEx.type === 'mixed_practice' && currentEx.options && currentEx.options.length > 0)) && (
           <div className="space-y-2 pt-1">
             {(currentEx.type === 'true_false' ? ['Đúng (True)', 'Sai (False)'] : currentEx.options || []).map((option, idx) => {
               const isSelected = selectedOptions.includes(idx);

@@ -38,6 +38,7 @@ export const TopicEditModal: React.FC<TopicEditModalProps> = ({
   const [primarySkill, setPrimarySkill] = useState<SkillCategory>('vocabulary');
   const [selectedClassName, setSelectedClassName] = useState<string>('');
   const [selectedClassId, setSelectedClassId] = useState<string>('');
+  const [isHidden, setIsHidden] = useState<boolean>(false);
 
   const distinctNames = useMemo(() => getDistinctClassNames(classrooms), [classrooms]);
 
@@ -51,6 +52,7 @@ export const TopicEditModal: React.FC<TopicEditModalProps> = ({
       setDescription(topic.description || '');
       setSubject(topic.subject || 'Tiếng Anh');
       setPrimarySkill(topic.primarySkill || 'vocabulary');
+      setIsHidden(!!topic.isHidden);
       const currentClass = available.find(c => c.id === topic.classroomId) || fallbackClass;
       if (currentClass) {
         setSelectedClassName(currentClass.name);
@@ -61,6 +63,7 @@ export const TopicEditModal: React.FC<TopicEditModalProps> = ({
       setDescription('');
       setSubject('Tiếng Anh');
       setPrimarySkill('vocabulary');
+      setIsHidden(false);
       if (fallbackClass) {
         setSelectedClassName(fallbackClass.name);
         setSelectedClassId(fallbackClass.id);
@@ -99,6 +102,8 @@ export const TopicEditModal: React.FC<TopicEditModalProps> = ({
       description: description.trim(),
       subject: subject.trim() || 'Tiếng Anh',
       primarySkill,
+      isHidden,
+      order: topic && !isCreate ? topic.order : undefined,
       createdAt: topic && !isCreate ? topic.createdAt : Date.now(),
     });
     onClose();
@@ -260,6 +265,27 @@ export const TopicEditModal: React.FC<TopicEditModalProps> = ({
               onChange={e => setDescription(e.target.value)}
               className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-xs border ${theme.border}`}
             />
+          </div>
+
+          {/* Visibility Setting: Hide from students */}
+          <div className={`p-3 rounded-xl border ${isHidden ? 'border-amber-500/30 bg-amber-500/5' : 'border-neutral-500/20 bg-neutral-500/5'} flex items-center justify-between`}>
+            <div>
+              <span className="text-xs font-semibold block">
+                {isHidden ? 'Đang ẩn với học sinh' : 'Hiển thị với học sinh'}
+              </span>
+              <span className={`text-[11px] ${theme.textMuted}`}>
+                {isHidden ? 'Chỉ giáo viên thấy chủ đề này, học sinh sẽ không thấy' : 'Học sinh trong lớp có thể nhìn thấy và vào học'}
+              </span>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isHidden}
+                onChange={e => setIsHidden(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-neutral-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
+            </label>
           </div>
 
           <div className="pt-2 flex justify-end gap-2">
