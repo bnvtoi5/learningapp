@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { X, Save, BookOpen, AlertCircle, School } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { X, Save, BookOpen, AlertCircle, School, Layers } from 'lucide-react';
 import { Topic, SkillCategory, Classroom } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import { loadClassrooms } from '../utils/storage';
+import { getDistinctClassNames, getClassroomsByName } from '../utils/classroomHelpers';
 
 interface TopicEditModalProps {
   topic: Topic | null;
@@ -35,26 +36,51 @@ export const TopicEditModal: React.FC<TopicEditModalProps> = ({
   const [description, setDescription] = useState('');
   const [subject, setSubject] = useState('Tiếng Anh');
   const [primarySkill, setPrimarySkill] = useState<SkillCategory>('vocabulary');
+  const [selectedClassName, setSelectedClassName] = useState<string>('');
   const [selectedClassId, setSelectedClassId] = useState<string>('');
+
+  const distinctNames = useMemo(() => getDistinctClassNames(classrooms), [classrooms]);
 
   useEffect(() => {
     if (!isOpen) return;
     const available = (propClassrooms && propClassrooms.length > 0) ? propClassrooms : loadClassrooms();
-    const fallbackId = defaultClassroomId || available[0]?.id || '';
+    const fallbackClass = available.find(c => c.id === defaultClassroomId) || available[0];
+    
     if (topic && !isCreate) {
       setTitle(topic.title);
       setDescription(topic.description || '');
       setSubject(topic.subject || 'Tiếng Anh');
       setPrimarySkill(topic.primarySkill || 'vocabulary');
-      setSelectedClassId(topic.classroomId || fallbackId);
+      const currentClass = available.find(c => c.id === topic.classroomId) || fallbackClass;
+      if (currentClass) {
+        setSelectedClassName(currentClass.name);
+        setSelectedClassId(currentClass.id);
+      }
     } else {
       setTitle('');
       setDescription('');
       setSubject('Tiếng Anh');
       setPrimarySkill('vocabulary');
-      setSelectedClassId(fallbackId);
+      if (fallbackClass) {
+        setSelectedClassName(fallbackClass.name);
+        setSelectedClassId(fallbackClass.id);
+      }
     }
   }, [topic, isOpen, isCreate, defaultClassroomId, propClassrooms]);
+
+  const availableCodesForSelectedName = useMemo(() => {
+    if (!selectedClassName) return classrooms;
+    return getClassroomsByName(classrooms, selectedClassName);
+  }, [classrooms, selectedClassName]);
+
+  // When selectedClassName changes, ensure selectedClassId is within available codes
+  const handleClassNameChange = (name: string) => {
+    setSelectedClassName(name);
+    const codes = getClassroomsByName(classrooms, name);
+    if (codes.length > 0) {
+      setSelectedClassId(codes[0].id);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -62,7 +88,7 @@ export const TopicEditModal: React.FC<TopicEditModalProps> = ({
     e.preventDefault();
     if (!title.trim()) return;
     if (!selectedClassId) {
-      alert('Vui lòng chọn Lớp học cho chủ đề này!');
+      alert('Vui lòng chọn Lớp học & Mã lớp cho chủ đề này!');
       return;
     }
 
@@ -122,26 +148,52 @@ export const TopicEditModal: React.FC<TopicEditModalProps> = ({
               )}
             </div>
           ) : (
-            <div>
-              <label className={`text-xs font-semibold ${theme.textMuted} block mb-1 flex items-center gap-1`}>
-                <School className="w-3.5 h-3.5 text-emerald-500" />
-                <span>Thuộc Lớp học * (Bắt buộc):</span>
-              </label>
-              <select
-                id="select-topic-classroom"
-                required
-                value={selectedClassId}
-                onChange={e => setSelectedClassId(e.target.value)}
-                className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-sm font-semibold border ${theme.border} focus:border-emerald-500`}
-              >
-                {classrooms.map(c => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} {c.code ? `(${c.code})` : ''}
-                  </option>
-                ))}
-              </select>
-              <span className={`text-[11px] ${theme.textMuted} mt-1 block`}>
-                Chủ đề sẽ được gán và hiển thị cho học sinh thuộc lớp này.
+            <div className="space-y-2 p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5">
+              <div className="flex items-center gap-1 text-xs font-bold text-emerald-500">
+                <School className="w-4 h-4 shrink-0" />
+                <span>Chọn Lớp & Mã lớp gán chủ đề (2 Tầng) *:</span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className={`text-[11px] font-semibold ${theme.textMuted} block mb-0.5`}>
+                    1. Tên Lớp (Khối):
+                  </label>
+                  <select
+                    value={selectedClassName}
+                    onChange={e => handleClassNameChange(e.target.value)}
+                    className={`w-full p-2 rounded-lg ${theme.inputBg} text-xs font-semibold border ${theme.border}`}
+                  >
+                    {distinctNames.map(name => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className={`text-[11px] font-semibold ${theme.textMuted} block mb-0.5`}>
+                    2. Mã lớp cụ thể *:
+                  </label>
+                  <select
+                    id="select-topic-classroom"
+                    required
+                    value={selectedClassId}
+                    onChange={e => setSelectedClassId(e.target.value)}
+                    className={`w-full p-2 rounded-lg ${theme.inputBg} text-xs font-bold text-sky-400 border ${theme.border}`}
+                  >
+                    {availableCodesForSelectedName.map(c => (
+                      <option key={c.id} value={c.id}>
+                        Mã: {c.code}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <span className={`text-[10px] ${theme.textMuted} block`}>
+                Chủ đề sẽ chỉ hiển thị cho học sinh thuộc mã lớp này.
               </span>
             </div>
           )}

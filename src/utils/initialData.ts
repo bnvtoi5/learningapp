@@ -14,6 +14,8 @@ export const defaultStudentPermissions: StudentPermissions = {
   canViewExplanations: true,
   canAccessErrorNotebook: true,
   canViewProgress: true,
+  canMarkErrorResolved: false, // Mặc định KHÓA: Học sinh không tự ý đánh dấu đã hiểu trong Sổ lỗi
+  canDeleteErrorLog: false, // Mặc định KHÓA: Học sinh không tự ý xóa lỗi sai trong Sổ lỗi
 };
 
 // Sạch hoàn toàn: Không có lớp học mặc định, người dùng tự tạo lớp

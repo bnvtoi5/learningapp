@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   User as UserIcon, 
   Lock, 
@@ -7,11 +7,13 @@ import {
   CheckCircle2, 
   AlertCircle,
   School,
-  GraduationCap
+  GraduationCap,
+  Layers
 } from 'lucide-react';
 import { User, Classroom } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import { defaultStudentPermissions } from '../utils/storage';
+import { getDistinctClassNames, getClassroomsByName } from '../utils/classroomHelpers';
 
 interface AuthScreenProps {
   classrooms?: Classroom[];
@@ -35,9 +37,36 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
-  const [selectedClassId, setSelectedClassId] = useState<string>(classrooms?.[0]?.id || '');
+
+  // 2-Tier Classroom Selection for Registration
+  const distinctClassNames = useMemo(() => getDistinctClassNames(classrooms), [classrooms]);
+  const [selectedClassName, setSelectedClassName] = useState<string>(distinctClassNames[0] || '');
+  const [selectedClassId, setSelectedClassId] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState('');
   const [successNotice, setSuccessNotice] = useState('');
+
+  // Available class codes for the chosen class name
+  const availableClassCodes = useMemo(() => {
+    if (!selectedClassName) return [];
+    return getClassroomsByName(classrooms, selectedClassName);
+  }, [classrooms, selectedClassName]);
+
+  // Sync selectedClassName and selectedClassId
+  useEffect(() => {
+    if (distinctClassNames.length > 0 && (!selectedClassName || !distinctClassNames.includes(selectedClassName))) {
+      setSelectedClassName(distinctClassNames[0]);
+    }
+  }, [distinctClassNames, selectedClassName]);
+
+  useEffect(() => {
+    if (availableClassCodes.length > 0) {
+      if (!selectedClassId || !availableClassCodes.some(c => c.id === selectedClassId)) {
+        setSelectedClassId(availableClassCodes[0].id);
+      }
+    } else {
+      setSelectedClassId('');
+    }
+  }, [availableClassCodes, selectedClassId]);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -290,30 +319,79 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 />
               </div>
 
-              {/* Classroom choice */}
-              <div className="space-y-1.5 p-3 rounded-xl border border-emerald-500/20 bg-emerald-500/5">
-                <label className="text-xs font-bold text-emerald-500 flex items-center gap-1.5">
-                  <School className="w-3.5 h-3.5" />
-                  <span>Chọn Lớp học muốn tham gia *:</span>
-                </label>
+              {/* 2-Tier Classroom choice */}
+              <div className="space-y-3 p-3.5 rounded-2xl border border-emerald-500/20 bg-emerald-500/5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-emerald-500 flex items-center gap-1.5">
+                    <School className="w-4 h-4" />
+                    <span>Chọn Lớp & Mã Lớp tham gia *:</span>
+                  </label>
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    2 Tầng Lớp
+                  </span>
+                </div>
+
                 {classrooms.length === 0 ? (
                   <p className="text-xs text-rose-500">Chưa có lớp học trên hệ thống. Vui lòng liên hệ Giáo viên tạo lớp.</p>
                 ) : (
-                  <select
-                    id="register-select-classroom"
-                    value={selectedClassId}
-                    onChange={e => setSelectedClassId(e.target.value)}
-                    className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-xs font-medium focus:outline-none focus:ring-1 focus:ring-emerald-500`}
-                  >
-                    {classrooms.map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} [Mã: {c.code}]
-                      </option>
-                    ))}
-                  </select>
+                  <div className="space-y-2.5">
+                    {/* Tầng 1: Chọn Tên Lớp / Khối lớp */}
+                    <div className="space-y-1">
+                      <span className={`text-[11px] font-semibold ${theme.textMuted} flex items-center gap-1`}>
+                        <School className="w-3 h-3 text-emerald-500" />
+                        <span>1. Chọn Tên Lớp / Khối:</span>
+                      </span>
+                      <select
+                        id="register-select-classname"
+                        value={selectedClassName}
+                        onChange={e => {
+                          const newName = e.target.value;
+                          setSelectedClassName(newName);
+                          const matched = getClassroomsByName(classrooms, newName);
+                          if (matched.length > 0) {
+                            setSelectedClassId(matched[0].id);
+                          } else {
+                            setSelectedClassId('');
+                          }
+                        }}
+                        className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer border ${theme.border}`}
+                      >
+                        {distinctClassNames.map(name => {
+                          const count = classrooms.filter(c => c.name.trim() === name).length;
+                          return (
+                            <option key={name} value={name}>
+                              {name} ({count} mã lớp)
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+
+                    {/* Tầng 2: Chọn Mã Lớp thuộc Lớp đã chọn */}
+                    <div className="space-y-1">
+                      <span className={`text-[11px] font-semibold ${theme.textMuted} flex items-center gap-1`}>
+                        <Layers className="w-3 h-3 text-sky-500" />
+                        <span>2. Chọn Mã Lớp cụ thể ({selectedClassName}):</span>
+                      </span>
+                      <select
+                        id="register-select-classcode"
+                        value={selectedClassId}
+                        onChange={e => setSelectedClassId(e.target.value)}
+                        disabled={availableClassCodes.length === 0}
+                        className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-xs font-mono font-bold text-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-500 cursor-pointer border ${theme.border} disabled:opacity-50`}
+                      >
+                        {availableClassCodes.map(c => (
+                          <option key={c.id} value={c.id}>
+                            Mã: {c.code} {c.description ? `— ${c.description}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
                 )}
+
                 <p className={`text-[10px] ${theme.textMuted}`}>
-                  ℹ️ Sau khi đăng ký, tài khoản sẽ chuyển sang trạng thái chờ Giáo viên phê duyệt vào lớp.
+                  ℹ️ Sau khi đăng ký, tài khoản sẽ chuyển sang trạng thái chờ Giáo viên phê duyệt vào mã lớp đã chọn.
                 </p>
               </div>
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   ShieldCheck, 
   Users, 
@@ -22,13 +22,23 @@ import {
   FileText,
   AlertTriangle,
   BarChart2,
-  Filter
+  Filter,
+  Layers,
+  ChevronRight,
+  FolderPlus
 } from 'lucide-react';
 import { User, Classroom, Topic, StudentPermissions, UserStatus, ErrorLog } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import { defaultStudentPermissions } from '../utils/storage';
 import { ConfirmModal } from './ConfirmModal';
 import { AdminErrorManager } from './AdminErrorManager';
+import { ClassroomCascadingFilter } from './ClassroomCascadingFilter';
+import { 
+  getDistinctClassNames, 
+  getClassroomsByName, 
+  groupClassroomsByName, 
+  isClassCodeDuplicate 
+} from '../utils/classroomHelpers';
 
 interface AdminPortalProps {
   users?: User[];
@@ -66,10 +76,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const { getThemeClasses } = useTheme();
   const theme = getThemeClasses();
 
-  const [activeTab, setActiveTab] = useState<'pending' | 'students' | 'classes' | 'permissions' | 'errors'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'students' | 'classes'>('pending');
 
-  // Search & filter states
+  // Search & 2-tier filter states for Students tab
   const [searchQuery, setSearchQuery] = useState('');
+  const [filterClassName, setFilterClassName] = useState<string>('all');
   const [filterClassId, setFilterClassId] = useState<string>('all');
 
   // Classroom form states
@@ -78,6 +89,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [newClassName, setNewClassName] = useState('');
   const [newClassCode, setNewClassCode] = useState('');
   const [newClassDesc, setNewClassDesc] = useState('');
+  const [formError, setFormError] = useState('');
 
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
@@ -92,6 +104,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     message: '',
     onConfirm: () => {},
   });
+
+  // Distinct class names for quick selection in create form
+  const distinctNames = useMemo(() => getDistinctClassNames(classrooms), [classrooms]);
+
+  // Group classrooms by Tên Lớp
+  const groupedClassrooms = useMemo(() => groupClassroomsByName(classrooms), [classrooms]);
 
   // Count pending students
   const pendingStudents = users.filter(u => u.role === 'student' && u.status === 'pending');
@@ -148,28 +166,48 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     onUpdateUser({ ...student, status: newStatus });
   };
 
-  // Handle Save Classroom
+  // Handle Save Classroom (Tên lớp được trùng, Mã lớp không được trùng)
   const handleSaveClassroom = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newClassName.trim() || !newClassCode.trim()) return;
+    setFormError('');
+
+    const cleanName = newClassName.trim();
+    const cleanCode = newClassCode.trim().toUpperCase();
+    const cleanDesc = newClassDesc.trim();
+
+    if (!cleanName) {
+      setFormError('Vui lòng nhập hoặc chọn Tên Lớp (ví dụ: Lớp 9).');
+      return;
+    }
+
+    if (!cleanCode) {
+      setFormError('Vui lòng nhập Mã Lớp (ví dụ: 9A1, 9A2).');
+      return;
+    }
+
+    // Check duplicate code across other classrooms
+    if (isClassCodeDuplicate(classrooms, cleanCode, editingClassId || undefined)) {
+      setFormError(`Mã lớp "${cleanCode}" đã tồn tại trên hệ thống. Tên lớp có thể trùng nhau nhưng Mã lớp phải là duy nhất.`);
+      return;
+    }
 
     if (editingClassId) {
       const existing = classrooms.find(c => c.id === editingClassId);
       if (existing) {
         onUpdateClassroom({
           ...existing,
-          name: newClassName.trim(),
-          code: newClassCode.trim().toUpperCase(),
-          description: newClassDesc.trim(),
+          name: cleanName,
+          code: cleanCode,
+          description: cleanDesc,
         });
       }
       setEditingClassId(null);
     } else {
       const newClass: Classroom = {
-        id: 'class_' + Date.now(),
-        name: newClassName.trim(),
-        code: newClassCode.trim().toUpperCase(),
-        description: newClassDesc.trim(),
+        id: 'class_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        name: cleanName,
+        code: cleanCode,
+        description: cleanDesc,
         createdAt: Date.now(),
       };
       onCreateClassroom(newClass);
@@ -181,12 +219,33 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     setIsCreatingClass(false);
   };
 
-  // Filter active students
+  // Open Create modal prefilled with specific class name
+  const handleOpenCreateWithClassName = (className?: string) => {
+    setEditingClassId(null);
+    setNewClassName(className || '');
+    setNewClassCode('');
+    setNewClassDesc('');
+    setFormError('');
+    setIsCreatingClass(true);
+  };
+
+  // Filter active students using 2 tiers
   const filteredStudents = activeStudents.filter(s => {
     const matchQuery = s.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
                        s.username.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchClass = filterClassId === 'all' || s.classroomId === filterClassId;
-    return matchQuery && matchClass;
+    
+    if (!matchQuery) return false;
+
+    if (filterClassId !== 'all') {
+      return s.classroomId === filterClassId;
+    }
+
+    if (filterClassName !== 'all') {
+      const studentClass = classrooms.find(c => c.id === s.classroomId);
+      return studentClass && studentClass.name.trim().toLowerCase() === filterClassName.trim().toLowerCase();
+    }
+
+    return true;
   });
 
   return (
@@ -197,10 +256,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         <div>
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-6 h-6 text-emerald-500" />
-            <h2 className="text-xl font-bold tracking-tight">Trung tâm Quản trị Admin</h2>
+            <h2 className="text-xl font-bold tracking-tight">Trung tâm Quản trị Lớp & Học Sinh</h2>
           </div>
           <p className={`text-xs ${theme.textMuted} mt-0.5`}>
-            Phê duyệt học sinh, phân tách lớp học và cài đặt quyền truy cập học tập.
+            Quản lý phân tầng 2 lớp học (Tên lớp & Mã lớp), phê duyệt và phân quyền học sinh.
           </p>
         </div>
 
@@ -208,7 +267,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         <div className="flex items-center gap-2">
           <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 flex items-center gap-1.5">
             <School className="w-3.5 h-3.5" />
-            <span>{classrooms.length} Lớp học</span>
+            <span>{distinctNames.length} Tên Lớp ({classrooms.length} Mã)</span>
           </span>
           <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-sky-500/10 text-sky-500 border border-sky-500/20 flex items-center gap-1.5">
             <Users className="w-3.5 h-3.5" />
@@ -233,7 +292,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           },
           { 
             id: 'classes', 
-            label: '3. Quản lý Lớp học', 
+            label: '3. Quản lý Lớp & Mã lớp (2 Tầng)', 
             icon: School 
           },
         ].map(tab => {
@@ -297,7 +356,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               <UserCheck className="w-10 h-10 text-emerald-500 mx-auto opacity-70" />
               <div className="text-sm font-bold">Không có học sinh nào đang chờ duyệt</div>
               <p className={`text-xs ${theme.textMuted} max-w-sm mx-auto`}>
-                Khi học sinh mới đăng ký tài khoản và chọn lớp, yêu cầu sẽ hiển thị tại đây để bạn phê duyệt.
+                Khi học sinh mới đăng ký tài khoản và chọn lớp / mã lớp, yêu cầu sẽ hiển thị tại đây để bạn phê duyệt.
               </p>
             </div>
           ) : (
@@ -319,7 +378,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       <div className="flex flex-wrap items-center gap-3 text-xs">
                         <span className="text-emerald-500 font-semibold flex items-center gap-1">
                           <School className="w-3 h-3" />
-                          <span>Lớp đăng ký: {targetClass?.name || 'Chưa gán lớp'}</span>
+                          <span>Lớp: {targetClass ? `${targetClass.name} (Mã: ${targetClass.code})` : 'Chưa gán lớp'}</span>
                         </span>
                         <span className={theme.textMuted}>
                           Đăng ký lúc: {new Date(student.registeredAt).toLocaleDateString('vi-VN')} {new Date(student.registeredAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
@@ -336,7 +395,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                       >
                         {classrooms.map(c => (
                           <option key={c.id} value={c.id}>
-                            {c.name}
+                            {c.name} [Mã: {c.code}]
                           </option>
                         ))}
                       </select>
@@ -347,7 +406,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                         className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
                       >
                         <Check className="w-4 h-4" />
-                        <span>Chấp thuận (Duyệt)</span>
+                        <span>Duyệt</span>
                       </button>
 
                       <button
@@ -372,8 +431,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       {/* ========================================================= */}
       {activeTab === 'students' && (
         <div className="space-y-4">
-          {/* Filter & Search Bar */}
-          <div className="flex flex-col sm:flex-row gap-2">
+          {/* 2-Tier Filter & Search Bar */}
+          <div className="flex flex-col lg:flex-row gap-2.5">
             <div className="relative flex-1">
               <Search className={`w-4 h-4 absolute left-3 top-3 ${theme.textMuted}`} />
               <input
@@ -385,23 +444,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               />
             </div>
 
-            <div className="flex items-center gap-2">
-              <Filter className={`w-3.5 h-3.5 ${theme.textMuted}`} />
-              <select
-                value={filterClassId}
-                onChange={e => setFilterClassId(e.target.value)}
-                className={`p-2 rounded-xl ${theme.inputBg} text-xs font-medium border ${theme.border}`}
-              >
-                <option value="all">Tất cả lớp ({activeStudents.length})</option>
-                {classrooms.map(c => {
-                  const count = activeStudents.filter(s => s.classroomId === c.id).length;
-                  return (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({count} HS)
-                    </option>
-                  );
-                })}
-              </select>
+            <div className="shrink-0">
+              <ClassroomCascadingFilter
+                classrooms={classrooms}
+                selectedClassName={filterClassName}
+                onSelectClassName={setFilterClassName}
+                selectedClassId={filterClassId}
+                onSelectClassId={setFilterClassId}
+                showAllOption={true}
+                allNameLabel="Tất cả Tên Lớp"
+                allCodeLabel="Tất cả Mã Lớp"
+                size="sm"
+              />
             </div>
           </div>
 
@@ -421,7 +475,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             <div className={`${theme.card} p-8 rounded-2xl border ${theme.border} text-center space-y-2`}>
               <Users className={`w-8 h-8 ${theme.textMuted} mx-auto opacity-70`} />
               <div className="text-sm font-bold">Không tìm thấy học sinh nào phù hợp</div>
-              <p className={`text-xs ${theme.textMuted}`}>Hãy thử tìm kiếm với từ khóa khác hoặc chọn lớp học khác.</p>
+              <p className={`text-xs ${theme.textMuted}`}>Hãy thử tìm kiếm với từ khóa khác hoặc đổi bộ lọc lớp.</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -451,16 +505,16 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                             </span>
                           )}
                         </div>
-                        <div className="flex items-center gap-2 text-xs mt-0.5">
-                          <span className={`text-[11px] ${theme.textMuted}`}>Lớp học:</span>
+                        <div className="flex items-center gap-2 text-xs mt-1">
+                          <span className={`text-[11px] ${theme.textMuted}`}>Lớp & Mã:</span>
                           <select
                             value={student.classroomId || ''}
                             onChange={e => handleChangeClassroom(student, e.target.value)}
-                            className={`px-2 py-1 rounded-lg ${theme.inputBg} text-xs font-semibold text-emerald-500 border ${theme.border}`}
+                            className={`px-2.5 py-1 rounded-lg ${theme.inputBg} text-xs font-semibold text-emerald-500 border ${theme.border}`}
                           >
                             {classrooms.map(c => (
                               <option key={c.id} value={c.id}>
-                                {c.name}
+                                {c.name} — Mã: {c.code}
                               </option>
                             ))}
                           </select>
@@ -478,7 +532,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                               : 'border-amber-500/40 text-amber-500 hover:bg-amber-500/10'
                           }`}
                         >
-                          {isBlocked ? 'Mở khóa tài khoản' : 'Tạm khóa'}
+                          {isBlocked ? 'Mở khóa' : 'Tạm khóa'}
                         </button>
                         <button
                           type="button"
@@ -503,14 +557,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                     {/* Permission Switches Grid */}
                     <div className="space-y-1.5">
                       <span className={`text-[11px] font-bold ${theme.textMuted} block`}>
-                        Phân quyền thao tác của học sinh này:
+                        Phân quyền thao tác của học sinh:
                       </span>
-                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2">
                         {[
                           { 
                             key: 'canViewTheory' as const, 
                             label: 'Lý thuyết', 
-                            desc: 'Xem Pha Learn',
+                            desc: 'Xem bài giảng',
                             icon: BookOpen 
                           },
                           { 
@@ -528,7 +582,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                           { 
                             key: 'canAccessErrorNotebook' as const, 
                             label: 'Sổ lỗi sai', 
-                            desc: 'Ôn câu sai',
+                            desc: 'Vào xem sổ lỗi',
                             icon: AlertTriangle 
                           },
                           { 
@@ -537,8 +591,22 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                             desc: 'Biểu đồ kỹ năng',
                             icon: BarChart2 
                           },
+                          { 
+                            key: 'canMarkErrorResolved' as const, 
+                            label: 'Đánh dấu đã hiểu', 
+                            desc: 'Tự gỡ lỗi sổ lỗi',
+                            icon: Check 
+                          },
+                          { 
+                            key: 'canDeleteErrorLog' as const, 
+                            label: 'Xóa câu sổ lỗi', 
+                            desc: 'Tự xóa lỗi phạt',
+                            icon: Trash2 
+                          },
                         ].map(item => {
-                          const isAllowed = perms[item.key] ?? true;
+                          const isAllowed = perms[item.key] ?? (
+                            item.key === 'canMarkErrorResolved' || item.key === 'canDeleteErrorLog' ? false : true
+                          );
                           const Icon = item.icon;
                           return (
                             <button
@@ -577,37 +645,37 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       )}
 
       {/* ========================================================= */}
-      {/* TAB 3: CLASSROOMS MANAGEMENT */}
+      {/* TAB 3: CLASSROOMS MANAGEMENT (2 TIERS) */}
       {/* ========================================================= */}
       {activeTab === 'classes' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold flex items-center gap-1.5">
-              <span>Danh sách Lớp học ({classrooms.length})</span>
-            </h3>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-bold flex items-center gap-1.5">
+                <School className="w-4 h-4 text-emerald-500" />
+                <span>Quản lý Lớp học 2 Tầng ({distinctNames.length} Tên Lớp, {classrooms.length} Mã Lớp)</span>
+              </h3>
+              <p className={`text-[11px] ${theme.textMuted} mt-0.5`}>
+                Tầng 1 là Tên Lớp (được đặt trùng, VD: "Lớp 9"), Tầng 2 là Mã Lớp cụ thể (duy nhất, VD: "9a1", "9a2").
+              </p>
+            </div>
             <button
               type="button"
-              onClick={() => {
-                setIsCreatingClass(true);
-                setEditingClassId(null);
-                setNewClassName('');
-                setNewClassCode('');
-                setNewClassDesc('');
-              }}
-              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1 shadow-sm"
+              onClick={() => handleOpenCreateWithClassName()}
+              className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm self-start sm:self-auto"
             >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Tạo lớp học mới</span>
+              <Plus className="w-4 h-4" />
+              <span>Tạo Lớp / Mã lớp mới</span>
             </button>
           </div>
 
           {/* Form: Create or Edit Classroom */}
           {isCreatingClass && (
-            <form onSubmit={handleSaveClassroom} className={`${theme.card} p-5 rounded-2xl border border-emerald-500/40 bg-emerald-500/5 space-y-3`}>
+            <form onSubmit={handleSaveClassroom} className={`${theme.card} p-5 rounded-2xl border border-emerald-500/40 bg-emerald-500/5 space-y-3.5`}>
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-emerald-500 flex items-center gap-1.5">
                   <School className="w-4 h-4" />
-                  <span>{editingClassId ? 'Chỉnh sửa thông tin Lớp học' : 'Tạo Lớp học mới'}</span>
+                  <span>{editingClassId ? 'Chỉnh sửa thông tin Mã Lớp' : 'Thêm Lớp học / Mã lớp mới'}</span>
                 </span>
                 <button
                   type="button"
@@ -618,45 +686,85 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 </button>
               </div>
 
+              {formError && (
+                <div className="p-2.5 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-500 text-xs font-medium flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{formError}</span>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className={`text-xs font-semibold ${theme.textMuted} block mb-1`}>
-                    Tên lớp học *:
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={newClassName}
-                    onChange={e => setNewClassName(e.target.value)}
-                    placeholder="VD: Lớp 9A1 - Anh Văn Căn Bản"
-                    className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-xs font-semibold border ${theme.border}`}
-                  />
+                {/* Tầng 1: Tên Lớp (được trùng) */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className={`text-xs font-semibold ${theme.textMuted}`}>
+                      1. Tên Lớp / Khối lớp (Được trùng) *:
+                    </label>
+                    {distinctNames.length > 0 && (
+                      <span className="text-[10px] text-emerald-500 font-medium">Gõ mới hoặc chọn sẵn</span>
+                    )}
+                  </div>
+                  
+                  <div className="space-y-1.5">
+                    <input
+                      type="text"
+                      required
+                      value={newClassName}
+                      onChange={e => setNewClassName(e.target.value)}
+                      placeholder="VD: Lớp 9, Lớp 8, Luyện Thi..."
+                      className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-xs font-semibold border ${theme.border}`}
+                    />
+                    
+                    {distinctNames.length > 0 && (
+                      <div className="flex flex-wrap gap-1 items-center pt-0.5">
+                        <span className={`text-[10px] ${theme.textMuted}`}>Tên có sẵn:</span>
+                        {distinctNames.map(name => (
+                          <button
+                            key={name}
+                            type="button"
+                            onClick={() => setNewClassName(name)}
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-semibold border transition-all ${
+                              newClassName === name
+                                ? 'bg-emerald-500 text-white border-emerald-500'
+                                : `${theme.badgeBg} border-inherit hover:opacity-80`
+                            }`}
+                          >
+                            {name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
-                <div>
-                  <label className={`text-xs font-semibold ${theme.textMuted} block mb-1`}>
-                    Mã lớp (học sinh dùng để nhận diện) *:
+                {/* Tầng 2: Mã Lớp (Bắt buộc duy nhất) */}
+                <div className="space-y-1">
+                  <label className={`text-xs font-semibold ${theme.textMuted} block`}>
+                    2. Mã Lớp cụ thể (BẮT BUỘC DUY NHẤT) *:
                   </label>
                   <input
                     type="text"
                     required
                     value={newClassCode}
                     onChange={e => setNewClassCode(e.target.value.toUpperCase())}
-                    placeholder="VD: 9A1-ENG"
-                    className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-xs font-mono font-bold border ${theme.border}`}
+                    placeholder="VD: 9A1, 9A2, 9_CHUYEN..."
+                    className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-xs font-mono font-bold text-sky-400 border ${theme.border}`}
                   />
+                  <p className={`text-[10px] ${theme.textMuted}`}>
+                    Mã định danh phân biệt giữa các lớp cùng tên (VD: 9A1 và 9A2 đều thuộc "Lớp 9").
+                  </p>
                 </div>
               </div>
 
               <div>
                 <label className={`text-xs font-semibold ${theme.textMuted} block mb-1`}>
-                  Mô tả mục tiêu của lớp:
+                  Mô tả mục tiêu của mã lớp này:
                 </label>
                 <input
                   type="text"
                   value={newClassDesc}
                   onChange={e => setNewClassDesc(e.target.value)}
-                  placeholder="VD: Dành cho học sinh khối 9 ôn tập kiến thức cốt lõi..."
+                  placeholder="VD: Dành cho học sinh chuyên Anh, học sinh bổ trợ..."
                   className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-xs border ${theme.border}`}
                 />
               </div>
@@ -674,87 +782,155 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm flex items-center gap-1.5"
                 >
                   <Save className="w-4 h-4" />
-                  <span>{editingClassId ? 'Lưu thay đổi' : 'Tạo lớp'}</span>
+                  <span>{editingClassId ? 'Lưu thay đổi' : 'Tạo lớp & Mã lớp'}</span>
                 </button>
               </div>
             </form>
           )}
 
-          {/* Classrooms Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {classrooms.map(c => {
-              const studentsInClass = users.filter(u => u.classroomId === c.id && u.role === 'student');
-              const approvedCount = studentsInClass.filter(u => u.status === 'approved').length;
-              const pendingCount = studentsInClass.filter(u => u.status === 'pending').length;
+          {/* 2-Tier Grouped Classrooms Display */}
+          {classrooms.length === 0 ? (
+            <div className={`${theme.card} p-8 rounded-2xl border ${theme.border} text-center space-y-3`}>
+              <School className="w-10 h-10 text-emerald-500 mx-auto opacity-70" />
+              <div className="text-sm font-bold">Chưa có Lớp học nào trên hệ thống</div>
+              <p className={`text-xs ${theme.textMuted} max-w-sm mx-auto`}>
+                Hãy tạo tên lớp (VD: Lớp 9) và các mã lớp (VD: 9A1, 9A2) để bắt đầu phân lớp và soạn bài!
+              </p>
+              <button
+                type="button"
+                onClick={() => handleOpenCreateWithClassName()}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Tạo lớp học đầu tiên</span>
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {(Object.entries(groupedClassrooms) as [string, Classroom[]][]).map(([className, classList]) => {
+                const totalStudentsInGroup = users.filter(u => 
+                  u.role === 'student' && classList.some(c => c.id === u.classroomId)
+                ).length;
+                const totalTopicsInGroup = topics.filter(t => 
+                  classList.some(c => c.id === t.classroomId)
+                ).length;
 
-              return (
-                <div
-                  key={c.id}
-                  className={`${theme.card} p-4 rounded-2xl border ${theme.border} flex flex-col justify-between gap-3 shadow-sm`}
-                >
-                  <div className="space-y-1.5">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <h4 className="font-bold text-sm">{c.name}</h4>
-                        <span className="inline-block mt-0.5 px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
-                          Mã lớp: {c.code}
-                        </span>
+                return (
+                  <div
+                    key={className}
+                    className={`${theme.card} rounded-2xl border ${theme.border} overflow-hidden shadow-sm`}
+                  >
+                    {/* Tầng 1: Header Nhóm Tên Lớp */}
+                    <div className="p-4 bg-emerald-500/5 border-b border-inherit flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-500 flex items-center justify-center font-black text-sm">
+                          <School className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="font-bold text-base tracking-tight text-emerald-500">{className}</h4>
+                            <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                              {classList.length} Mã lớp
+                            </span>
+                          </div>
+                          <p className={`text-xs ${theme.textMuted}`}>
+                            Tổng: {totalStudentsInGroup} học sinh • {totalTopicsInGroup} chủ đề bài học
+                          </p>
+                        </div>
                       </div>
 
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingClassId(c.id);
-                            setNewClassName(c.name);
-                            setNewClassCode(c.code);
-                            setNewClassDesc(c.description || '');
-                            setIsCreatingClass(true);
-                          }}
-                          className={`p-1.5 rounded-lg border ${theme.border} hover:opacity-80`}
-                          title="Sửa lớp"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setConfirmDialog({
-                              isOpen: true,
-                              title: 'Xóa lớp học',
-                              message: `Bạn có chắc muốn xóa lớp "${c.name}"?`,
-                              confirmText: 'Xóa lớp',
-                              isDanger: true,
-                              onConfirm: () => onDeleteClassroom(c.id),
-                            });
-                          }}
-                          className="p-1.5 rounded-lg border border-rose-500/30 text-rose-500 hover:bg-rose-500/10 cursor-pointer"
-                          title="Xóa lớp"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                      {/* Add quick code to this class name */}
+                      <button
+                        type="button"
+                        onClick={() => handleOpenCreateWithClassName(className)}
+                        className="px-3 py-1.5 rounded-xl bg-emerald-600/90 hover:bg-emerald-600 text-white text-xs font-bold flex items-center gap-1 shadow-sm self-start sm:self-auto"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Thêm mã lớp cho {className}</span>
+                      </button>
                     </div>
 
-                    <p className={`text-xs ${theme.textMuted} line-clamp-2`}>
-                      {c.description || 'Chưa có mô tả chi tiết.'}
-                    </p>
-                  </div>
+                    {/* Tầng 2: Danh sách các Mã Lớp con */}
+                    <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {classList.map(c => {
+                        const studentsInCode = users.filter(u => u.classroomId === c.id && u.role === 'student');
+                        const approvedCount = studentsInCode.filter(u => u.status === 'approved').length;
+                        const pendingCount = studentsInCode.filter(u => u.status === 'pending').length;
+                        const topicsInCode = topics.filter(t => t.classroomId === c.id);
 
-                  {/* Class Stats */}
-                  <div className={`p-2.5 rounded-xl ${theme.badgeBg} flex items-center justify-between text-xs`}>
-                    <span className={theme.textMuted}>Sĩ số lớp:</span>
-                    <div className="flex items-center gap-2 font-bold">
-                      <span className="text-emerald-500">{approvedCount} đã duyệt</span>
-                      {pendingCount > 0 && (
-                        <span className="text-amber-500">({pendingCount} chờ duyệt)</span>
-                      )}
+                        return (
+                          <div
+                            key={c.id}
+                            className={`p-3.5 rounded-xl border ${theme.border} ${theme.badgeBg} flex flex-col justify-between gap-2.5 transition-all hover:border-emerald-500/40`}
+                          >
+                            <div className="space-y-1">
+                              <div className="flex items-start justify-between">
+                                <div className="flex items-center gap-2">
+                                  <span className="px-2.5 py-1 rounded-lg text-xs font-mono font-black bg-sky-500/15 text-sky-400 border border-sky-500/30">
+                                    Mã: {c.code}
+                                  </span>
+                                  <span className="text-xs font-bold">{c.name}</span>
+                                </div>
+
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingClassId(c.id);
+                                      setNewClassName(c.name);
+                                      setNewClassCode(c.code);
+                                      setNewClassDesc(c.description || '');
+                                      setFormError('');
+                                      setIsCreatingClass(true);
+                                    }}
+                                    className={`p-1.5 rounded-lg border ${theme.border} hover:opacity-80`}
+                                    title="Sửa mã lớp"
+                                  >
+                                    <Edit3 className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setConfirmDialog({
+                                        isOpen: true,
+                                        title: 'Xóa mã lớp học',
+                                        message: `Bạn có chắc muốn xóa mã lớp "${c.code}" thuộc "${c.name}"?`,
+                                        confirmText: 'Xóa mã lớp',
+                                        isDanger: true,
+                                        onConfirm: () => onDeleteClassroom(c.id),
+                                      });
+                                    }}
+                                    className="p-1.5 rounded-lg border border-rose-500/30 text-rose-500 hover:bg-rose-500/10 cursor-pointer"
+                                    title="Xóa mã lớp"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+
+                              <p className={`text-xs ${theme.textMuted} line-clamp-1`}>
+                                {c.description || 'Chưa có mô tả mục tiêu.'}
+                              </p>
+                            </div>
+
+                            {/* Stats info */}
+                            <div className="flex items-center justify-between pt-1 border-t border-inherit/40 text-[11px]">
+                              <span className="font-semibold text-emerald-400">
+                                {approvedCount} HS đã duyệt {pendingCount > 0 && <span className="text-amber-400">({pendingCount} chờ)</span>}
+                              </span>
+                              <span className={theme.textMuted}>
+                                {topicsInCode.length} chủ đề
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

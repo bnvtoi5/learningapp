@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { resolveMediaUrl } from '../utils/mediaDb';
+import { getBestVoiceForPreference } from '../utils/audio';
 
 interface ListeningAudioPlayerProps {
   audioUrl?: string;
@@ -26,7 +27,7 @@ export const ListeningAudioPlayer: React.FC<ListeningAudioPlayerProps> = ({
   title = 'Băng ghi âm bài nghe (TOEIC Audio Track)',
   autoPlay = false,
 }) => {
-  const { getThemeClasses } = useTheme();
+  const { settings, getThemeClasses } = useTheme();
   const theme = getThemeClasses();
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -120,6 +121,11 @@ export const ListeningAudioPlayer: React.FC<ListeningAudioPlayerProps> = ({
       utterance.lang = 'en-US';
       utterance.rate = playbackRate;
       utterance.volume = isMuted ? 0 : volume;
+
+      const bestVoice = getBestVoiceForPreference(settings?.voiceGender, settings?.selectedVoiceURI);
+      if (bestVoice) {
+        utterance.voice = bestVoice;
+      }
 
       utterance.onstart = () => {
         setIsPlaying(true);

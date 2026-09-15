@@ -3,11 +3,13 @@ import {
   AlertTriangle, 
   RotateCcw, 
   CheckCircle, 
+  CheckCircle2,
   Trash2, 
   Filter, 
   BookOpen, 
   Sparkles,
-  HelpCircle
+  HelpCircle,
+  Lock
 } from 'lucide-react';
 import { ErrorLog, SkillCategory, User, Topic, Lesson, Exercise } from '../types';
 import { useTheme } from '../context/ThemeContext';
@@ -43,6 +45,10 @@ export const ErrorReview: React.FC<ErrorReviewProps> = ({
   const [filterSkill, setFilterSkill] = useState<string>('all');
   const [showResolved, setShowResolved] = useState(false);
   const [errorToDelete, setErrorToDelete] = useState<ErrorLog | null>(null);
+
+  const isAdmin = currentUser?.role === 'admin';
+  const canMarkResolved = isAdmin || (currentUser?.permissions?.canMarkErrorResolved === true);
+  const canDeleteError = isAdmin || (currentUser?.permissions?.canDeleteErrorLog === true);
 
   const studentClassroomId = currentUser?.classroomId;
   const studentTopicIds = new Set(topics.filter(t => studentClassroomId && t.classroomId === studentClassroomId).map(t => t.id));
@@ -207,25 +213,36 @@ export const ErrorReview: React.FC<ErrorReviewProps> = ({
                 </div>
 
                 <div className="flex items-center gap-1 shrink-0">
-                  {!err.resolved && (
+                  {canMarkResolved && !err.resolved && (
                     <button
                       id={`btn-mark-resolved-${err.id}`}
                       onClick={() => onResolveError(err.id)}
                       title="Đánh dấu đã hiểu / Khắc phục xong"
-                      className="p-1.5 text-emerald-400 hover:text-emerald-500 rounded hover:bg-emerald-500/10"
+                      className="p-1.5 text-emerald-400 hover:text-emerald-500 rounded hover:bg-emerald-500/10 cursor-pointer"
                     >
                       <CheckCircle className="w-4 h-4" />
                     </button>
                   )}
-                  <button
-                    id={`btn-delete-error-${err.id}`}
-                    type="button"
-                    onClick={() => setErrorToDelete(err)}
-                    title="Xóa khỏi sổ lỗi"
-                    className="p-1.5 text-rose-400 hover:text-rose-500 rounded hover:bg-rose-500/10 cursor-pointer"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  {canDeleteError && (
+                    <button
+                      id={`btn-delete-error-${err.id}`}
+                      type="button"
+                      onClick={() => setErrorToDelete(err)}
+                      title="Xóa khỏi sổ lỗi"
+                      className="p-1.5 text-rose-400 hover:text-rose-500 rounded hover:bg-rose-500/10 cursor-pointer"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                  {!isAdmin && !canMarkResolved && !canDeleteError && !err.resolved && (
+                    <span 
+                      title="Chức năng tự gỡ/xóa lỗi bị khóa bởi Giáo viên. Bạn cần bấm 'Ôn tập' để làm lại và gỡ lỗi."
+                      className="p-1 rounded bg-neutral-800 text-neutral-400 text-[10px] flex items-center gap-1 opacity-70"
+                    >
+                      <Lock className="w-3 h-3" />
+                      <span className="hidden sm:inline">Phạt làm lại</span>
+                    </span>
+                  )}
                 </div>
               </div>
 

@@ -1,4 +1,5 @@
 import { resolveMediaUrl } from './mediaDb';
+import { speakText } from './audio';
 
 function formatTime(secs: number): string {
   if (isNaN(secs) || secs < 0 || !isFinite(secs)) return '00:00';
@@ -29,11 +30,8 @@ export function attachAudioBarListeners(container: HTMLElement): () => void {
           const resolved = await resolveMediaUrl(audioSrc);
           const audio = new Audio(resolved || audioSrc);
           audio.play().catch(console.warn);
-        } else if (audioText && 'speechSynthesis' in window) {
-          window.speechSynthesis.cancel();
-          const ut = new SpeechSynthesisUtterance(audioText);
-          ut.lang = 'en-US';
-          window.speechSynthesis.speak(ut);
+        } else if (audioText) {
+          speakText(audioText);
         }
       };
       bar.addEventListener('click', clickHandler);
@@ -152,15 +150,14 @@ export function attachAudioBarListeners(container: HTMLElement): () => void {
               setPlayingState(true);
             }).catch(console.warn);
           }
-        } else if (rawText && 'speechSynthesis' in window) {
+        } else if (rawText) {
           // TTS Fallback
           setPlayingState(true);
-          const ut = new SpeechSynthesisUtterance(rawText);
-          ut.lang = 'en-US';
-          ut.rate = currentSpeed;
-          ut.onend = () => setPlayingState(false);
-          ut.onerror = () => setPlayingState(false);
-          window.speechSynthesis.speak(ut);
+          speakText(rawText, {
+            rate: currentSpeed,
+            onEnd: () => setPlayingState(false),
+            onError: () => setPlayingState(false),
+          });
         }
       };
     }

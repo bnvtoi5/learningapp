@@ -12,6 +12,7 @@ interface StoredMediaRecord {
   blob?: Blob;
   mimeType?: string;
   size?: number;
+  folderId?: string;
   createdAt: number;
 }
 
@@ -75,6 +76,7 @@ export async function saveMediaToDb(asset: {
   dataUrl?: string;
   blob?: Blob;
   onlineUrl?: string;
+  folderId?: string;
   size?: number;
 }): Promise<MediaAsset> {
   const db = await getMediaDatabase();
@@ -93,6 +95,7 @@ export async function saveMediaToDb(asset: {
     blob: blobToStore,
     mimeType: blobToStore ? blobToStore.type : undefined,
     size: asset.size || (blobToStore ? blobToStore.size : undefined),
+    folderId: asset.folderId,
     createdAt,
   };
 
@@ -117,6 +120,7 @@ export async function saveMediaToDb(asset: {
         type: asset.type,
         name: asset.name,
         url: runtimeUrl || `idb:${asset.id}`,
+        folderId: asset.folderId,
         size: record.size,
         createdAt,
       };
@@ -156,6 +160,7 @@ export async function getAllMediaFromDb(): Promise<MediaAsset[]> {
             type: rec.type,
             name: rec.name,
             url,
+            folderId: rec.folderId,
             size: rec.size,
             createdAt: rec.createdAt,
           };
@@ -172,6 +177,31 @@ export async function getAllMediaFromDb(): Promise<MediaAsset[]> {
     console.warn('Failed to load media from IndexedDB:', err);
     return [];
   }
+}
+
+/**
+ * Update media asset folder
+ */
+export async function updateMediaAssetFolder(id: string, folderId?: string): Promise<void> {
+  const db = await getMediaDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_NAME], 'readwrite');
+    const store = tx.objectStore(STORE_NAME);
+    const getReq = store.get(id);
+
+    getReq.onsuccess = () => {
+      const record: StoredMediaRecord | undefined = getReq.result;
+      if (record) {
+        record.folderId = folderId;
+        const putReq = store.put(record);
+        putReq.onsuccess = () => resolve();
+        putReq.onerror = () => reject(putReq.error);
+      } else {
+        resolve();
+      }
+    };
+    getReq.onerror = () => reject(getReq.error);
+  });
 }
 
 /**

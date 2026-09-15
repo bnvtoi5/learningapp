@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   FolderPlus, 
   Plus, 
@@ -15,14 +15,20 @@ import {
   AlertCircle,
   School,
   Sparkles,
-  HardDrive
+  HardDrive,
+  Filter,
+  Copy,
+  MoveRight,
+  CheckSquare,
+  Square,
+  X
 } from 'lucide-react';
 import { 
   Topic, 
   Lesson, 
   Exercise, 
-  SkillCategory,
-  Classroom
+  SkillCategory, 
+  Classroom 
 } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import { ExerciseEditModal } from './ExerciseEditModal';
@@ -32,7 +38,10 @@ import { ConfirmModal } from './ConfirmModal';
 import { LessonLectureModal } from './LessonLectureModal';
 import { LessonContentEditorModal } from './LessonContentEditorModal';
 import { MediaLibraryModal } from './MediaLibraryModal';
+import { BulkContentModal, BulkActionType, BulkContentType } from './BulkContentModal';
 import { loadClassrooms } from '../utils/storage';
+import { ClassroomCascadingFilter } from './ClassroomCascadingFilter';
+import { getClassroomsByName } from '../utils/classroomHelpers';
 
 interface ContentManagerProps {
   topics?: Topic[];
@@ -48,6 +57,16 @@ interface ContentManagerProps {
   onDeleteLesson: (lessonId: string) => void;
   onUpdateExercise: (exercise: Exercise) => void;
   onDeleteExercise: (exerciseId: string) => void;
+  // Bulk action handlers
+  onBulkDeleteTopics?: (topicIds: string[]) => void;
+  onBulkMoveTopics?: (topicIds: string[], targetClassroomId: string) => void;
+  onBulkDuplicateTopics?: (topicIds: string[], targetClassroomIds: string[]) => void;
+  onBulkDeleteLessons?: (lessonIds: string[]) => void;
+  onBulkMoveLessons?: (lessonIds: string[], targetTopicId: string) => void;
+  onBulkDuplicateLessons?: (lessonIds: string[], targetTopicIds: string[]) => void;
+  onBulkDeleteExercises?: (exerciseIds: string[]) => void;
+  onBulkMoveExercises?: (exerciseIds: string[], targetLessonId: string) => void;
+  onBulkDuplicateExercises?: (exerciseIds: string[], targetLessonIds: string[]) => void;
 }
 
 const TYPE_NAMES: Record<string, string> = {
@@ -84,6 +103,15 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
   onDeleteLesson,
   onUpdateExercise,
   onDeleteExercise,
+  onBulkDeleteTopics,
+  onBulkMoveTopics,
+  onBulkDuplicateTopics,
+  onBulkDeleteLessons,
+  onBulkMoveLessons,
+  onBulkDuplicateLessons,
+  onBulkDeleteExercises,
+  onBulkMoveExercises,
+  onBulkDuplicateExercises,
 }) => {
   const { getThemeClasses } = useTheme();
   const theme = getThemeClasses();
@@ -91,14 +119,39 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
   // Always ensure fresh classrooms from props or local storage
   const classrooms = (propClassrooms && propClassrooms.length > 0) ? propClassrooms : loadClassrooms();
 
-  // Classroom & Search Filters
+  // Classroom & Search Filters (2 Tiers)
+  const [selectedClassName, setSelectedClassName] = useState<string>('all');
   const [selectedClassFilter, setSelectedClassFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Filter topics by selected class
-  const filteredTopics = selectedClassFilter === 'all'
-    ? topics
-    : topics.filter(t => t.classroomId === selectedClassFilter);
+  // Bulk Selection States
+  const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>([]);
+  const [selectedLessonIds, setSelectedLessonIds] = useState<string[]>([]);
+  const [selectedExerciseIds, setSelectedExerciseIds] = useState<string[]>([]);
+
+  // Bulk Action Modal State
+  const [bulkModal, setBulkModal] = useState<{
+    isOpen: boolean;
+    action: BulkActionType;
+    contentType: BulkContentType;
+  }>({
+    isOpen: false,
+    action: 'delete',
+    contentType: 'topic',
+  });
+
+  // Filter topics by selected 2-tier class
+  const filteredTopics = useMemo(() => {
+    if (selectedClassFilter !== 'all') {
+      return topics.filter(t => t.classroomId === selectedClassFilter);
+    }
+    if (selectedClassName !== 'all') {
+      const classList = getClassroomsByName(classrooms, selectedClassName);
+      const classIdSet = new Set(classList.map(c => c.id));
+      return topics.filter(t => classIdSet.has(t.classroomId));
+    }
+    return topics;
+  }, [topics, classrooms, selectedClassName, selectedClassFilter]);
 
   const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
@@ -124,6 +177,22 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
     onConfirm: () => {},
   });
 
+  // Calculate scoped statistics according to current 2-tier filter
+  const filteredTopicIds = useMemo(() => new Set(filteredTopics.map(t => t.id)), [filteredTopics]);
+  const scopedLessons = useMemo(() => lessons.filter(l => filteredTopicIds.has(l.topicId)), [lessons, filteredTopicIds]);
+  const scopedLessonIds = useMemo(() => new Set(scopedLessons.map(l => l.id)), [scopedLessons]);
+  const scopedExercises = useMemo(() => exercises.filter(e => scopedLessonIds.has(e.lessonId)), [exercises, scopedLessonIds]);
+
+  const scopedClassCount = useMemo(() => {
+    if (selectedClassFilter !== 'all') {
+      return 1;
+    }
+    if (selectedClassName !== 'all') {
+      return getClassroomsByName(classrooms, selectedClassName).length;
+    }
+    return classrooms.length;
+  }, [classrooms, selectedClassName, selectedClassFilter]);
+
   // Current active topic & its lessons
   const activeTopic = filteredTopics.find(t => t.id === selectedTopicId) || filteredTopics[0] || null;
   const currentLessons = activeTopic ? lessons.filter(l => l.topicId === activeTopic.id) : [];
@@ -144,6 +213,58 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
     );
   });
 
+  // Bulk Selection Helpers
+  const toggleSelectTopic = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedTopicIds(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAllTopics = () => {
+    if (selectedTopicIds.length === filteredTopics.length) {
+      setSelectedTopicIds([]);
+    } else {
+      setSelectedTopicIds(filteredTopics.map(t => t.id));
+    }
+  };
+
+  const toggleSelectLesson = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedLessonIds(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAllLessons = () => {
+    if (selectedLessonIds.length === currentLessons.length) {
+      setSelectedLessonIds([]);
+    } else {
+      setSelectedLessonIds(currentLessons.map(l => l.id));
+    }
+  };
+
+  const toggleSelectExercise = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedExerciseIds(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAllExercises = () => {
+    if (selectedExerciseIds.length === filteredExercises.length) {
+      setSelectedExerciseIds([]);
+    } else {
+      setSelectedExerciseIds(filteredExercises.map(e => e.id));
+    }
+  };
+
+  const clearAllSelections = () => {
+    setSelectedTopicIds([]);
+    setSelectedLessonIds([]);
+    setSelectedExerciseIds([]);
+  };
+
   return (
     <div className="space-y-6 pb-24 animate-in fade-in duration-150">
       {/* Top Header */}
@@ -155,27 +276,27 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {classrooms.length > 0 && (
-            <div className="flex items-center gap-1.5">
-              <School className={`w-3.5 h-3.5 ${theme.textMuted}`} />
-              <select
-                id="select-manager-class-filter"
-                value={selectedClassFilter}
-                onChange={e => {
-                  setSelectedClassFilter(e.target.value);
+            <div className="flex items-center gap-2">
+              <ClassroomCascadingFilter
+                classrooms={classrooms}
+                selectedClassName={selectedClassName}
+                onSelectClassName={name => {
+                  setSelectedClassName(name);
                   setSelectedTopicId(null);
                   setSelectedLessonId(null);
                 }}
-                className={`p-2 rounded-xl text-xs font-semibold ${theme.inputBg} border ${theme.border}`}
-              >
-                <option value="all">Tất cả lớp ({classrooms.length})</option>
-                {classrooms.map(c => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} ({topics.filter(t => t.classroomId === c.id).length} chủ đề)
-                  </option>
-                ))}
-              </select>
+                selectedClassId={selectedClassFilter}
+                onSelectClassId={id => {
+                  setSelectedClassFilter(id);
+                  setSelectedTopicId(null);
+                  setSelectedLessonId(null);
+                }}
+                showAllOption={true}
+                allOptionLabel="Tất cả các lớp"
+                size="sm"
+              />
             </div>
           )}
 
@@ -225,11 +346,13 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
         </div>
       )}
 
-      {/* Summary stats pills */}
+      {/* Summary stats pills (Scaled to Active Filter) */}
       <div className="grid grid-cols-4 gap-2">
         <div className={`p-3 rounded-xl ${theme.card} border ${theme.border} text-center`}>
-          <span className={`text-[11px] ${theme.textMuted} block`}>Lớp học</span>
-          <span className="text-lg font-bold text-teal-400">{classrooms.length}</span>
+          <span className={`text-[11px] ${theme.textMuted} block truncate`}>
+            {selectedClassFilter !== 'all' || selectedClassName !== 'all' ? 'Lớp đang lọc' : 'Tổng Lớp học'}
+          </span>
+          <span className="text-lg font-bold text-teal-400">{scopedClassCount}</span>
         </div>
         <div className={`p-3 rounded-xl ${theme.card} border ${theme.border} text-center`}>
           <span className={`text-[11px] ${theme.textMuted} block`}>Chủ đề</span>
@@ -237,11 +360,11 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
         </div>
         <div className={`p-3 rounded-xl ${theme.card} border ${theme.border} text-center`}>
           <span className={`text-[11px] ${theme.textMuted} block`}>Bài học</span>
-          <span className="text-lg font-bold text-sky-500">{lessons.length}</span>
+          <span className="text-lg font-bold text-sky-500">{scopedLessons.length}</span>
         </div>
         <div className={`p-3 rounded-xl ${theme.card} border ${theme.border} text-center`}>
           <span className={`text-[11px] ${theme.textMuted} block`}>Tổng câu hỏi</span>
-          <span className="text-lg font-bold text-amber-500">{exercises.length}</span>
+          <span className="text-lg font-bold text-amber-500">{scopedExercises.length}</span>
         </div>
       </div>
 
@@ -268,30 +391,56 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
             {/* Topic Selector */}
             <div className={`${theme.card} p-4 rounded-2xl border ${theme.border} space-y-3`}>
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-emerald-500">
-                  1. Chủ đề ({filteredTopics.length})
-                </span>
-                <button
-                  onClick={() => setIsCreatingTopic(true)}
-                  className={`p-1 rounded-lg ${theme.highlight} text-xs text-emerald-500 hover:opacity-80 cursor-pointer`}
-                  title="Thêm chủ đề"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                </button>
+                <div className="flex items-center gap-2">
+                  {filteredTopics.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={toggleSelectAllTopics}
+                      className="text-[11px] text-emerald-500 hover:opacity-80 flex items-center gap-1 cursor-pointer font-semibold"
+                      title={selectedTopicIds.length === filteredTopics.length ? 'Bỏ chọn tất cả chủ đề' : 'Chọn tất cả chủ đề'}
+                    >
+                      {selectedTopicIds.length > 0 && selectedTopicIds.length === filteredTopics.length ? (
+                        <CheckSquare className="w-3.5 h-3.5 text-emerald-500" />
+                      ) : (
+                        <Square className="w-3.5 h-3.5 opacity-50" />
+                      )}
+                    </button>
+                  )}
+                  <span className="text-xs font-bold uppercase tracking-wider text-emerald-500">
+                    1. Chủ đề ({filteredTopics.length})
+                  </span>
+                </div>
+                <div className="flex items-center gap-1">
+                  {selectedTopicIds.length > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-500 font-bold">
+                      Đã chọn {selectedTopicIds.length}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => setIsCreatingTopic(true)}
+                    className={`p-1 rounded-lg ${theme.highlight} text-xs text-emerald-500 hover:opacity-80 cursor-pointer`}
+                    title="Thêm chủ đề"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
                 {filteredTopics.map(topic => {
                   const isSelected = activeTopic?.id === topic.id;
+                  const isChecked = selectedTopicIds.includes(topic.id);
                   const topicLessons = lessons.filter(l => l.topicId === topic.id);
                   const topicClass = classrooms.find(c => c.id === topic.classroomId);
                   return (
                     <div
                       key={topic.id}
                       className={`p-2.5 rounded-xl border transition-all flex items-center justify-between gap-2 cursor-pointer ${
-                        isSelected 
-                          ? 'border-emerald-500 bg-emerald-500/10 text-emerald-500 font-semibold' 
-                          : `${theme.border} ${theme.highlight}`
+                        isChecked
+                          ? 'border-emerald-500 bg-emerald-500/15 text-emerald-500 font-semibold'
+                          : isSelected 
+                            ? 'border-emerald-500/60 bg-emerald-500/5 text-emerald-500 font-semibold' 
+                            : `${theme.border} ${theme.highlight}`
                       }`}
                       onClick={() => {
                         setSelectedTopicId(topic.id);
@@ -299,6 +448,19 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                         setSelectedLessonId(firstL?.id || null);
                       }}
                     >
+                      <button
+                        type="button"
+                        onClick={(e) => toggleSelectTopic(topic.id, e)}
+                        className="p-1 text-emerald-500 hover:scale-110 transition-transform cursor-pointer shrink-0"
+                        title={isChecked ? 'Bỏ chọn chủ đề này' : 'Chọn chủ đề này'}
+                      >
+                        {isChecked ? (
+                          <CheckSquare className="w-4 h-4 text-emerald-500" />
+                        ) : (
+                          <Square className="w-4 h-4 opacity-40 hover:opacity-100" />
+                        )}
+                      </button>
+
                       <div className="min-w-0 flex-1">
                         {topicClass && (
                           <span className="text-[9px] px-1.5 py-0.2 rounded bg-teal-500/15 text-teal-400 font-medium inline-block mb-0.5">
@@ -344,19 +506,42 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
             {/* Lesson Selector */}
             <div className={`${theme.card} p-4 rounded-2xl border ${theme.border} space-y-3`}>
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-sky-500">
-                  2. Bài học ({currentLessons.length})
-                </span>
-                {activeTopic && (
-                  <button
-                    onClick={() => setIsCreatingLesson(true)}
-                    className={`p-1 rounded-lg ${theme.highlight} text-xs text-sky-500 hover:opacity-80 flex items-center gap-1 cursor-pointer`}
-                    title="Thêm bài học"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span className="text-[10px] font-medium">Thêm bài</span>
-                  </button>
-                )}
+                <div className="flex items-center gap-2">
+                  {currentLessons.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={toggleSelectAllLessons}
+                      className="text-[11px] text-sky-500 hover:opacity-80 flex items-center gap-1 cursor-pointer font-semibold"
+                      title={selectedLessonIds.length === currentLessons.length ? 'Bỏ chọn tất cả bài học' : 'Chọn tất cả bài học'}
+                    >
+                      {selectedLessonIds.length > 0 && selectedLessonIds.length === currentLessons.length ? (
+                        <CheckSquare className="w-3.5 h-3.5 text-sky-500" />
+                      ) : (
+                        <Square className="w-3.5 h-3.5 opacity-50" />
+                      )}
+                    </button>
+                  )}
+                  <span className="text-xs font-bold uppercase tracking-wider text-sky-500">
+                    2. Bài học ({currentLessons.length})
+                  </span>
+                </div>
+                <div className="flex items-center gap-1">
+                  {selectedLessonIds.length > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-500 font-bold">
+                      Đã chọn {selectedLessonIds.length}
+                    </span>
+                  )}
+                  {activeTopic && (
+                    <button
+                      onClick={() => setIsCreatingLesson(true)}
+                      className={`p-1 rounded-lg ${theme.highlight} text-xs text-sky-500 hover:opacity-80 flex items-center gap-1 cursor-pointer`}
+                      title="Thêm bài học"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span className="text-[10px] font-medium">Thêm bài</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
               {currentLessons.length === 0 ? (
@@ -376,17 +561,33 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                 <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
                   {currentLessons.map(lesson => {
                     const isSelected = activeLesson?.id === lesson.id;
+                    const isChecked = selectedLessonIds.includes(lesson.id);
                     const lessonExs = exercises.filter(e => e.lessonId === lesson.id);
                     return (
                       <div
                         key={lesson.id}
                         className={`p-2.5 rounded-xl border transition-all flex items-center justify-between gap-2 cursor-pointer ${
-                          isSelected 
-                            ? 'border-sky-500 bg-sky-500/10 text-sky-500 font-semibold' 
-                            : `${theme.border} ${theme.highlight}`
+                          isChecked
+                            ? 'border-sky-500 bg-sky-500/15 text-sky-500 font-semibold'
+                            : isSelected 
+                              ? 'border-sky-500/60 bg-sky-500/5 text-sky-500 font-semibold' 
+                              : `${theme.border} ${theme.highlight}`
                         }`}
                         onClick={() => setSelectedLessonId(lesson.id)}
                       >
+                        <button
+                          type="button"
+                          onClick={(e) => toggleSelectLesson(lesson.id, e)}
+                          className="p-1 text-sky-500 hover:scale-110 transition-transform cursor-pointer shrink-0"
+                          title={isChecked ? 'Bỏ chọn bài học này' : 'Chọn bài học này'}
+                        >
+                          {isChecked ? (
+                            <CheckSquare className="w-4 h-4 text-sky-500" />
+                          ) : (
+                            <Square className="w-4 h-4 opacity-40 hover:opacity-100" />
+                          )}
+                        </button>
+
                         <div className="min-w-0 flex-1">
                           <span className="text-xs block truncate">{lesson.title}</span>
                           <span className={`text-[10px] ${theme.textMuted} block`}>
@@ -431,84 +632,104 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
             <div className={`${theme.card} p-5 rounded-2xl border ${theme.border} space-y-4`}>
               {/* Header & Controls */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-inherit pb-4">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base font-bold">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-base font-bold truncate">
                       {activeLesson ? activeLesson.title : 'Chọn bài học'}
                     </h3>
                     {activeLesson && (
-                      <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-sky-500/10 text-sky-500">
+                      <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-sky-500/10 text-sky-500 shrink-0">
                         {currentExercises.length} câu hỏi
                       </span>
                     )}
                   </div>
-                  <p className={`text-xs ${theme.textMuted} mt-0.5`}>
-                    {activeLesson?.description || 'Chọn một bài học ở cột bên trái để quản lý câu hỏi'}
-                  </p>
                 </div>
 
                 {activeLesson && (
-                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <div className="flex flex-wrap items-center gap-1.5 shrink-0">
                     <button
                       id="btn-manager-view-lecture"
                       type="button"
                       onClick={() => setLectureModalLesson(activeLesson)}
-                      className="px-3 py-1.5 rounded-xl border border-sky-500/40 text-sky-400 hover:bg-sky-500/10 text-xs font-semibold flex items-center gap-1.5 transition-colors"
-                      title="Xem bài giảng lý thuyết"
+                      className="px-2.5 py-1.5 rounded-xl border border-sky-500/40 text-sky-400 hover:bg-sky-500/10 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                      title="Xem bài giảng lý thuyết & kiến thức cốt lõi"
                     >
                       <BookOpen className="w-3.5 h-3.5" />
-                      <span>Xem bài giảng</span>
+                      <span className="hidden xl:inline">Bài giảng</span>
                     </button>
 
                     <button
                       id="btn-manager-edit-content"
                       type="button"
                       onClick={() => setEditorModalLesson(activeLesson)}
-                      className="px-3 py-1.5 rounded-xl border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 text-xs font-semibold flex items-center gap-1.5 transition-colors"
-                      title="Thiết kế nội dung bài học"
+                      className="px-2.5 py-1.5 rounded-xl border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                      title="Thiết kế nội dung & slide bài học"
                     >
                       <Sparkles className="w-3.5 h-3.5" />
-                      <span>
+                      <span className="hidden xl:inline">
                         {activeLesson.slides && activeLesson.slides.length > 0 
-                          ? 'Sửa nội dung bài học' 
-                          : 'Thêm nội dung bài học'}
+                          ? 'Sửa nội dung' 
+                          : 'Soạn nội dung'}
                       </span>
                     </button>
 
                     <button
                       id="btn-manager-add-exercise"
                       onClick={() => onOpenCreateModal('exercise', activeLesson.id)}
-                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm"
+                      className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm cursor-pointer shrink-0"
+                      title="Thêm câu hỏi luyện tập mới"
                     >
                       <Plus className="w-3.5 h-3.5" />
-                      <span>Thêm câu hỏi</span>
+                      <span>Thêm câu</span>
                     </button>
 
                     {currentExercises.length > 0 && (
                       <button
                         onClick={() => onStartPractice(activeLesson.id)}
-                        className={`px-3 py-1.5 rounded-xl border ${theme.border} ${theme.highlight} text-emerald-500 text-xs font-semibold flex items-center gap-1.5`}
+                        className={`px-2.5 py-1.5 rounded-xl border ${theme.border} ${theme.highlight} text-emerald-500 text-xs font-semibold flex items-center gap-1.5 cursor-pointer shrink-0`}
                         title="Luyện tập bài này"
                       >
                         <Play className="w-3.5 h-3.5" />
-                        <span>Học bài này</span>
+                        <span className="hidden sm:inline">Học bài</span>
                       </button>
                     )}
                   </div>
                 )}
               </div>
 
-              {/* Search in questions */}
+              {/* Search & Bulk Select in questions */}
               {currentExercises.length > 0 && (
-                <div className="relative">
-                  <Search className={`w-3.5 h-3.5 absolute left-3 top-3 ${theme.textMuted}`} />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
-                    placeholder="Tìm câu hỏi, từ vựng hoặc đáp án..."
-                    className={`w-full pl-8 pr-3 py-2 rounded-xl ${theme.inputBg} text-xs`}
-                  />
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={toggleSelectAllExercises}
+                      className="px-2.5 py-1.5 rounded-xl border border-inherit text-xs font-semibold flex items-center gap-1.5 cursor-pointer hover:border-emerald-500 transition-colors"
+                      title={selectedExerciseIds.length === filteredExercises.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả câu trong bài'}
+                    >
+                      {selectedExerciseIds.length > 0 && selectedExerciseIds.length === filteredExercises.length ? (
+                        <CheckSquare className="w-4 h-4 text-emerald-500" />
+                      ) : (
+                        <Square className="w-4 h-4 opacity-50" />
+                      )}
+                      <span>
+                        {selectedExerciseIds.length > 0 
+                          ? `Đã chọn (${selectedExerciseIds.length}/${filteredExercises.length})` 
+                          : 'Chọn tất cả câu'}
+                      </span>
+                    </button>
+                  </div>
+
+                  <div className="relative flex-1 max-w-sm">
+                    <Search className={`w-3.5 h-3.5 absolute left-3 top-2.5 ${theme.textMuted}`} />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                      placeholder="Tìm câu hỏi, từ vựng hoặc đáp án..."
+                      className={`w-full pl-8 pr-3 py-1.5 rounded-xl ${theme.inputBg} text-xs`}
+                    />
+                  </div>
                 </div>
               )}
 
@@ -536,14 +757,31 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                 <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
                   {filteredExercises.map((ex, idx) => {
                     const typeLabel = TYPE_NAMES[ex.type] || ex.type;
+                    const isExChecked = selectedExerciseIds.includes(ex.id);
                     return (
                       <div
                         key={ex.id}
-                        className={`p-4 rounded-xl border ${theme.border} ${theme.highlight} hover:border-emerald-500/50 transition-all space-y-2`}
+                        className={`p-4 rounded-xl border transition-all space-y-2 ${
+                          isExChecked
+                            ? 'border-emerald-500 bg-emerald-500/10 shadow-sm'
+                            : `${theme.border} ${theme.highlight} hover:border-emerald-500/50`
+                        }`}
                       >
                         {/* Badges and action buttons */}
                         <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-1.5 flex-wrap">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={(e) => toggleSelectExercise(ex.id, e)}
+                              className="p-0.5 text-emerald-500 hover:scale-110 transition-transform cursor-pointer"
+                              title={isExChecked ? 'Bỏ chọn câu này' : 'Chọn câu này'}
+                            >
+                              {isExChecked ? (
+                                <CheckSquare className="w-4 h-4 text-emerald-500" />
+                              ) : (
+                                <Square className="w-4 h-4 opacity-40 hover:opacity-100" />
+                              )}
+                            </button>
                             <span className="text-xs font-bold text-emerald-500">
                               #{idx + 1}
                             </span>
@@ -653,6 +891,182 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
           </div>
         </div>
       )}
+
+      {/* Floating Bulk Action Bar (Docked at bottom) */}
+      {(selectedTopicIds.length > 0 || selectedLessonIds.length > 0 || selectedExerciseIds.length > 0) && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[95%] max-w-2xl bg-neutral-900/95 text-white dark:bg-neutral-800/95 border border-emerald-500/40 shadow-2xl rounded-2xl p-3 sm:p-4 backdrop-blur-md flex flex-wrap items-center justify-between gap-3 animate-slideUp">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-xl bg-emerald-500 text-neutral-950 font-black flex items-center justify-center text-sm shadow-md">
+              {selectedTopicIds.length || selectedLessonIds.length || selectedExerciseIds.length}
+            </div>
+            <div>
+              <span className="text-xs font-bold block">
+                {selectedTopicIds.length > 0 && `${selectedTopicIds.length} chủ đề đang chọn`}
+                {selectedLessonIds.length > 0 && `${selectedLessonIds.length} bài học đang chọn`}
+                {selectedExerciseIds.length > 0 && `${selectedExerciseIds.length} câu hỏi đang chọn`}
+              </span>
+              <span className="text-[10px] text-neutral-400 block">
+                Chọn thao tác hàng loạt phía bên phải
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Action Buttons for Selected Topics */}
+            {selectedTopicIds.length > 0 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setBulkModal({ isOpen: true, action: 'move', contentType: 'topic' })}
+                  className="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                >
+                  <MoveRight className="w-3.5 h-3.5" />
+                  <span>Chuyển Lớp</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBulkModal({ isOpen: true, action: 'duplicate', contentType: 'topic' })}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Nhân bản</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBulkModal({ isOpen: true, action: 'delete', contentType: 'topic' })}
+                  className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Xóa ({selectedTopicIds.length})</span>
+                </button>
+              </>
+            )}
+
+            {/* Action Buttons for Selected Lessons */}
+            {selectedLessonIds.length > 0 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setBulkModal({ isOpen: true, action: 'move', contentType: 'lesson' })}
+                  className="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                >
+                  <MoveRight className="w-3.5 h-3.5" />
+                  <span>Chuyển Chủ đề</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBulkModal({ isOpen: true, action: 'duplicate', contentType: 'lesson' })}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Sao chép</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBulkModal({ isOpen: true, action: 'delete', contentType: 'lesson' })}
+                  className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Xóa ({selectedLessonIds.length})</span>
+                </button>
+              </>
+            )}
+
+            {/* Action Buttons for Selected Exercises */}
+            {selectedExerciseIds.length > 0 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setBulkModal({ isOpen: true, action: 'move', contentType: 'exercise' })}
+                  className="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                >
+                  <MoveRight className="w-3.5 h-3.5" />
+                  <span>Chuyển Bài học</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBulkModal({ isOpen: true, action: 'duplicate', contentType: 'exercise' })}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Sao chép</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBulkModal({ isOpen: true, action: 'delete', contentType: 'exercise' })}
+                  className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Xóa ({selectedExerciseIds.length})</span>
+                </button>
+              </>
+            )}
+
+            {/* Deselect All Button */}
+            <button
+              type="button"
+              onClick={clearAllSelections}
+              className="p-1.5 rounded-xl hover:bg-white/10 text-neutral-400 hover:text-white transition-colors cursor-pointer"
+              title="Bỏ chọn tất cả"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Content Action Modal */}
+      <BulkContentModal
+        isOpen={bulkModal.isOpen}
+        onClose={() => setBulkModal(prev => ({ ...prev, isOpen: false }))}
+        actionType={bulkModal.action}
+        contentType={bulkModal.contentType}
+        selectedIds={
+          bulkModal.contentType === 'topic' ? selectedTopicIds :
+          bulkModal.contentType === 'lesson' ? selectedLessonIds :
+          selectedExerciseIds
+        }
+        topics={topics}
+        lessons={lessons}
+        exercises={exercises}
+        classrooms={classrooms}
+        onConfirmMove={(targetId) => {
+          if (bulkModal.contentType === 'topic' && onBulkMoveTopics) {
+            onBulkMoveTopics(selectedTopicIds, targetId);
+            setSelectedTopicIds([]);
+          } else if (bulkModal.contentType === 'lesson' && onBulkMoveLessons) {
+            onBulkMoveLessons(selectedLessonIds, targetId);
+            setSelectedLessonIds([]);
+          } else if (bulkModal.contentType === 'exercise' && onBulkMoveExercises) {
+            onBulkMoveExercises(selectedExerciseIds, targetId);
+            setSelectedExerciseIds([]);
+          }
+        }}
+        onConfirmDuplicate={(targetIds) => {
+          if (bulkModal.contentType === 'topic' && onBulkDuplicateTopics) {
+            onBulkDuplicateTopics(selectedTopicIds, targetIds);
+            setSelectedTopicIds([]);
+          } else if (bulkModal.contentType === 'lesson' && onBulkDuplicateLessons) {
+            onBulkDuplicateLessons(selectedLessonIds, targetIds);
+            setSelectedLessonIds([]);
+          } else if (bulkModal.contentType === 'exercise' && onBulkDuplicateExercises) {
+            onBulkDuplicateExercises(selectedExerciseIds, targetIds);
+            setSelectedExerciseIds([]);
+          }
+        }}
+        onConfirmDelete={() => {
+          if (bulkModal.contentType === 'topic' && onBulkDeleteTopics) {
+            onBulkDeleteTopics(selectedTopicIds);
+            setSelectedTopicIds([]);
+          } else if (bulkModal.contentType === 'lesson' && onBulkDeleteLessons) {
+            onBulkDeleteLessons(selectedLessonIds);
+            setSelectedLessonIds([]);
+          } else if (bulkModal.contentType === 'exercise' && onBulkDeleteExercises) {
+            onBulkDeleteExercises(selectedExerciseIds);
+            setSelectedExerciseIds([]);
+          }
+        }}
+      />
 
       {/* Edit & Create Modals */}
       <TopicEditModal

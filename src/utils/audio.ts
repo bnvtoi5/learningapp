@@ -1,3 +1,6 @@
+import { VoiceGenderPreference } from '../types';
+import { loadSettings } from './storage';
+
 // Web Audio API and Speech API helpers
 
 class SoundManager {
@@ -85,14 +88,155 @@ export function triggerHaptic(type: 'light' | 'heavy' | boolean = true) {
   }
 }
 
-// Text to Speech
-export function speakText(text: string, lang = 'en-US') {
+/**
+ * Lấy danh sách giọng đọc TTS từ trình duyệt (Web Speech API)
+ */
+let cachedVoices: SpeechSynthesisVoice[] = [];
+
+export function getAvailableSpeechVoices(): SpeechSynthesisVoice[] {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return [];
+  const voices = window.speechSynthesis.getVoices();
+  if (voices && voices.length > 0) {
+    cachedVoices = voices;
+  }
+  return cachedVoices.length > 0 ? cachedVoices : voices;
+}
+
+// Lắng nghe sự kiện nạp giọng nói bất đồng bộ từ Chrome / Android
+if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+  window.speechSynthesis.onvoiceschanged = () => {
+    cachedVoices = window.speechSynthesis.getVoices();
+  };
+}
+
+/**
+ * Tìm kiếm giọng đọc tiếng Anh tự nhiên, mượt mà và phổ biến nhất theo sở thích
+ * Có cơ chế FALLBACK an toàn: Nếu không tìm thấy giọng chuyên biệt thì tự động dùng giọng mặc định
+ */
+export function getBestVoiceForPreference(
+  preference: VoiceGenderPreference = 'female',
+  customVoiceURI?: string
+): SpeechSynthesisVoice | null {
+  const voices = getAvailableSpeechVoices();
+  if (!voices || voices.length === 0) return null;
+
+  // 1. Nếu người dùng chọn đích danh 1 Voice qua URI
+  if (customVoiceURI) {
+    const directMatch = voices.find(v => v.voiceURI === customVoiceURI || v.name === customVoiceURI);
+    if (directMatch) return directMatch;
+  }
+
+  // Nếu chọn 'auto' -> Dùng giọng mặc định của thiết bị (an toàn tuyệt đối)
+  if (preference === 'auto') {
+    const defaultVoice = voices.find(v => v.default && v.lang.toLowerCase().startsWith('en'));
+    if (defaultVoice) return defaultVoice;
+    const anyEn = voices.find(v => v.lang.toLowerCase().startsWith('en'));
+    return anyEn || null;
+  }
+
+  // Danh sách các giọng hot/tự nhiên phổ biến trên Edge, Chrome, iOS (Siri/Samantha), Android
+  const femaleKeywords = [
+    'natural', 'neural', 'jenny', 'aria', 'samantha', 'karen', 'natasha', 'zira', 'siri',
+    'female', 'woman', 'ava', 'allison', 'victoria', 'serena', 'stephanie', 'libby', 'sonia', 'en-us-x-sfg'
+  ];
+
+  const maleKeywords = [
+    'natural', 'neural', 'guy', 'david', 'mark', 'alex', 'daniel', 'fred', 'oliver', 'george',
+    'ryan', 'male', 'man', 'christopher', 'andrew', 'en-us-x-sfg#male', 'tom', 'lee'
+  ];
+
+  const englishVoices = voices.filter(v => v.lang.toLowerCase().startsWith('en'));
+  if (englishVoices.length === 0) return null;
+
+  // Lọc theo khu vực UK / US nếu có
+  let candidateVoices = englishVoices;
+  if (preference === 'uk_female' || preference === 'uk_male') {
+    const ukVoices = englishVoices.filter(v => v.lang.toLowerCase().includes('gb') || v.lang.toLowerCase().includes('uk'));
+    if (ukVoices.length > 0) candidateVoices = ukVoices;
+  } else {
+    // Ưu tiên US (Mỹ)
+    const usVoices = englishVoices.filter(v => v.lang.toLowerCase().includes('us'));
+    if (usVoices.length > 0) candidateVoices = usVoices;
+  }
+
+  // 2. Tìm giọng Nữ (Female)
+  if (preference === 'female' || preference === 'uk_female') {
+    // Ưu tiên 1: Giọng Natural / Neural / High Quality
+    for (const kw of femaleKeywords) {
+      const found = candidateVoices.find(v => v.name.toLowerCase().includes(kw) || v.voiceURI.toLowerCase().includes(kw));
+      if (found) return found;
+    }
+    // Ưu tiên 2: Tìm trong toàn bộ englishVoices
+    for (const kw of femaleKeywords) {
+      const found = englishVoices.find(v => v.name.toLowerCase().includes(kw) || v.voiceURI.toLowerCase().includes(kw));
+      if (found) return found;
+    }
+  }
+
+  // 3. Tìm giọng Nam (Male)
+  if (preference === 'male' || preference === 'uk_male') {
+    for (const kw of maleKeywords) {
+      const found = candidateVoices.find(v => v.name.toLowerCase().includes(kw) || v.voiceURI.toLowerCase().includes(kw));
+      if (found) return found;
+    }
+    for (const kw of maleKeywords) {
+      const found = englishVoices.find(v => v.name.toLowerCase().includes(kw) || v.voiceURI.toLowerCase().includes(kw));
+      if (found) return found;
+    }
+  }
+
+  // 4. FALLBACK an toàn: lấy giọng tiếng Anh đầu tiên hoặc giọng mặc định
+  const fallbackDefault = candidateVoices.find(v => v.default) || candidateVoices[0] || englishVoices[0];
+  return fallbackDefault || null;
+}
+
+export interface SpeakOptions {
+  lang?: string;
+  rate?: number;
+  pitch?: number;
+  voiceGender?: VoiceGenderPreference;
+  voiceURI?: string;
+  onEnd?: () => void;
+  onError?: () => void;
+}
+
+/**
+ * Text to Speech đa năng, hỗ trợ chọn giọng và an toàn với fallback mặc định
+ */
+export function speakText(text: string, options?: SpeakOptions | string) {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = lang;
-  utterance.rate = 0.9; // Slightly clearer pace for learners
-  window.speechSynthesis.speak(utterance);
+  if (!text || !text.trim()) return;
+
+  try {
+    window.speechSynthesis.cancel();
+
+    // Hỗ trợ truyền nhanh speakText('Hello', 'en-US')
+    const opts: SpeakOptions = typeof options === 'string' ? { lang: options } : (options || {});
+
+    // Lấy cài đặt đã lưu trong ứng dụng nếu không truyền riêng
+    const settings = loadSettings();
+    const voicePreference: VoiceGenderPreference = opts.voiceGender || settings.voiceGender || 'female';
+    const chosenRate = opts.rate !== undefined ? opts.rate : (settings.voiceSpeed || 0.9);
+    const chosenLang = opts.lang || 'en-US';
+
+    const utterance = new SpeechSynthesisUtterance(text.trim());
+    utterance.lang = chosenLang;
+    utterance.rate = chosenRate;
+    utterance.pitch = opts.pitch !== undefined ? opts.pitch : 1.0;
+
+    // Tìm và gán Voice tốt nhất
+    const bestVoice = getBestVoiceForPreference(voicePreference, opts.voiceURI || settings.selectedVoiceURI);
+    if (bestVoice) {
+      utterance.voice = bestVoice;
+    }
+
+    if (opts.onEnd) utterance.onend = opts.onEnd;
+    if (opts.onError) utterance.onerror = opts.onError;
+
+    window.speechSynthesis.speak(utterance);
+  } catch (err) {
+    console.warn('Speech synthesis playback error, fallback silent:', err);
+  }
 }
 
 // Speech Recognition wrapper for speaking tasks

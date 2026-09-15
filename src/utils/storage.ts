@@ -9,7 +9,8 @@ import {
   User,
   Classroom,
   StudentPermissions,
-  MediaAsset
+  MediaAsset,
+  MediaFolder
 } from '../types';
 
 import {
@@ -45,6 +46,7 @@ const STORAGE_KEYS = {
   CURRENT_USER: 'study_app_current_user',
   CLASSROOMS: 'study_app_classrooms',
   MEDIA: 'study_app_media_assets',
+  MEDIA_FOLDERS: 'study_app_media_folders',
   CLEAN_TAG: 'study_app_clean_tag',
 };
 
@@ -55,6 +57,8 @@ export const defaultSettings: AppSettings = {
   soundEnabled: true,
   hapticEnabled: true,
   autoSpeak: false,
+  voiceGender: 'female', // Mặc định: Giọng Nữ dễ nghe, tự nhiên nhất
+  voiceSpeed: 0.9, // Tốc độ chuẩn 0.9x cho người học tiếng Anh
   defaultPenaltyCount: 2, // Mặc định phải làm đúng 2 lần để gỡ lỗi sai
 };
 
@@ -641,11 +645,21 @@ export function saveClassrooms(classrooms: Classroom[]) {
 
 export function createClassroom(newClassroom: Classroom) {
   const classrooms = loadClassrooms();
+  const cleanCode = newClassroom.code.trim().toLowerCase();
+  const exists = classrooms.some(c => c.code.trim().toLowerCase() === cleanCode);
+  if (exists) {
+    throw new Error(`Mã lớp "${newClassroom.code}" đã tồn tại trên hệ thống. Không thể tạo trùng mã lớp.`);
+  }
   saveClassrooms([...classrooms, newClassroom]);
 }
 
 export function updateClassroom(updatedClassroom: Classroom) {
   const classrooms = loadClassrooms();
+  const cleanCode = updatedClassroom.code.trim().toLowerCase();
+  const duplicate = classrooms.some(c => c.id !== updatedClassroom.id && c.code.trim().toLowerCase() === cleanCode);
+  if (duplicate) {
+    throw new Error(`Mã lớp "${updatedClassroom.code}" đã được sử dụng bởi lớp khác.`);
+  }
   const next = classrooms.map(c => (c.id === updatedClassroom.id ? updatedClassroom : c));
   saveClassrooms(next);
 }
@@ -803,6 +817,288 @@ export function deleteExerciseCascade(exerciseId: string): {
     exercises,
     errors: remainingErrors,
   };
+}
+
+// -------------------------------------------------------------
+// Bulk Operations: Topics, Lessons, Exercises (Move, Duplicate, Delete)
+// -------------------------------------------------------------
+
+export function bulkDeleteTopics(topicIds: string[]): {
+  topics: Topic[];
+  lessons: Lesson[];
+  exercises: Exercise[];
+  errors: ErrorLog[];
+} {
+  const topicIdSet = new Set(topicIds);
+  const allTopics = loadTopics();
+  const topics = allTopics.filter(t => !topicIdSet.has(t.id));
+  saveTopics(topics);
+  topicIds.forEach(id => deleteDocFromCloud('topics', id));
+
+  const allLessons = loadLessons();
+  const lessonsToDelete = allLessons.filter(l => topicIdSet.has(l.topicId));
+  const lessonIdsToDelete = new Set(lessonsToDelete.map(l => l.id));
+  const remainingLessons = allLessons.filter(l => !topicIdSet.has(l.topicId));
+  saveLessons(remainingLessons);
+  lessonsToDelete.forEach(l => deleteDocFromCloud('lessons', l.id));
+
+  const allExercises = loadExercises();
+  const exercisesToDelete = allExercises.filter(e => lessonIdsToDelete.has(e.lessonId));
+  const exerciseIdsToDelete = new Set(exercisesToDelete.map(e => e.id));
+  const remainingExercises = allExercises.filter(e => !lessonIdsToDelete.has(e.lessonId));
+  saveExercises(remainingExercises);
+  exercisesToDelete.forEach(e => deleteDocFromCloud('exercises', e.id));
+
+  const allErrors = loadErrors();
+  const remainingErrors = allErrors.filter(e => !exerciseIdsToDelete.has(e.exerciseId));
+  const errorsToDelete = allErrors.filter(e => exerciseIdsToDelete.has(e.exerciseId));
+  saveErrors(remainingErrors);
+  errorsToDelete.forEach(e => deleteDocFromCloud('errors', e.id));
+
+  return {
+    topics,
+    lessons: remainingLessons,
+    exercises: remainingExercises,
+    errors: remainingErrors,
+  };
+}
+
+export function bulkMoveTopics(topicIds: string[], targetClassroomId: string): Topic[] {
+  const topicIdSet = new Set(topicIds);
+  const topics = loadTopics().map(t => {
+    if (topicIdSet.has(t.id)) {
+      return { ...t, classroomId: targetClassroomId };
+    }
+    return t;
+  });
+  saveTopics(topics);
+  return topics;
+}
+
+export function bulkDuplicateTopics(
+  topicIds: string[],
+  targetClassroomIds: string[]
+): {
+  topics: Topic[];
+  lessons: Lesson[];
+  exercises: Exercise[];
+} {
+  const allTopics = loadTopics();
+  const allLessons = loadLessons();
+  const allExercises = loadExercises();
+
+  const selectedTopics = allTopics.filter(t => topicIds.includes(t.id));
+  const newTopics: Topic[] = [];
+  const newLessons: Lesson[] = [];
+  const newExercises: Exercise[] = [];
+
+  targetClassroomIds.forEach(classroomId => {
+    selectedTopics.forEach(topic => {
+      const isSameClass = topic.classroomId === classroomId;
+      const newTopicId = 'topic_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+      const clonedTopic: Topic = {
+        ...topic,
+        id: newTopicId,
+        classroomId,
+        title: isSameClass ? `${topic.title} (Bản sao)` : topic.title,
+        createdAt: Date.now(),
+      };
+      newTopics.push(clonedTopic);
+
+      // Clone child lessons
+      const childLessons = allLessons.filter(l => l.topicId === topic.id);
+      childLessons.forEach(lesson => {
+        const newLessonId = 'lesson_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+        const clonedLesson: Lesson = {
+          ...lesson,
+          id: newLessonId,
+          topicId: newTopicId,
+        };
+        newLessons.push(clonedLesson);
+
+        // Clone child exercises
+        const childExercises = allExercises.filter(e => e.lessonId === lesson.id);
+        childExercises.forEach(exercise => {
+          const newExerciseId = 'ex_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+          const clonedExercise: Exercise = {
+            ...exercise,
+            id: newExerciseId,
+            lessonId: newLessonId,
+          };
+          newExercises.push(clonedExercise);
+        });
+      });
+    });
+  });
+
+  const updatedTopics = [...allTopics, ...newTopics];
+  const updatedLessons = [...allLessons, ...newLessons];
+  const updatedExercises = [...allExercises, ...newExercises];
+
+  saveTopics(updatedTopics);
+  saveLessons(updatedLessons);
+  saveExercises(updatedExercises);
+
+  return {
+    topics: updatedTopics,
+    lessons: updatedLessons,
+    exercises: updatedExercises,
+  };
+}
+
+export function bulkDeleteLessons(lessonIds: string[]): {
+  lessons: Lesson[];
+  exercises: Exercise[];
+  errors: ErrorLog[];
+} {
+  const lessonIdSet = new Set(lessonIds);
+  const allLessons = loadLessons();
+  const lessons = allLessons.filter(l => !lessonIdSet.has(l.id));
+  saveLessons(lessons);
+  lessonIds.forEach(id => deleteDocFromCloud('lessons', id));
+
+  const allExercises = loadExercises();
+  const exercisesToDelete = allExercises.filter(e => lessonIdSet.has(e.lessonId));
+  const exerciseIdsToDelete = new Set(exercisesToDelete.map(e => e.id));
+  const remainingExercises = allExercises.filter(e => !lessonIdSet.has(e.lessonId));
+  saveExercises(remainingExercises);
+  exercisesToDelete.forEach(e => deleteDocFromCloud('exercises', e.id));
+
+  const allErrors = loadErrors();
+  const remainingErrors = allErrors.filter(e => !exerciseIdsToDelete.has(e.exerciseId));
+  const errorsToDelete = allErrors.filter(e => exerciseIdsToDelete.has(e.exerciseId));
+  saveErrors(remainingErrors);
+  errorsToDelete.forEach(e => deleteDocFromCloud('errors', e.id));
+
+  return {
+    lessons,
+    exercises: remainingExercises,
+    errors: remainingErrors,
+  };
+}
+
+export function bulkMoveLessons(lessonIds: string[], targetTopicId: string): Lesson[] {
+  const lessonIdSet = new Set(lessonIds);
+  const lessons = loadLessons().map(l => {
+    if (lessonIdSet.has(l.id)) {
+      return { ...l, topicId: targetTopicId };
+    }
+    return l;
+  });
+  saveLessons(lessons);
+  return lessons;
+}
+
+export function bulkDuplicateLessons(
+  lessonIds: string[],
+  targetTopicIds: string[]
+): {
+  lessons: Lesson[];
+  exercises: Exercise[];
+} {
+  const allLessons = loadLessons();
+  const allExercises = loadExercises();
+
+  const selectedLessons = allLessons.filter(l => lessonIds.includes(l.id));
+  const newLessons: Lesson[] = [];
+  const newExercises: Exercise[] = [];
+
+  targetTopicIds.forEach(topicId => {
+    selectedLessons.forEach(lesson => {
+      const isSameTopic = lesson.topicId === topicId;
+      const newLessonId = 'lesson_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+      const clonedLesson: Lesson = {
+        ...lesson,
+        id: newLessonId,
+        topicId,
+        title: isSameTopic ? `${lesson.title} (Bản sao)` : lesson.title,
+      };
+      newLessons.push(clonedLesson);
+
+      const childExercises = allExercises.filter(e => e.lessonId === lesson.id);
+      childExercises.forEach(exercise => {
+        const newExerciseId = 'ex_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+        const clonedExercise: Exercise = {
+          ...exercise,
+          id: newExerciseId,
+          lessonId: newLessonId,
+        };
+        newExercises.push(clonedExercise);
+      });
+    });
+  });
+
+  const updatedLessons = [...allLessons, ...newLessons];
+  const updatedExercises = [...allExercises, ...newExercises];
+
+  saveLessons(updatedLessons);
+  saveExercises(updatedExercises);
+
+  return {
+    lessons: updatedLessons,
+    exercises: updatedExercises,
+  };
+}
+
+export function bulkDeleteExercises(exerciseIds: string[]): {
+  exercises: Exercise[];
+  errors: ErrorLog[];
+} {
+  const exerciseIdSet = new Set(exerciseIds);
+  const allExercises = loadExercises();
+  const exercises = allExercises.filter(e => !exerciseIdSet.has(e.id));
+  saveExercises(exercises);
+  exerciseIds.forEach(id => deleteDocFromCloud('exercises', id));
+
+  const allErrors = loadErrors();
+  const remainingErrors = allErrors.filter(e => !exerciseIdSet.has(e.exerciseId));
+  const errorsToDelete = allErrors.filter(e => exerciseIdSet.has(e.exerciseId));
+  saveErrors(remainingErrors);
+  errorsToDelete.forEach(e => deleteDocFromCloud('errors', e.id));
+
+  return {
+    exercises,
+    errors: remainingErrors,
+  };
+}
+
+export function bulkMoveExercises(exerciseIds: string[], targetLessonId: string): Exercise[] {
+  const exerciseIdSet = new Set(exerciseIds);
+  const exercises = loadExercises().map(e => {
+    if (exerciseIdSet.has(e.id)) {
+      return { ...e, lessonId: targetLessonId };
+    }
+    return e;
+  });
+  saveExercises(exercises);
+  return exercises;
+}
+
+export function bulkDuplicateExercises(
+  exerciseIds: string[],
+  targetLessonIds: string[]
+): Exercise[] {
+  const allExercises = loadExercises();
+  const selectedExercises = allExercises.filter(e => exerciseIds.includes(e.id));
+  const newExercises: Exercise[] = [];
+
+  targetLessonIds.forEach(lessonId => {
+    selectedExercises.forEach(exercise => {
+      const isSameLesson = exercise.lessonId === lessonId;
+      const newExerciseId = 'ex_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+      const clonedExercise: Exercise = {
+        ...exercise,
+        id: newExerciseId,
+        lessonId,
+        question: isSameLesson ? `${exercise.question} (Bản sao)` : exercise.question,
+      };
+      newExercises.push(clonedExercise);
+    });
+  });
+
+  const updatedExercises = [...allExercises, ...newExercises];
+  saveExercises(updatedExercises);
+  return updatedExercises;
 }
 
 // -------------------------------------------------------------
@@ -992,5 +1288,95 @@ export function deleteMediaAsset(assetId: string): MediaAsset[] {
   saveMediaAssets(next);
   deleteDocFromCloud('media', assetId);
   return next;
+}
+
+// Media Folder Management
+export function loadMediaFolders(): MediaFolder[] {
+  const data = localStorage.getItem(STORAGE_KEYS.MEDIA_FOLDERS);
+  if (!data) {
+    const defaultFolders: MediaFolder[] = [
+      { id: 'folder_audio_dialogs', name: 'Hội thoại & Phát âm', color: '#10b981', createdAt: Date.now() - 300000 },
+      { id: 'folder_vocab_images', name: 'Hình ảnh từ vựng', color: '#3b82f6', createdAt: Date.now() - 200000 },
+      { id: 'folder_grammar_charts', name: 'Sơ đồ ngữ pháp', color: '#f59e0b', createdAt: Date.now() - 100000 },
+    ];
+    saveMediaFolders(defaultFolders);
+    return defaultFolders;
+  }
+  try {
+    return JSON.parse(data);
+  } catch {
+    return [];
+  }
+}
+
+export function saveMediaFolders(folders: MediaFolder[]): void {
+  try {
+    localStorage.setItem(STORAGE_KEYS.MEDIA_FOLDERS, JSON.stringify(folders || []));
+    folders?.forEach(f => syncDocToCloud('media_folders', f.id, f));
+  } catch (err) {
+    console.warn('LocalStorage saveMediaFolders error:', err);
+  }
+}
+
+export function createMediaFolder(name: string, color?: string): MediaFolder {
+  const folders = loadMediaFolders();
+  const newFolder: MediaFolder = {
+    id: 'folder_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+    name: name.trim() || 'Thư mục mới',
+    color: color || '#10b981',
+    createdAt: Date.now(),
+  };
+  const next = [...folders, newFolder];
+  saveMediaFolders(next);
+  return newFolder;
+}
+
+export function updateMediaAssetFolder(assetId: string, folderId?: string): MediaAsset[] {
+  const assets = loadMediaAssets().map(a => {
+    if (a.id === assetId) {
+      return { ...a, folderId: folderId || undefined };
+    }
+    return a;
+  });
+  saveMediaAssets(assets);
+  const updated = assets.find(a => a.id === assetId);
+  if (updated) {
+    syncDocToCloud('media', updated.id, updated);
+  }
+  return assets;
+}
+
+export function deleteMediaFolder(folderId: string, deleteFiles = false): {
+  folders: MediaFolder[];
+  assets: MediaAsset[];
+} {
+  const folders = loadMediaFolders().filter(f => f.id !== folderId);
+  saveMediaFolders(folders);
+  deleteDocFromCloud('media_folders', folderId);
+
+  const allAssets = loadMediaAssets();
+  let remainingAssets: MediaAsset[];
+
+  if (deleteFiles) {
+    // Delete files inside this folder
+    const toDelete = allAssets.filter(a => a.folderId === folderId);
+    remainingAssets = allAssets.filter(a => a.folderId !== folderId);
+    saveMediaAssets(remainingAssets);
+    toDelete.forEach(a => deleteDocFromCloud('media', a.id));
+  } else {
+    // Move files to root / unassigned folder
+    remainingAssets = allAssets.map(a => {
+      if (a.folderId === folderId) {
+        return { ...a, folderId: undefined };
+      }
+      return a;
+    });
+    saveMediaAssets(remainingAssets);
+  }
+
+  return {
+    folders,
+    assets: remainingAssets,
+  };
 }
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Plus, 
   Save, 
@@ -35,6 +35,7 @@ import {
 import { useTheme } from '../context/ThemeContext';
 import { loadClassrooms } from '../utils/storage';
 import { MediaLibraryModal } from './MediaLibraryModal';
+import { getDistinctClassNames, getClassroomsByName } from '../utils/classroomHelpers';
 
 interface ExerciseBuilderProps {
   topics?: Topic[];
@@ -95,7 +96,9 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
   );
   const [statusBanner, setStatusBanner] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
-  // Topic Form
+  // Topic Form (2 Tiers)
+  const distinctClassNames = useMemo(() => getDistinctClassNames(classrooms), [classrooms]);
+  const [targetClassName, setTargetClassName] = useState<string>(distinctClassNames[0] || '');
   const [targetClassroomId, setTargetClassroomId] = useState<string>(classrooms?.[0]?.id || '');
   const [topicTitle, setTopicTitle] = useState('');
   const [topicDesc, setTopicDesc] = useState('');
@@ -103,12 +106,23 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
   const [topicSkill, setTopicSkill] = useState<SkillCategory>('vocabulary');
 
   useEffect(() => {
+    if (distinctClassNames.length > 0 && (!targetClassName || !distinctClassNames.includes(targetClassName))) {
+      setTargetClassName(distinctClassNames[0]);
+    }
+  }, [distinctClassNames, targetClassName]);
+
+  useEffect(() => {
     if (classrooms.length > 0) {
-      if (!targetClassroomId || !classrooms.some(c => c.id === targetClassroomId)) {
+      const available = targetClassName ? getClassroomsByName(classrooms, targetClassName) : classrooms;
+      if (available.length > 0) {
+        if (!targetClassroomId || !available.some(c => c.id === targetClassroomId)) {
+          setTargetClassroomId(available[0].id);
+        }
+      } else {
         setTargetClassroomId(classrooms[0].id);
       }
     }
-  }, [classrooms, targetClassroomId]);
+  }, [classrooms, targetClassName, targetClassroomId]);
 
   // Lesson Form
   const [targetTopicId, setTargetTopicId] = useState<string>(topics?.[0]?.id || '');
@@ -1099,11 +1113,11 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
       {/* ============================================================== */}
       {activeTab === 'topic' && (
         <form onSubmit={handleSubmitTopic} className={`${theme.card} p-5 rounded-2xl border ${theme.border} space-y-4`}>
-          {/* Classroom Selection */}
+          {/* Classroom Selection (2 Tiers) */}
           <div>
-            <label className={`text-xs font-semibold ${theme.textMuted} block mb-1 flex items-center gap-1.5`}>
+            <label className={`text-xs font-semibold ${theme.textMuted} block mb-1.5 flex items-center gap-1.5`}>
               <School className="w-3.5 h-3.5 text-emerald-500" />
-              <span>Thuộc Lớp học * (Bắt buộc):</span>
+              <span>Thuộc Lớp học & Mã lớp * (Bắt buộc 2 Tầng):</span>
             </label>
             {classrooms.length === 0 ? (
               <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs text-amber-400 space-y-2">
@@ -1125,19 +1139,48 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
                 )}
               </div>
             ) : (
-              <select
-                id="select-builder-topic-class"
-                required
-                value={targetClassroomId}
-                onChange={e => setTargetClassroomId(e.target.value)}
-                className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-xs font-semibold border ${theme.border}`}
-              >
-                {classrooms.map(c => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} {c.code ? `(${c.code})` : ''}
-                  </option>
-                ))}
-              </select>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5">
+                <div>
+                  <label className={`text-[11px] font-semibold ${theme.textMuted} block mb-1`}>
+                    1. Tên Lớp (Khối):
+                  </label>
+                  <select
+                    value={targetClassName}
+                    onChange={e => {
+                      const newName = e.target.value;
+                      setTargetClassName(newName);
+                      const codes = getClassroomsByName(classrooms, newName);
+                      if (codes.length > 0) setTargetClassroomId(codes[0].id);
+                    }}
+                    className={`w-full p-2 rounded-lg ${theme.inputBg} text-xs font-semibold border ${theme.border}`}
+                  >
+                    {distinctClassNames.map(name => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className={`text-[11px] font-semibold ${theme.textMuted} block mb-1`}>
+                    2. Mã Lớp cụ thể *:
+                  </label>
+                  <select
+                    id="select-builder-topic-class"
+                    required
+                    value={targetClassroomId}
+                    onChange={e => setTargetClassroomId(e.target.value)}
+                    className={`w-full p-2 rounded-lg ${theme.inputBg} text-xs font-mono font-bold text-sky-400 border ${theme.border}`}
+                  >
+                    {getClassroomsByName(classrooms, targetClassName).map(c => (
+                      <option key={c.id} value={c.id}>
+                        Mã: {c.code}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
             )}
           </div>
 

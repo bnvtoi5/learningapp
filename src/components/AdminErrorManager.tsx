@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   AlertTriangle, 
   CheckCircle2, 
@@ -25,6 +25,8 @@ import {
 import { ErrorLog, User, Classroom, SkillCategory } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import { ConfirmModal } from './ConfirmModal';
+import { ClassroomCascadingFilter } from './ClassroomCascadingFilter';
+import { getClassroomsByName } from '../utils/classroomHelpers';
 
 interface AdminErrorManagerProps {
   errors: ErrorLog[];
@@ -52,7 +54,8 @@ export const AdminErrorManager: React.FC<AdminErrorManagerProps> = ({
   const { getThemeClasses } = useTheme();
   const theme = getThemeClasses();
 
-  // Filters
+  // Filters (2-tier classroom)
+  const [selectedClassName, setSelectedClassName] = useState<string>('all');
   const [selectedClassId, setSelectedClassId] = useState<string>('all');
   const [selectedStudentId, setSelectedStudentId] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'unresolved' | 'resolved'>('all');
@@ -84,10 +87,22 @@ export const AdminErrorManager: React.FC<AdminErrorManagerProps> = ({
     return { student, errClassId };
   };
 
-  // Filter students based on selected class
+  // Get matching classroom IDs for current filter
+  const activeClassIdSet = useMemo(() => {
+    if (selectedClassId !== 'all') {
+      return new Set([selectedClassId]);
+    }
+    if (selectedClassName !== 'all') {
+      const classList = getClassroomsByName(classrooms, selectedClassName);
+      return new Set(classList.map(c => c.id));
+    }
+    return null; // all
+  }, [classrooms, selectedClassName, selectedClassId]);
+
+  // Filter students based on selected 2-tier class
   const filteredStudents = users.filter(u => {
     if (u.role !== 'student') return false;
-    if (selectedClassId !== 'all' && u.classroomId !== selectedClassId) return false;
+    if (activeClassIdSet && (!u.classroomId || !activeClassIdSet.has(u.classroomId))) return false;
     return true;
   });
 
@@ -95,9 +110,9 @@ export const AdminErrorManager: React.FC<AdminErrorManagerProps> = ({
   const filteredErrors = errors.filter(err => {
     const { student, errClassId } = getErrorStudentAndClass(err);
 
-    // Classroom filter
-    if (selectedClassId !== 'all') {
-      if (errClassId !== selectedClassId) return false;
+    // Classroom filter (2 tiers)
+    if (activeClassIdSet) {
+      if (!errClassId || !activeClassIdSet.has(errClassId)) return false;
     }
 
     // Student filter
@@ -270,27 +285,27 @@ export const AdminErrorManager: React.FC<AdminErrorManagerProps> = ({
       {/* Filter Bar */}
       <div className={`${theme.card} p-3.5 rounded-xl border ${theme.border} space-y-3`}>
         <div className="flex flex-col sm:flex-row gap-2.5">
-          {/* Class Filter */}
+          {/* Class Filter (2 Tiers) */}
           <div className="flex-1">
             <label className={`text-[11px] font-bold ${theme.textMuted} block mb-1`}>
-              Lọc theo Lớp học:
+              Lọc theo Lớp học (2 Tầng):
             </label>
-            <select
-              id="filter-error-class"
-              value={selectedClassId}
-              onChange={e => {
-                setSelectedClassId(e.target.value);
-                setSelectedStudentId('all'); // Reset student when class changes
+            <ClassroomCascadingFilter
+              classrooms={classrooms}
+              selectedClassName={selectedClassName}
+              onSelectClassName={name => {
+                setSelectedClassName(name);
+                setSelectedStudentId('all');
               }}
-              className={`w-full px-2.5 py-1.5 rounded-lg text-xs font-semibold ${theme.inputBg} border ${theme.border}`}
-            >
-              <option value="all">Tất cả lớp học</option>
-              {classrooms.map(c => (
-                <option key={c.id} value={c.id}>
-                  🏫 {c.name} ({c.code})
-                </option>
-              ))}
-            </select>
+              selectedClassId={selectedClassId}
+              onSelectClassId={id => {
+                setSelectedClassId(id);
+                setSelectedStudentId('all');
+              }}
+              showAllOption={true}
+              allOptionLabel="Tất cả các lớp"
+              size="sm"
+            />
           </div>
 
           {/* Student Filter */}

@@ -12,17 +12,29 @@ import {
   Link as LinkIcon, 
   Search,
   AlertCircle,
-  FolderOpen
+  FolderOpen,
+  Folder,
+  FolderPlus
 } from 'lucide-react';
-import { MediaAsset } from '../types';
+import { MediaAsset, MediaFolder } from '../types';
 import { useTheme } from '../context/ThemeContext';
-import { loadMediaAssets, addMediaAsset, deleteMediaAsset } from '../utils/storage';
+import { 
+  loadMediaAssets, 
+  addMediaAsset, 
+  deleteMediaAsset,
+  loadMediaFolders,
+  createMediaFolder,
+  deleteMediaFolder,
+  updateMediaAssetFolder
+} from '../utils/storage';
 import { 
   saveMediaToDb, 
   getAllMediaFromDb, 
   deleteMediaFromDb, 
-  resolveMediaUrl 
+  resolveMediaUrl,
+  updateMediaAssetFolder as updateDbAssetFolder
 } from '../utils/mediaDb';
+import { speakText } from '../utils/audio';
 import { ConfirmModal } from './ConfirmModal';
 
 interface MediaLibraryModalProps {
@@ -42,14 +54,22 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
   const theme = getThemeClasses();
 
   const [assets, setAssets] = useState<MediaAsset[]>([]);
+  const [folders, setFolders] = useState<MediaFolder[]>([]);
+  const [selectedFolderId, setSelectedFolderId] = useState<string>('all'); // 'all' | 'unorganized' | folderId
   const [activeTab, setActiveTab] = useState<'all' | 'image' | 'audio'>(initialTab);
   const [searchQuery, setSearchQuery] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Folder creation state
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [deleteFolderTarget, setDeleteFolderTarget] = useState<MediaFolder | null>(null);
+
   // Upload Form State
   const [uploadType, setUploadType] = useState<'image' | 'audio'>('image');
   const [uploadMode, setUploadMode] = useState<'file' | 'url' | 'tts'>('file');
+  const [uploadFolderId, setUploadFolderId] = useState<string>('');
   const [assetName, setAssetName] = useState('');
   const [assetUrl, setAssetUrl] = useState('');
   const [ttsText, setTtsText] = useState('');
@@ -81,6 +101,7 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
             id: la.id,
             type: la.type,
             name: la.name,
+            folderId: la.folderId,
             onlineUrl: la.url.startsWith('http') ? la.url : undefined,
             dataUrl: la.url.startsWith('data:') ? la.url : undefined,
           });
@@ -93,9 +114,14 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
     }
   };
 
+  const refreshFolders = () => {
+    setFolders(loadMediaFolders());
+  };
+
   useEffect(() => {
     if (isOpen) {
       refreshAssets();
+      refreshFolders();
       setActiveTab(initialTab);
       setIsUploading(false);
       setErrorMessage(null);
@@ -135,6 +161,7 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
     setPreviewDataUrl(null);
     setSelectedFile(null);
     setUploadMode('file');
+    setUploadFolderId(selectedFolderId !== 'all' && selectedFolderId !== 'unorganized' ? selectedFolderId : '');
     setErrorMessage(null);
   };
 
@@ -175,15 +202,12 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
         console.warn('Audio playback error:', err);
         setPlayingAssetId(null);
       }
-    } else if ('speechSynthesis' in window) {
-      // Fallback TTS
-      const textToSpeak = asset.name;
-      const utterance = new SpeechSynthesisUtterance(textToSpeak);
-      utterance.lang = 'en-US';
-      utterance.rate = 0.9;
-      utterance.onend = () => setPlayingAssetId(null);
-      utterance.onerror = () => setPlayingAssetId(null);
-      window.speechSynthesis.speak(utterance);
+    } else if (asset.name) {
+      // Fallback TTS with chosen voice
+      speakText(asset.name, {
+        onEnd: () => setPlayingAssetId(null),
+        onError: () => setPlayingAssetId(null),
+      });
     } else {
       setPlayingAssetId(null);
     }
@@ -248,12 +272,14 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
     try {
       const newId = `media_${Date.now()}`;
       let savedAsset: MediaAsset;
+      const targetFolder = uploadFolderId || undefined;
 
       if (uploadMode === 'file' && selectedFile) {
         savedAsset = await saveMediaToDb({
           id: newId,
           type: uploadType,
           name: finalName,
+          folderId: targetFolder,
           blob: selectedFile,
           size: selectedFile.size,
         });
@@ -262,6 +288,7 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
           id: newId,
           type: uploadType,
           name: finalName,
+          folderId: targetFolder,
           dataUrl: previewDataUrl,
         });
       } else if (uploadMode === 'url') {
@@ -269,6 +296,7 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
           id: newId,
           type: uploadType,
           name: finalName,
+          folderId: targetFolder,
           onlineUrl: assetUrl.trim(),
         });
       } else {
@@ -277,6 +305,7 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
           id: newId,
           type: 'audio',
           name: ttsText.trim(),
+          folderId: targetFolder,
           onlineUrl: '',
         });
       }
@@ -319,17 +348,50 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
     }
   };
 
+  // Folder Actions
+  const handleCreateNewFolder = () => {
+    if (!newFolderName.trim()) return;
+    const created = createMediaFolder(newFolderName.trim());
+    setFolders(loadMediaFolders());
+    setSelectedFolderId(created.id);
+    setNewFolderName('');
+    setIsCreatingFolder(false);
+  };
+
+  const handleConfirmDeleteFolder = async () => {
+    if (!deleteFolderTarget) return;
+    deleteMediaFolder(deleteFolderTarget.id);
+    refreshFolders();
+    if (selectedFolderId === deleteFolderTarget.id) {
+      setSelectedFolderId('all');
+    }
+    await refreshAssets();
+    setDeleteFolderTarget(null);
+  };
+
+  const handleChangeAssetFolder = async (assetId: string, folderId: string) => {
+    const updatedFolderId = folderId === 'none' ? undefined : folderId;
+    updateMediaAssetFolder(assetId, updatedFolderId);
+    await updateDbAssetFolder(assetId, updatedFolderId);
+    await refreshAssets();
+  };
+
   if (!isOpen) return null;
 
   const filteredAssets = assets
     .filter(a => activeTab === 'all' || a.type === activeTab)
+    .filter(a => {
+      if (selectedFolderId === 'all') return true;
+      if (selectedFolderId === 'unorganized') return !a.folderId;
+      return a.folderId === selectedFolderId;
+    })
     .filter(a => !searchQuery.trim() || a.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
   return (
     <>
       <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-sm animate-fadeIn">
         <div 
-          className={`${theme.card} w-full max-w-3xl rounded-2xl border ${theme.border} shadow-2xl flex flex-col max-h-[90vh] overflow-hidden`}
+          className={`${theme.card} w-full max-w-4xl rounded-2xl border ${theme.border} shadow-2xl flex flex-col max-h-[90vh] overflow-hidden`}
           onClick={e => e.stopPropagation()}
         >
           {/* Header */}
@@ -342,11 +404,11 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
                 <h3 className="text-sm font-bold flex items-center gap-1.5">
                   <span>Kho tư liệu truyền thông</span>
                   <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                    Lưu trữ IndexedDB
+                    Lưu trữ IndexedDB & Thư mục
                   </span>
                 </h3>
                 <p className={`text-xs ${theme.textMuted}`}>
-                  Quản lý hình ảnh minh họa & âm thanh bài nghe (Listening)
+                  Quản lý thư mục, hình ảnh minh họa & âm thanh bài nghe (Listening)
                 </p>
               </div>
             </div>
@@ -429,6 +491,128 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
                 <span>{isUploading ? 'Đóng form' : '+ Thêm tệp mới'}</span>
               </button>
             </div>
+          </div>
+
+          {/* Folder Filter Bar */}
+          <div className="px-5 py-2.5 border-b border-inherit bg-neutral-500/5 flex items-center gap-2 overflow-x-auto shrink-0">
+            <span className="text-[11px] font-bold text-neutral-500 uppercase tracking-wider shrink-0 flex items-center gap-1">
+              <Folder className="w-3.5 h-3.5" />
+              <span>Thư mục:</span>
+            </span>
+
+            {/* All folder chip */}
+            <button
+              type="button"
+              onClick={() => setSelectedFolderId('all')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold shrink-0 transition-all cursor-pointer flex items-center gap-1.5 ${
+                selectedFolderId === 'all'
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : `${theme.highlight} border ${theme.border} text-neutral-700 dark:text-neutral-300`
+              }`}
+            >
+              <span>Tất cả</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${selectedFolderId === 'all' ? 'bg-white/20 text-white' : 'bg-neutral-500/20'}`}>
+                {assets.length}
+              </span>
+            </button>
+
+            {/* Unorganized folder chip */}
+            <button
+              type="button"
+              onClick={() => setSelectedFolderId('unorganized')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold shrink-0 transition-all cursor-pointer flex items-center gap-1.5 ${
+                selectedFolderId === 'unorganized'
+                  ? 'bg-amber-600 text-white shadow-sm'
+                  : `${theme.highlight} border ${theme.border} text-neutral-700 dark:text-neutral-300`
+              }`}
+            >
+              <span>Chưa phân loại</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${selectedFolderId === 'unorganized' ? 'bg-white/20 text-white' : 'bg-neutral-500/20'}`}>
+                {assets.filter(a => !a.folderId).length}
+              </span>
+            </button>
+
+            {/* Custom Folders */}
+            {folders.map(folder => {
+              const count = assets.filter(a => a.folderId === folder.id).length;
+              const isSelected = selectedFolderId === folder.id;
+              return (
+                <div
+                  key={folder.id}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold shrink-0 transition-all flex items-center gap-1.5 ${
+                    isSelected
+                      ? 'bg-sky-600 text-white shadow-sm'
+                      : `${theme.highlight} border ${theme.border} text-neutral-700 dark:text-neutral-300`
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setSelectedFolderId(folder.id)}
+                    className="flex items-center gap-1 cursor-pointer"
+                  >
+                    <span>📁 {folder.name}</span>
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${isSelected ? 'bg-white/20 text-white' : 'bg-neutral-500/20'}`}>
+                      {count}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteFolderTarget(folder);
+                    }}
+                    className={`p-0.5 rounded hover:bg-rose-500 hover:text-white transition-colors cursor-pointer ${
+                      isSelected ? 'text-white/70' : 'text-neutral-400'
+                    }`}
+                    title="Xóa thư mục này"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+              );
+            })}
+
+            {/* Add New Folder Inline Button / Input */}
+            {isCreatingFolder ? (
+              <div className="flex items-center gap-1 shrink-0">
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder="Tên thư mục mới..."
+                  value={newFolderName}
+                  onChange={e => setNewFolderName(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') handleCreateNewFolder();
+                    if (e.key === 'Escape') setIsCreatingFolder(false);
+                  }}
+                  className={`px-2 py-1 text-xs rounded-lg ${theme.inputBg} border border-emerald-500 focus:outline-none`}
+                />
+                <button
+                  type="button"
+                  onClick={handleCreateNewFolder}
+                  className="px-2 py-1 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-500 cursor-pointer"
+                >
+                  Tạo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsCreatingFolder(false)}
+                  className="px-1.5 py-1 rounded-lg hover:bg-neutral-500/20 text-xs text-neutral-400 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsCreatingFolder(true)}
+                className="px-2.5 py-1 rounded-lg text-xs font-semibold shrink-0 border border-dashed border-emerald-500/60 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors flex items-center gap-1 cursor-pointer"
+              >
+                <FolderPlus className="w-3.5 h-3.5" />
+                <span>+ Thêm thư mục</span>
+              </button>
+            )}
           </div>
 
           {/* Upload Drawer / Panel */}
@@ -603,17 +787,35 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
                     </div>
                   )}
 
-                  <div>
-                    <label className={`block text-xs font-medium ${theme.textMuted} mb-1`}>
-                      Tên định danh tư liệu:
-                    </label>
-                    <input
-                      type="text"
-                      placeholder={uploadType === 'image' ? 'Ví dụ: Sơ đồ ngữ pháp Thì hiện tại đơn' : 'Ví dụ: TOEIC Listening Part 1 - Track 01'}
-                      value={assetName}
-                      onChange={e => setAssetName(e.target.value)}
-                      className={`w-full px-3 py-1.5 text-xs rounded-xl ${theme.inputBg} border ${theme.border} focus:border-emerald-500`}
-                    />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <label className={`block text-xs font-medium ${theme.textMuted} mb-1`}>
+                        Tên định danh tư liệu:
+                      </label>
+                      <input
+                        type="text"
+                        placeholder={uploadType === 'image' ? 'Ví dụ: Sơ đồ ngữ pháp' : 'Ví dụ: Track 01'}
+                        value={assetName}
+                        onChange={e => setAssetName(e.target.value)}
+                        className={`w-full px-3 py-1.5 text-xs rounded-xl ${theme.inputBg} border ${theme.border} focus:border-emerald-500`}
+                      />
+                    </div>
+
+                    <div>
+                      <label className={`block text-xs font-medium ${theme.textMuted} mb-1`}>
+                        Lưu vào thư mục:
+                      </label>
+                      <select
+                        value={uploadFolderId}
+                        onChange={e => setUploadFolderId(e.target.value)}
+                        className={`w-full px-3 py-1.5 text-xs rounded-xl ${theme.inputBg} border ${theme.border} focus:border-emerald-500`}
+                      >
+                        <option value="">(Chưa phân loại)</option>
+                        {folders.map(f => (
+                          <option key={f.id} value={f.id}>📁 {f.name}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 </div>
 
@@ -753,7 +955,7 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
                         )}
 
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1 flex-wrap">
                             <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase ${
                               isAudio 
                                 ? 'bg-sky-100 dark:bg-sky-500/15 text-sky-900 dark:text-sky-300 border border-sky-300 dark:border-sky-500/30' 
@@ -761,6 +963,14 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
                             }`}>
                               {isAudio ? 'Âm thanh' : 'Hình ảnh'}
                             </span>
+                            {(() => {
+                              const assetFolder = folders.find(f => f.id === asset.folderId);
+                              return assetFolder ? (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20 truncate max-w-[120px]">
+                                  📁 {assetFolder.name}
+                                </span>
+                              ) : null;
+                            })()}
                           </div>
                           <h4 className="text-xs font-bold truncate mt-1 text-neutral-950 dark:text-neutral-100" title={asset.name}>
                             {asset.name}
@@ -771,34 +981,53 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
                         </div>
                       </div>
 
-                      {/* Action buttons */}
-                      <div className="flex items-center justify-between pt-2 border-t border-inherit">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDeleteTargetId(asset.id);
-                          }}
-                          className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-500/15 transition-colors cursor-pointer"
-                          title="Xóa khỏi kho"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                      {/* Folder assignment & actions */}
+                      <div className="space-y-2 pt-2 border-t border-inherit">
+                        {/* Move folder selector */}
+                        {folders.length > 0 && (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] text-neutral-400 shrink-0">Thư mục:</span>
+                            <select
+                              value={asset.folderId || 'none'}
+                              onChange={(e) => handleChangeAssetFolder(asset.id, e.target.value)}
+                              className={`flex-1 text-[11px] px-2 py-1 rounded-lg ${theme.inputBg} border ${theme.border} focus:outline-none`}
+                            >
+                              <option value="none">Chưa phân loại</option>
+                              {folders.map(f => (
+                                <option key={f.id} value={f.id}>{f.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
 
-                        {onSelectAsset && (
+                        <div className="flex items-center justify-between">
                           <button
                             type="button"
-                            onClick={() => {
-                              stopAudio();
-                              onSelectAsset(asset);
-                              onClose();
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteTargetId(asset.id);
                             }}
-                            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1 shadow-sm transition-all cursor-pointer"
+                            className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-500/15 transition-colors cursor-pointer"
+                            title="Xóa khỏi kho"
                           >
-                            <Check className="w-3.5 h-3.5" />
-                            <span>Chèn vào bài</span>
+                            <Trash2 className="w-4 h-4" />
                           </button>
-                        )}
+
+                          {onSelectAsset && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                stopAudio();
+                                onSelectAsset(asset);
+                                onClose();
+                              }}
+                              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1 shadow-sm transition-all cursor-pointer"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Chèn vào bài</span>
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
@@ -809,7 +1038,7 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
 
           {/* Footer */}
           <div className="px-5 py-3 border-t border-inherit flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400 shrink-0">
-            <span>Tổng cộng: {assets.length} tệp trong kho lưu trữ</span>
+            <span>Tổng cộng: {assets.length} tệp • {folders.length} thư mục trong kho lưu trữ</span>
             <button
               type="button"
               onClick={() => {
@@ -824,7 +1053,7 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
         </div>
       </div>
 
-      {/* Confirmation Modal for Delete */}
+      {/* Confirmation Modal for Delete Asset */}
       <ConfirmModal
         isOpen={!!deleteTargetId}
         title="Xóa tư liệu khỏi kho"
@@ -833,6 +1062,17 @@ export const MediaLibraryModal: React.FC<MediaLibraryModalProps> = ({
         isDanger={true}
         onConfirm={handleConfirmDelete}
         onCancel={() => setDeleteTargetId(null)}
+      />
+
+      {/* Confirmation Modal for Delete Folder */}
+      <ConfirmModal
+        isOpen={!!deleteFolderTarget}
+        title="Xóa thư mục tư liệu"
+        message={`Bạn có chắc muốn xóa thư mục "${deleteFolderTarget?.name}"? Các tệp bên trong sẽ không bị xóa mà được chuyển về mục "Chưa phân loại".`}
+        confirmText="Xóa thư mục"
+        isDanger={true}
+        onConfirm={handleConfirmDeleteFolder}
+        onCancel={() => setDeleteFolderTarget(null)}
       />
     </>
   );

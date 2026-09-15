@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Play, 
   Zap, 
@@ -18,11 +18,14 @@ import {
   Lock,
   Users,
   BarChart2,
-  Filter
+  Filter,
+  Layers
 } from 'lucide-react';
 import { Topic, Lesson, Exercise, ErrorLog, UserStats, User, Classroom } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import { getClassroomOverviewStats } from '../utils/storage';
+import { ClassroomCascadingFilter } from './ClassroomCascadingFilter';
+import { getDistinctClassNames, getClassroomsByName } from '../utils/classroomHelpers';
 
 interface DashboardProps {
   topics: Topic[];
@@ -62,7 +65,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const isAdmin = currentUser?.role === 'admin';
   const perms = currentUser?.permissions;
 
-  // For Admin: Selection filter for Classroom
+  // 2-Tier Classroom Filter for Admin
+  const distinctClassNames = useMemo(() => getDistinctClassNames(classrooms), [classrooms]);
+  const [selectedClassName, setSelectedClassName] = useState<string>(distinctClassNames[0] || '');
   const [selectedClassId, setSelectedClassId] = useState<string>(() => {
     if (classrooms.length > 0) {
       return classrooms[0].id;
@@ -70,16 +75,27 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return '';
   });
 
-  // Keep selectedClassId in sync if classrooms list changes
+  // Keep selectedClassName and selectedClassId in sync
+  useEffect(() => {
+    if (distinctClassNames.length > 0 && (!selectedClassName || !distinctClassNames.includes(selectedClassName))) {
+      setSelectedClassName(distinctClassNames[0]);
+    }
+  }, [distinctClassNames, selectedClassName]);
+
   useEffect(() => {
     if (classrooms.length > 0) {
-      if (!selectedClassId || !classrooms.some(c => c.id === selectedClassId)) {
+      const available = selectedClassName ? getClassroomsByName(classrooms, selectedClassName) : classrooms;
+      if (available.length > 0) {
+        if (!selectedClassId || !available.some(c => c.id === selectedClassId)) {
+          setSelectedClassId(available[0].id);
+        }
+      } else {
         setSelectedClassId(classrooms[0].id);
       }
     } else {
       setSelectedClassId('');
     }
-  }, [classrooms, selectedClassId]);
+  }, [classrooms, selectedClassName, selectedClassId]);
 
   // Selected class data for Admin
   const selectedClass = classrooms.find(c => c.id === selectedClassId);
@@ -200,48 +216,42 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
           </div>
 
-          {/* ADMIN CLASSROOM SELECTOR FILTER */}
-          <div className={`${theme.card} p-4 rounded-2xl border-2 border-emerald-500/30 shadow-sm space-y-3`}>
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          {/* ADMIN CLASSROOM SELECTOR FILTER (2 TIERS) */}
+          <div className={`${theme.card} p-4 rounded-2xl border-2 border-emerald-500/30 shadow-sm space-y-3.5`}>
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-500">
                   <Filter className="w-4 h-4" />
                 </div>
                 <div>
                   <h3 className="text-sm font-bold flex items-center gap-1.5">
-                    <span>Bộ lọc Lớp học</span>
-                    <span className="text-[11px] font-normal text-emerald-500 bg-emerald-500/10 px-2 py-0.2 rounded-full border border-emerald-500/20">
+                    <span>Bộ lọc Lớp & Mã Lớp (2 Tầng)</span>
+                    <span className="text-[11px] font-semibold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
                       Bắt buộc chọn lớp
                     </span>
                   </h3>
                   <p className={`text-[11px] ${theme.textMuted}`}>
-                    Xem dữ liệu chủ đề & kết quả thống kê riêng biệt cho từng lớp
+                    Chọn Tên Lớp để tải các Mã Lớp con, sau đó chọn Mã Lớp để xem thống kê & chủ đề
                   </p>
                 </div>
               </div>
 
               {classrooms.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <label htmlFor="admin-class-select" className={`text-xs font-semibold ${theme.textMuted}`}>
-                    Chọn lớp:
-                  </label>
-                  <select
-                    id="admin-class-select"
-                    value={selectedClassId}
-                    onChange={e => setSelectedClassId(e.target.value)}
-                    className={`px-3 py-1.5 rounded-xl ${theme.inputBg} border ${theme.border} text-xs font-semibold text-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer`}
-                  >
-                    {classrooms.map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} ({c.code})
-                      </option>
-                    ))}
-                  </select>
+                <div className="w-full lg:w-auto">
+                  <ClassroomCascadingFilter
+                    classrooms={classrooms}
+                    selectedClassName={selectedClassName}
+                    onSelectClassName={setSelectedClassName}
+                    selectedClassId={selectedClassId}
+                    onSelectClassId={setSelectedClassId}
+                    showAllOption={false}
+                    size="sm"
+                  />
                 </div>
               )}
             </div>
 
-            {/* Quick Pills for Classroom Selection */}
+            {/* Quick Pills for Class Codes within selected Class Name */}
             {classrooms.length === 0 ? (
               <div className={`p-4 rounded-xl border border-dashed ${theme.border} text-center space-y-2`}>
                 <p className={`text-xs ${theme.textMuted}`}>
@@ -257,33 +267,44 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </button>
               </div>
             ) : (
-              <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-0.5">
-                {classrooms.map(c => {
-                  const isSelected = c.id === selectedClassId;
-                  const countStudents = users.filter(u => u.role === 'student' && u.classroomId === c.id).length;
-                  const countTopics = topics.filter(t => t.classroomId === c.id).length;
+              <div className="space-y-1.5 pt-1 border-t border-inherit/40">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className={`font-semibold ${theme.textMuted} flex items-center gap-1`}>
+                    <Layers className="w-3 h-3 text-sky-500" />
+                    <span>Các mã lớp thuộc "{selectedClassName}":</span>
+                  </span>
+                  <span className="text-emerald-500 font-bold">
+                    Đang chọn: Mã {selectedClass?.code}
+                  </span>
+                </div>
 
-                  return (
-                    <button
-                      key={c.id}
-                      id={`btn-select-class-${c.id}`}
-                      onClick={() => setSelectedClassId(c.id)}
-                      className={`px-3.5 py-2 rounded-xl text-xs font-medium flex items-center gap-2 shrink-0 transition-all cursor-pointer ${
-                        isSelected 
-                          ? 'bg-emerald-600 text-white font-bold shadow-sm ring-2 ring-emerald-500/40' 
-                          : `${theme.card} border ${theme.border} ${theme.textMuted} hover:text-emerald-500 hover:border-emerald-500/40`
-                      }`}
-                    >
-                      <School className="w-3.5 h-3.5" />
-                      <span>{c.name}</span>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-md ${
-                        isSelected ? 'bg-black/20 text-white' : 'bg-neutral-500/10'
-                      }`}>
-                        {countStudents} HS • {countTopics} chủ đề
-                      </span>
-                    </button>
-                  );
-                })}
+                <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                  {getClassroomsByName(classrooms, selectedClassName).map(c => {
+                    const isSelected = c.id === selectedClassId;
+                    const countStudents = users.filter(u => u.role === 'student' && u.classroomId === c.id).length;
+                    const countTopics = topics.filter(t => t.classroomId === c.id).length;
+
+                    return (
+                      <button
+                        key={c.id}
+                        id={`btn-select-class-${c.id}`}
+                        onClick={() => setSelectedClassId(c.id)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-2 shrink-0 transition-all cursor-pointer ${
+                          isSelected 
+                            ? 'bg-sky-600 text-white font-bold shadow-sm ring-2 ring-sky-500/40' 
+                            : `${theme.card} border ${theme.border} ${theme.textMuted} hover:text-sky-500 hover:border-sky-500/40`
+                        }`}
+                      >
+                        <span className="font-mono font-bold">Mã: {c.code}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-md ${
+                          isSelected ? 'bg-black/20 text-white' : 'bg-neutral-500/10'
+                        }`}>
+                          {countStudents} HS • {countTopics} chủ đề
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>

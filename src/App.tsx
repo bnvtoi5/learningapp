@@ -26,6 +26,15 @@ import {
   deleteTopicCascade,
   deleteLessonCascade,
   deleteExerciseCascade,
+  bulkMoveTopics,
+  bulkDuplicateTopics,
+  bulkDeleteTopics,
+  bulkMoveLessons,
+  bulkDuplicateLessons,
+  bulkDeleteLessons,
+  bulkMoveExercises,
+  bulkDuplicateExercises,
+  bulkDeleteExercises,
   loadErrors, 
   saveErrors, 
   loadStats, 
@@ -404,6 +413,70 @@ function MainApp() {
     setErrors(result.errors);
   };
 
+  // Bulk Content Handlers
+  const handleBulkMoveTopics = (topicIds: string[], targetClassroomId: string) => {
+    const result = bulkMoveTopics(topicIds, targetClassroomId);
+    setTopics(result);
+    showToast(`Đã chuyển thành công ${topicIds.length} chủ đề sang lớp học mới!`, 'success');
+  };
+
+  const handleBulkDuplicateTopics = (topicIds: string[], targetClassroomIds: string[]) => {
+    const result = bulkDuplicateTopics(topicIds, targetClassroomIds);
+    setTopics(result.topics);
+    setLessons(result.lessons);
+    setExercises(result.exercises);
+    showToast(`Đã nhân bản ${topicIds.length} chủ đề sang ${targetClassroomIds.length} lớp học!`, 'success');
+  };
+
+  const handleBulkDeleteTopics = (topicIds: string[]) => {
+    const result = bulkDeleteTopics(topicIds);
+    setTopics(result.topics);
+    setLessons(result.lessons);
+    setExercises(result.exercises);
+    setErrors(result.errors);
+    showToast(`Đã xóa thành công ${topicIds.length} chủ đề và các bài liên quan!`, 'info');
+  };
+
+  const handleBulkMoveLessons = (lessonIds: string[], targetTopicId: string) => {
+    const result = bulkMoveLessons(lessonIds, targetTopicId);
+    setLessons(result);
+    showToast(`Đã chuyển thành công ${lessonIds.length} bài học sang chủ đề mới!`, 'success');
+  };
+
+  const handleBulkDuplicateLessons = (lessonIds: string[], targetTopicIds: string[]) => {
+    const result = bulkDuplicateLessons(lessonIds, targetTopicIds);
+    setLessons(result.lessons);
+    setExercises(result.exercises);
+    showToast(`Đã nhân bản ${lessonIds.length} bài học sang ${targetTopicIds.length} chủ đề!`, 'success');
+  };
+
+  const handleBulkDeleteLessons = (lessonIds: string[]) => {
+    const result = bulkDeleteLessons(lessonIds);
+    setLessons(result.lessons);
+    setExercises(result.exercises);
+    setErrors(result.errors);
+    showToast(`Đã xóa thành công ${lessonIds.length} bài học và câu hỏi liên quan!`, 'info');
+  };
+
+  const handleBulkMoveExercises = (exerciseIds: string[], targetLessonId: string) => {
+    const result = bulkMoveExercises(exerciseIds, targetLessonId);
+    setExercises(result);
+    showToast(`Đã chuyển thành công ${exerciseIds.length} câu hỏi sang bài học mới!`, 'success');
+  };
+
+  const handleBulkDuplicateExercises = (exerciseIds: string[], targetLessonIds: string[]) => {
+    const result = bulkDuplicateExercises(exerciseIds, targetLessonIds);
+    setExercises(result);
+    showToast(`Đã sao chép ${exerciseIds.length} câu hỏi sang ${targetLessonIds.length} bài học!`, 'success');
+  };
+
+  const handleBulkDeleteExercises = (exerciseIds: string[]) => {
+    const result = bulkDeleteExercises(exerciseIds);
+    setExercises(result.exercises);
+    setErrors(result.errors);
+    showToast(`Đã xóa thành công ${exerciseIds.length} câu hỏi!`, 'info');
+  };
+
   // Error Handlers
   const handleResolveError = (errorId: string) => {
     resolveError(errorId);
@@ -671,6 +744,15 @@ function MainApp() {
                 onDeleteLesson={handleDeleteLesson}
                 onUpdateExercise={handleUpdateExercise}
                 onDeleteExercise={handleDeleteExercise}
+                onBulkMoveTopics={handleBulkMoveTopics}
+                onBulkDuplicateTopics={handleBulkDuplicateTopics}
+                onBulkDeleteTopics={handleBulkDeleteTopics}
+                onBulkMoveLessons={handleBulkMoveLessons}
+                onBulkDuplicateLessons={handleBulkDuplicateLessons}
+                onBulkDeleteLessons={handleBulkDeleteLessons}
+                onBulkMoveExercises={handleBulkMoveExercises}
+                onBulkDuplicateExercises={handleBulkDuplicateExercises}
+                onBulkDeleteExercises={handleBulkDeleteExercises}
               />
             )}
 
@@ -756,6 +838,7 @@ function MainApp() {
             isOpen={isSettingsOpen}
             onClose={() => setIsSettingsOpen(false)}
             onDataReload={reloadAllData}
+            currentUser={currentUser}
           />
         </>
       )}

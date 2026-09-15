@@ -415,7 +415,7 @@ export const TopicList: React.FC<TopicListProps> = ({
               )}
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2.5">
               {currentLessons.map((lesson, idx) => {
                 const lessonExercises = exercises.filter(e => e.lessonId === lesson.id);
                 const canPractice = isAdmin || (perms?.canPractice !== false);
@@ -425,23 +425,64 @@ export const TopicList: React.FC<TopicListProps> = ({
                   <div
                     key={lesson.id}
                     id={`lesson-card-${lesson.id}`}
-                    className={`${theme.card} p-4 rounded-xl space-y-3 border ${theme.border}`}
+                    className={`${theme.card} p-3 sm:p-4 rounded-xl border ${theme.border} flex flex-col sm:flex-row sm:items-center justify-between gap-3`}
                   >
-                    <div className="flex items-start justify-between">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-500 text-xs font-bold flex items-center justify-center">
-                            {idx + 1}
-                          </span>
-                          <h4 className="text-base font-semibold">{lesson.title}</h4>
-                        </div>
-                        <p className={`text-xs ${theme.textMuted}`}>
-                          {lesson.description || 'Chưa có tóm tắt bài học'}
-                        </p>
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="w-6 h-6 rounded-full bg-emerald-500/10 text-emerald-500 text-xs font-bold flex items-center justify-center shrink-0">
+                        {idx + 1}
+                      </span>
+                      <div className="min-w-0">
+                        <h4 className="text-sm sm:text-base font-semibold truncate">{lesson.title}</h4>
+                        <span className={`text-[11px] ${theme.textMuted} block`}>
+                          {lessonExercises.length} câu hỏi luyện tập
+                        </span>
                       </div>
+                    </div>
 
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      {/* 1. Nút Xem bài giảng (khi nhấn vào sẽ thấy toàn bộ kiến thức cốt lõi & slide bài giảng) */}
+                      {canViewTheory && (
+                        <button
+                          id={`btn-view-lecture-${lesson.id}`}
+                          type="button"
+                          onClick={() => setSelectedLectureLesson(lesson)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-sky-500/40 text-sky-400 hover:bg-sky-500/10 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                          title="Xem bài giảng và kiến thức cốt lõi"
+                        >
+                          <BookOpen className="w-3.5 h-3.5" />
+                          <span>Xem bài giảng</span>
+                          {lesson.slides && lesson.slides.length > 0 && (
+                            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-sky-500/20 text-sky-300 font-bold">
+                              {lesson.slides.length}
+                            </span>
+                          )}
+                        </button>
+                      )}
+
+                      {/* 2. Admin actions */}
                       {isAdmin && (
-                        <div className="flex items-center gap-2">
+                        <>
+                          <button
+                            id={`btn-edit-lesson-content-${lesson.id}`}
+                            type="button"
+                            onClick={() => setSelectedEditorLesson(lesson)}
+                            className="px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 flex items-center gap-1 transition-colors cursor-pointer shrink-0"
+                            title="Soạn bài / Sửa nội dung bài học"
+                          >
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span className="hidden md:inline">Soạn bài</span>
+                          </button>
+
+                          <button
+                            id={`btn-add-exercise-to-lesson-${lesson.id}`}
+                            onClick={() => onOpenCreateModal('exercise', lesson.id)}
+                            className={`p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg text-xs font-medium border ${theme.border} hover:${theme.highlight} flex items-center gap-1 cursor-pointer shrink-0`}
+                            title="Thêm câu hỏi luyện tập"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span className="hidden md:inline">Thêm câu</span>
+                          </button>
+
                           <button
                             id={`btn-delete-lesson-${lesson.id}`}
                             type="button"
@@ -453,120 +494,32 @@ export const TopicList: React.FC<TopicListProps> = ({
                                 onConfirm: () => onDeleteLesson(lesson.id),
                               });
                             }}
-                            className="p-1.5 text-rose-400 hover:text-rose-500 rounded cursor-pointer"
+                            className="p-1.5 text-rose-400 hover:text-rose-500 rounded cursor-pointer shrink-0"
                             title="Xóa bài học"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
+                        </>
+                      )}
+
+                      {/* 3. Luyện bài này */}
+                      {canPractice ? (
+                        <button
+                          id={`btn-start-practice-lesson-${lesson.id}`}
+                          disabled={lessonExercises.length === 0}
+                          onClick={() => onStartPractice(lesson.id)}
+                          className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs flex items-center gap-1.5 disabled:opacity-40 cursor-pointer shrink-0"
+                          title="Bắt đầu luyện bài này"
+                        >
+                          <Play className="w-3.5 h-3.5 fill-current" />
+                          <span>Luyện bài</span>
+                        </button>
+                      ) : (
+                        <div className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-neutral-500/10 text-neutral-400 border border-neutral-500/20 flex items-center gap-1 shrink-0">
+                          <Lock className="w-3 h-3" />
+                          <span>Khóa</span>
                         </div>
                       )}
-                    </div>
-
-                    {/* Knowledge Summary Teaser (Respects canViewTheory) */}
-                    {lesson.knowledgeSummary && (
-                      canViewTheory ? (
-                        <div className={`p-3 rounded-lg ${theme.highlight} text-xs leading-relaxed`}>
-                          <span className="font-semibold text-emerald-500 block mb-1">
-                            📌 Kiến thức cốt lõi:
-                          </span>
-                          <p className="whitespace-pre-line">{lesson.knowledgeSummary}</p>
-                        </div>
-                      ) : (
-                        <div className={`p-2.5 rounded-lg border ${theme.border} ${theme.badgeBg} text-[11px] text-amber-500/90 flex items-center gap-2`}>
-                          <Lock className="w-3.5 h-3.5 shrink-0" />
-                          <span>Giáo viên tạm thời khóa phần xem lý thuyết trước khi làm bài.</span>
-                        </div>
-                      )
-                    )}
-
-                    {/* 6 Stages indicators */}
-                    <div className="pt-1">
-                      <div className="text-[11px] font-medium text-emerald-500 mb-1 flex items-center gap-1">
-                        <Layers className="w-3 h-3" />
-                        <span>Cấu trúc 6 pha học tập:</span>
-                      </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-6 gap-1.5 text-[10px]">
-                        {LESSON_STAGES.map(stage => (
-                          <div 
-                            key={stage.id}
-                            className={`p-1.5 rounded text-center border ${theme.border} ${theme.badgeBg}`}
-                          >
-                            <span className="font-medium block truncate">{stage.name}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Footer Actions */}
-                    <div className="pt-2 border-t border-inherit flex flex-wrap items-center justify-between gap-2">
-                      <span className={`text-xs ${theme.textMuted}`}>
-                        {lessonExercises.length} câu hỏi luyện tập
-                      </span>
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        {/* 1. Nút Xem bài giảng (Học sinh & Giáo viên) */}
-                        {canViewTheory && (
-                          <button
-                            id={`btn-view-lecture-${lesson.id}`}
-                            type="button"
-                            onClick={() => setSelectedLectureLesson(lesson)}
-                            className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-sky-500/40 text-sky-400 hover:bg-sky-500/10 flex items-center gap-1.5 transition-colors cursor-pointer"
-                          >
-                            <BookOpen className="w-3.5 h-3.5" />
-                            <span>Xem bài giảng</span>
-                            {lesson.slides && lesson.slides.length > 0 && (
-                              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-sky-500/20 text-sky-300 font-bold">
-                                {lesson.slides.length} trang
-                              </span>
-                            )}
-                          </button>
-                        )}
-
-                        {/* 2. Nút Thêm nội dung bài học (Giáo viên / Admin) */}
-                        {isAdmin && (
-                          <button
-                            id={`btn-edit-lesson-content-${lesson.id}`}
-                            type="button"
-                            onClick={() => setSelectedEditorLesson(lesson)}
-                            className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 flex items-center gap-1.5 transition-colors cursor-pointer"
-                          >
-                            <Sparkles className="w-3.5 h-3.5" />
-                            <span>
-                              {lesson.slides && lesson.slides.length > 0 
-                                ? 'Sửa nội dung bài học' 
-                                : 'Thêm nội dung bài học'}
-                            </span>
-                          </button>
-                        )}
-
-                        {isAdmin && (
-                          <button
-                            id={`btn-add-exercise-to-lesson-${lesson.id}`}
-                            onClick={() => onOpenCreateModal('exercise', lesson.id)}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-medium border ${theme.border} hover:${theme.highlight} flex items-center gap-1`}
-                          >
-                            <Plus className="w-3 h-3" />
-                            <span>Thêm câu hỏi</span>
-                          </button>
-                        )}
-
-                        {canPractice ? (
-                          <button
-                            id={`btn-start-practice-lesson-${lesson.id}`}
-                            disabled={lessonExercises.length === 0}
-                            onClick={() => onStartPractice(lesson.id)}
-                            className="px-3.5 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm flex items-center gap-1.5 disabled:opacity-40"
-                          >
-                            <Play className="w-3 h-3 fill-current" />
-                            <span>Luyện bài này</span>
-                          </button>
-                        ) : (
-                          <div className="px-3 py-1.5 rounded-lg text-xs font-medium bg-neutral-500/10 text-neutral-400 border border-neutral-500/20 flex items-center gap-1.5">
-                            <Lock className="w-3 h-3" />
-                            <span>Giáo viên tạm khóa luyện tập</span>
-                          </div>
-                        )}
-                      </div>
                     </div>
                   </div>
                 );

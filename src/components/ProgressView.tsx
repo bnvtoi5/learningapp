@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   BarChart2, 
   CheckCircle2, 
@@ -29,6 +29,8 @@ import {
 } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import { loadStats, getClassroomOverviewStats } from '../utils/storage';
+import { ClassroomCascadingFilter } from './ClassroomCascadingFilter';
+import { getDistinctClassNames, getClassroomsByName } from '../utils/classroomHelpers';
 
 interface ProgressViewProps {
   stats: UserStats;
@@ -82,10 +84,34 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
 
   const isAdmin = currentUser?.role === 'admin';
 
-  // For Admin: classroom selection filter is MANDATORY before showing class stats
+  // 2-Tier Classroom Filter for Admin
+  const distinctClassNames = useMemo(() => getDistinctClassNames(classrooms), [classrooms]);
+  const [selectedClassName, setSelectedClassName] = useState<string>(distinctClassNames[0] || '');
   const [selectedClassId, setSelectedClassId] = useState<string>(() => {
     return classrooms.length > 0 ? classrooms[0].id : '';
   });
+
+  // Keep selectedClassName and selectedClassId in sync
+  useEffect(() => {
+    if (distinctClassNames.length > 0 && (!selectedClassName || !distinctClassNames.includes(selectedClassName))) {
+      setSelectedClassName(distinctClassNames[0]);
+    }
+  }, [distinctClassNames, selectedClassName]);
+
+  useEffect(() => {
+    if (classrooms.length > 0) {
+      const available = selectedClassName ? getClassroomsByName(classrooms, selectedClassName) : classrooms;
+      if (available.length > 0) {
+        if (!selectedClassId || !available.some(c => c.id === selectedClassId)) {
+          setSelectedClassId(available[0].id);
+        }
+      } else {
+        setSelectedClassId(classrooms[0].id);
+      }
+    } else {
+      setSelectedClassId('');
+    }
+  }, [classrooms, selectedClassName, selectedClassId]);
 
   // Keep selectedClassId valid
   const effectiveClassId = isAdmin 
@@ -187,44 +213,37 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
         </p>
       </div>
 
-      {/* ADMIN CLASSROOM SELECTOR FILTER (MANDATORY REQUIREMENT) */}
+      {/* ADMIN CLASSROOM SELECTOR FILTER (2 TIERS MANDATORY) */}
       {isAdmin && (
         <div className={`${theme.card} p-4 rounded-2xl border-2 border-emerald-500/30 shadow-sm space-y-3`}>
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <School className="w-5 h-5 text-emerald-500 shrink-0" />
               <div>
-                <label htmlFor="admin-classroom-select" className="text-xs font-bold uppercase tracking-wider text-emerald-500 block">
-                  Bộ Lọc Lớp Học Bắt Buộc
+                <label className="text-xs font-bold uppercase tracking-wider text-emerald-500 block">
+                  Bộ Lọc Lớp Học & Mã Lớp (2 Tầng)
                 </label>
-                <span className="text-sm font-semibold">Chọn lớp để phân tích & xem kỹ năng:</span>
+                <span className="text-sm font-semibold">Chọn lớp & mã lớp để phân tích & xem kỹ năng:</span>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <select
-                id="admin-classroom-select"
-                value={effectiveClassId}
-                onChange={e => setSelectedClassId(e.target.value)}
-                className={`px-3 py-2 rounded-xl text-sm font-semibold ${theme.inputBg} border ${theme.border} text-emerald-500 focus:ring-2 focus:ring-emerald-500 cursor-pointer`}
-              >
-                {classrooms.length === 0 ? (
-                  <option value="">Chưa có lớp học nào</option>
-                ) : (
-                  classrooms.map(c => (
-                    <option key={c.id} value={c.id}>
-                      🏫 {c.name} ({c.code})
-                    </option>
-                  ))
-                )}
-              </select>
+            <div className="w-full lg:w-auto">
+              <ClassroomCascadingFilter
+                classrooms={classrooms}
+                selectedClassName={selectedClassName}
+                onSelectClassName={setSelectedClassName}
+                selectedClassId={selectedClassId}
+                onSelectClassId={setSelectedClassId}
+                showAllOption={false}
+                size="sm"
+              />
             </div>
           </div>
 
           {selectedClass && (
             <div className="pt-2 border-t border-inherit flex flex-wrap items-center justify-between gap-2 text-xs">
               <span className={theme.textMuted}>
-                {selectedClass.description || 'Không có mô tả'} • Mã lớp: <strong className="text-emerald-400">{selectedClass.code}</strong>
+                {selectedClass.name} • {selectedClass.description || 'Không có mô tả'} • Mã lớp: <strong className="text-sky-400 font-mono">{selectedClass.code}</strong>
               </span>
               <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-500 font-medium">
                 Sĩ số: {classStudents.length} học sinh • {scopedExercises.length} câu hỏi bài tập

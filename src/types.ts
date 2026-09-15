@@ -96,11 +96,19 @@ export interface LessonSlide {
   contentHtml: string; // Nội dung rich HTML được thiết kế (bảng, căn chỉnh, font, màu, khung ngữ pháp,...)
 }
 
+export interface MediaFolder {
+  id: string;
+  name: string;
+  color?: string;
+  createdAt: number;
+}
+
 export interface MediaAsset {
   id: string;
   type: 'image' | 'audio';
   name: string;
   url: string; // Base64 data URL or audio/image URL
+  folderId?: string; // ID thư mục phân loại trong kho tư liệu
   size?: number;
   createdAt: number;
 }
@@ -169,6 +177,8 @@ export interface StudentPermissions {
   canViewExplanations: boolean; // Được xem giải thích chi tiết đáp án
   canAccessErrorNotebook: boolean; // Được vào Sổ lỗi sai
   canViewProgress: boolean; // Được xem thống kê tiến độ
+  canMarkErrorResolved?: boolean; // Được tự bấm 'Đánh dấu đã hiểu' trong Sổ lỗi (Mặc định: Khóa)
+  canDeleteErrorLog?: boolean; // Được tự bấm 'Xóa khỏi sổ lỗi' (Mặc định: Khóa)
 }
 
 export interface User {
@@ -193,6 +203,8 @@ export interface Classroom {
   assignedTopicIds?: string[]; // Danh sách chủ đề được mở cho lớp
 }
 
+export type VoiceGenderPreference = 'auto' | 'female' | 'male' | 'uk_female' | 'uk_male';
+
 export interface AppSettings {
   theme: ThemeMode;
   fontSize: FontSize;
@@ -200,5 +212,8 @@ export interface AppSettings {
   soundEnabled: boolean;
   hapticEnabled: boolean;
   autoSpeak: boolean;
+  voiceGender?: VoiceGenderPreference; // Tùy chọn giọng đọc (Mặc định: 'female' hoặc 'auto')
+  voiceSpeed?: number; // Tốc độ đọc (0.8, 0.9, 1.0, 1.15)
+  selectedVoiceURI?: string; // Tên voice URI cụ thể nếu người dùng chọn
   defaultPenaltyCount?: number; // Số lần làm đúng bắt buộc để hoàn thành lỗi sai (mặc định: 2)
 }
