@@ -838,8 +838,8 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                               </span>
                             )}
                             {lesson.shuffleExercises && (
-                              <span className="text-[9px] px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-400 font-bold inline-flex items-center gap-0.5 mb-0.5" title="Xáo trộn ngẫu nhiên câu hỏi khi phát cho học sinh">
-                                <Shuffle className="w-2.5 h-2.5" /> Xáo trộn
+                              <span className="text-[9px] p-1 rounded bg-indigo-500/20 text-indigo-400 font-bold inline-flex items-center justify-center mb-0.5" title="Xáo trộn ngẫu nhiên câu hỏi khi phát cho học sinh">
+                                <Shuffle className="w-2.5 h-2.5" />
                               </span>
                             )}
                           </div>
@@ -940,9 +940,9 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                       id="btn-manager-toggle-shuffle"
                       type="button"
                       onClick={() => onUpdateLesson({ ...activeLesson, shuffleExercises: !activeLesson.shuffleExercises })}
-                      className={`px-2.5 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+                      className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center transition-all cursor-pointer shrink-0 ${
                         activeLesson.shuffleExercises
-                          ? 'border-indigo-500/60 bg-indigo-500/15 text-indigo-400 font-bold shadow-xs'
+                          ? 'border-indigo-500/60 bg-indigo-500/20 text-indigo-400 font-bold shadow-xs'
                           : `border-inherit ${theme.badgeBg} text-neutral-400 hover:text-indigo-400`
                       }`}
                       title={activeLesson.shuffleExercises 
@@ -950,9 +950,6 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                         : 'Đang giữ nguyên thứ tự câu hỏi như thiết kế (Bấm để bật xáo trộn ngẫu nhiên khi phát cho học sinh)'}
                     >
                       <Shuffle className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">
-                        {activeLesson.shuffleExercises ? 'Xáo trộn: BẬT' : 'Xáo trộn: TẮT'}
-                      </span>
                     </button>
 
                     <button

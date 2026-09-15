@@ -556,9 +556,8 @@ export const TopicList: React.FC<TopicListProps> = ({
                             </span>
                           )}
                           {lesson.shuffleExercises && (
-                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-400 border border-indigo-500/30 flex items-center gap-1" title="Câu hỏi được xáo trộn ngẫu nhiên khi phát cho học sinh">
+                            <span className="p-1 rounded bg-indigo-500/15 text-indigo-400 border border-indigo-500/30 flex items-center justify-center" title="Câu hỏi được xáo trộn ngẫu nhiên khi phát cho học sinh">
                               <Shuffle className="w-3 h-3" />
-                              <span>Xáo trộn</span>
                             </span>
                           )}
                         </div>
