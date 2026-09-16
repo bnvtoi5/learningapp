@@ -21,6 +21,14 @@ export const MASCOT_HANDLES: Record<MascotType, string> = {
  */
 export const DEFAULT_QUICK_COMMANDS: QuickCommandItem[] = [
   {
+    id: 'cmd_tinhcach',
+    command: '/tinhcach',
+    label: 'Xem tính cách đang dùng',
+    description: 'Kiểm tra prompt tính cách & vai trò hiện tại của linh vật và tài khoản',
+    iconName: 'Sparkles',
+    isSystem: true,
+  },
+  {
     id: 'cmd_dich',
     command: '/dich',
     label: 'Dịch thuật thông minh',
@@ -83,7 +91,10 @@ export async function getSystemQuickCommands(): Promise<QuickCommandItem[]> {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        commands = parsed;
+        // Đảm bảo các lệnh hệ thống như /tinhcach và /clear luôn hiện diện
+        const existingCmds = new Set(parsed.map(c => c.command));
+        const missingSystemCmds = DEFAULT_QUICK_COMMANDS.filter(d => d.isSystem && !existingCmds.has(d.command));
+        commands = [...parsed, ...missingSystemCmds];
       }
     }
   } catch (e) {
@@ -96,7 +107,9 @@ export async function getSystemQuickCommands(): Promise<QuickCommandItem[]> {
     if (snap.exists()) {
       const cloudData = snap.data() as { items?: QuickCommandItem[] };
       if (Array.isArray(cloudData.items) && cloudData.items.length > 0) {
-        commands = cloudData.items;
+        const existingCmds = new Set(cloudData.items.map(c => c.command));
+        const missingSystemCmds = DEFAULT_QUICK_COMMANDS.filter(d => d.isSystem && !existingCmds.has(d.command));
+        commands = [...cloudData.items, ...missingSystemCmds];
         localStorage.setItem(QUICK_COMMANDS_LOCAL_KEY, JSON.stringify(commands));
       }
     }

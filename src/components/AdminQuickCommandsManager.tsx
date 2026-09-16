@@ -47,6 +47,9 @@ export const QUICK_COMMAND_ICONS: Record<string, React.ElementType> = {
   HelpCircle,
   FileText,
   CheckCircle,
+  Sliders,
+  Eye,
+  MessageSquare,
 };
 
 export const AdminQuickCommandsManager: React.FC = () => {

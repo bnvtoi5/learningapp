@@ -35,7 +35,8 @@ import {
   MASCOT_HANDLES, 
   sendMascotChatMessage, 
   DEFAULT_QUICK_COMMANDS, 
-  getSystemQuickCommands 
+  getSystemQuickCommands,
+  getActiveMascotPrompt
 } from '../utils/mascotAI';
 import { MASCOT_LIST } from '../utils/mascotSprites';
 import { StudyMascot } from './StudyMascot';
@@ -361,9 +362,55 @@ export const MascotChatDrawer: React.FC<MascotChatDrawerProps> = ({
     return c.command.toLowerCase().startsWith(query) || c.label.toLowerCase().includes(query.slice(1));
   });
 
+  const handleShowPersonalityInfo = () => {
+    if (settings.soundEnabled) {
+      soundManager.playCorrect();
+    }
+    const userPromptOverride = settings.mascotCustomPrompts?.[mascotId];
+    const hasCustomPrompt = Boolean(userPromptOverride && userPromptOverride.trim().length > 0);
+    const activePromptText = getActiveMascotPrompt(mascotId, userPromptOverride);
+    const accountLabel = currentUser?.fullName || 'Khách (Guest)';
+    const emailLabel = currentUser?.email ? ` (${currentUser.email})` : '';
+
+    const userMsg: ChatMessage = {
+      id: 'msg_u_' + Date.now(),
+      sender: 'user',
+      text: '/tinhcach',
+      timestamp: Date.now(),
+    };
+
+    const infoMsg: ChatMessage = {
+      id: 'msg_personality_' + (Date.now() + 1),
+      sender: 'mascot',
+      text: `🎭 **Hồ Sơ Tính Cách & Cấu Hình Đang Áp Dụng Cho Linh Vật**
+
+• **Linh vật**: **${mascotInfo.name}** (\`${mascotHandle}\`)
+• **Tài khoản**: **${accountLabel}**${emailLabel}
+• **Trạng thái**: ${hasCustomPrompt ? '🟢 **Đang dùng Tính cách TÙY BIẾN của tài khoản này**' : '🔵 **Đang dùng Tính cách MẶC ĐỊNH chuẩn của hệ thống**'}
+• **Mô hình AI đang kết nối**: \`${activeProvider.toUpperCase()}\` (${activeModel})
+
+---
+📝 **Chi tiết System Instruction (Prompt) gửi tới AI:**
+\`\`\`text
+${activePromptText}
+\`\`\`
+
+*(💡 **Mẹo**: Bạn có thể vào phần **Cài đặt cá nhân** để tùy chỉnh tính cách cho từng linh vật riêng biệt cho tài khoản này bất cứ lúc nào).*`,
+      timestamp: Date.now() + 1,
+    };
+
+    setMessages(prev => [...prev, userMsg, infoMsg]);
+  };
+
   const handleSelectCommand = (cmd: QuickCommandItem) => {
     if (cmd.command === '/clear') {
       handleClearChat();
+      setInputVal('');
+      setShowCommandsMenu(false);
+      return;
+    }
+    if (cmd.command === '/tinhcach') {
+      handleShowPersonalityInfo();
       setInputVal('');
       setShowCommandsMenu(false);
       return;
@@ -403,6 +450,18 @@ export const MascotChatDrawer: React.FC<MascotChatDrawerProps> = ({
     // Kiểm tra nếu là lệnh /clear
     if (rawText.toLowerCase() === '/clear') {
       handleClearChat();
+      setInputVal('');
+      setPendingAttachment(null);
+      return;
+    }
+
+    // Kiểm tra nếu là lệnh /tinhcach hoặc /personality
+    if (
+      rawText.toLowerCase() === '/tinhcach' || 
+      rawText.toLowerCase() === '/personality' || 
+      rawText.toLowerCase() === '/prompt'
+    ) {
+      handleShowPersonalityInfo();
       setInputVal('');
       setPendingAttachment(null);
       return;
