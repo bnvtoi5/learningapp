@@ -26,6 +26,7 @@ import {
   EyeOff,
   GripVertical,
   Shuffle,
+  Printer,
   X
 } from 'lucide-react';
 import { 
@@ -42,6 +43,7 @@ import { LessonEditModal } from './LessonEditModal';
 import { ConfirmModal } from './ConfirmModal';
 import { LessonLectureModal } from './LessonLectureModal';
 import { LessonContentEditorModal } from './LessonContentEditorModal';
+import { LessonPrintModal } from './LessonPrintModal';
 import { MediaLibraryModal } from './MediaLibraryModal';
 import { BulkContentModal, BulkActionType, BulkContentType } from './BulkContentModal';
 import { loadClassrooms } from '../utils/storage';
@@ -186,6 +188,7 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
   const [editingExercise, setEditingExercise] = useState<Exercise | null>(null);
   const [lectureModalLesson, setLectureModalLesson] = useState<Lesson | null>(null);
   const [editorModalLesson, setEditorModalLesson] = useState<Lesson | null>(null);
+  const [printModalLesson, setPrintModalLesson] = useState<Lesson | null>(null);
   const [isMediaLibraryOpen, setIsMediaLibraryOpen] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
@@ -964,6 +967,17 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                     </button>
 
                     <button
+                      id="btn-manager-print-lesson"
+                      type="button"
+                      onClick={() => setPrintModalLesson(activeLesson)}
+                      className="px-2.5 py-1.5 rounded-xl border border-indigo-500/40 text-indigo-400 hover:bg-indigo-500/10 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                      title="In nội dung bài học ra file PDF (chọn trang tùy thích)"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      <span className="hidden xl:inline">In PDF</span>
+                    </button>
+
+                    <button
                       id="btn-manager-edit-content"
                       type="button"
                       onClick={() => setEditorModalLesson(activeLesson)}
@@ -1554,6 +1568,14 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
           }
           setEditorModalLesson(null);
         }}
+      />
+
+      {/* Lesson Print PDF Modal */}
+      <LessonPrintModal
+        isOpen={!!printModalLesson}
+        onClose={() => setPrintModalLesson(null)}
+        lesson={printModalLesson}
+        topicTitle={activeTopic?.title}
       />
 
       {/* Media Library Asset Manager */}

@@ -25,11 +25,12 @@ import {
   Info
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
-import { ThemeMode, FontSize, LineSpacing, VoiceGenderPreference, User } from '../types';
+import { ThemeMode, FontSize, LineSpacing, VoiceGenderPreference, User, MascotType } from '../types';
 import { exportAllData, importData, clearAllDatabase, syncDatabaseWithCloud, loadUsers, loadClassrooms, loadTopics, loadLessons, loadExercises, loadErrors, loadMediaAssets } from '../utils/storage';
 import { syncAllToCloud } from '../lib/firebase';
 import { speakText, getAvailableSpeechVoices } from '../utils/audio';
 import { ConfirmModal } from './ConfirmModal';
+import { MASCOT_LIST } from '../utils/mascotSprites';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -283,6 +284,59 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   {item.label}
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* 3.5. Linh vật đồng hành học tập (Mascot) */}
+          <div className="space-y-3 pt-1 border-t border-inherit">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className={`text-xs font-semibold ${theme.textMuted} uppercase tracking-wider block`}>
+                  Linh vật đồng hành (Mascot)
+                </label>
+                <span className={`text-[11px] ${theme.textMuted}`}>
+                  Chọn người bạn đồng hành dõi theo và động viên bạn học tập
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => updateSettings({ mascotFloatingEnabled: settings.mascotFloatingEnabled !== false ? false : true })}
+                className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
+                  settings.mascotFloatingEnabled !== false 
+                    ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-500' 
+                    : `${theme.border} ${theme.textMuted}`
+                }`}
+              >
+                {settings.mascotFloatingEnabled !== false ? '✓ Đang bật nổi' : 'Đã ẩn linh vật nổi'}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {MASCOT_LIST.map(m => {
+                const isSelected = (settings.mascotType || 'owl') === m.id;
+                return (
+                  <button
+                    key={m.id}
+                    id={`btn-setting-mascot-${m.id}`}
+                    type="button"
+                    onClick={() => updateSettings({ mascotType: m.id as MascotType })}
+                    className={`p-2.5 rounded-xl border text-left flex flex-col items-center justify-center transition-all cursor-pointer relative group ${
+                      isSelected
+                        ? 'border-emerald-500 bg-emerald-500/15 text-emerald-500 font-bold ring-1 ring-emerald-500/40 shadow-sm'
+                        : `${theme.border} ${theme.highlight} hover:border-neutral-500/40`
+                    }`}
+                  >
+                    <span className="text-2xl mb-1 group-hover:scale-110 transition-transform">{m.emoji}</span>
+                    <span className="text-xs font-semibold truncate max-w-full">{m.name}</span>
+                    <span className={`text-[10px] ${theme.textMuted} truncate max-w-full text-center mt-0.5`}>{m.title}</span>
+                    {isSelected && (
+                      <span className="absolute top-1.5 right-1.5 w-3.5 h-3.5 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[9px] font-bold">
+                        ✓
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
 

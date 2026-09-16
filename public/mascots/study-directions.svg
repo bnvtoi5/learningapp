@@ -1,0 +1,289 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" width="300" height="300">
+      <g id="cell-up-left">
+        
+    <!-- Ears / Tuft -->
+    <path d="M 26 28 L 16 12 L 36 22 Z" fill="#047857" />
+    <path d="M 74 28 L 84 12 L 64 22 Z" fill="#047857" />
+    <!-- Main Head / Body -->
+    <ellipse cx="50" cy="50" rx="36" ry="34" fill="#10b981" />
+    <ellipse cx="50" cy="56" rx="28" ry="24" fill="#ecfdf5" />
+    <!-- Graduation Cap / Scholar Hat -->
+    <polygon points="50,12 74,20 50,28 26,20" fill="#0f172a" />
+    <rect x="42" y="25" width="16" height="6" rx="2" fill="#1e293b" />
+    <circle cx="50" cy="20" r="2.5" fill="#f59e0b" />
+    <path d="M 50 20 Q 68 22 70 34" stroke="#f59e0b" stroke-width="2" fill="none" />
+    <circle cx="70" cy="34" r="2" fill="#f59e0b" />
+    <!-- Cheeks Blush -->
+    <ellipse cx="30" cy="62" rx="5" ry="3" fill="#f43f5e" opacity="0.35" />
+    <ellipse cx="70" cy="62" rx="5" ry="3" fill="#f43f5e" opacity="0.35" />
+    <!-- Beak -->
+    <polygon points="50,64 45,57 55,57" fill="#f59e0b" />
+  
+        <!-- Left Eye Outer -->
+        <circle cx="38" cy="52" r="10" fill="#ffffff" stroke="#047857" stroke-width="1.5" />
+        <!-- Left Pupil -->
+        <circle cx="33" cy="47" r="5.5" fill="#0f172a" />
+        <circle cx="31" cy="45" r="2" fill="#ffffff" />
+        <!-- Right Eye Outer -->
+        <circle cx="62" cy="52" r="10" fill="#ffffff" stroke="#047857" stroke-width="1.5" />
+        <!-- Right Pupil -->
+        <circle cx="57" cy="47" r="5.5" fill="#0f172a" />
+        <circle cx="55" cy="45" r="2" fill="#ffffff" />
+      </g>
+    
+      <g id="cell-up">
+        
+    <!-- Ears / Tuft -->
+    <path d="M 126 28 L 116 12 L 136 22 Z" fill="#047857" />
+    <path d="M 174 28 L 184 12 L 164 22 Z" fill="#047857" />
+    <!-- Main Head / Body -->
+    <ellipse cx="150" cy="50" rx="36" ry="34" fill="#10b981" />
+    <ellipse cx="150" cy="56" rx="28" ry="24" fill="#ecfdf5" />
+    <!-- Graduation Cap / Scholar Hat -->
+    <polygon points="150,12 174,20 150,28 126,20" fill="#0f172a" />
+    <rect x="142" y="25" width="16" height="6" rx="2" fill="#1e293b" />
+    <circle cx="150" cy="20" r="2.5" fill="#f59e0b" />
+    <path d="M 150 20 Q 168 22 170 34" stroke="#f59e0b" stroke-width="2" fill="none" />
+    <circle cx="170" cy="34" r="2" fill="#f59e0b" />
+    <!-- Cheeks Blush -->
+    <ellipse cx="130" cy="62" rx="5" ry="3" fill="#f43f5e" opacity="0.35" />
+    <ellipse cx="170" cy="62" rx="5" ry="3" fill="#f43f5e" opacity="0.35" />
+    <!-- Beak -->
+    <polygon points="150,64 145,57 155,57" fill="#f59e0b" />
+  
+        <!-- Left Eye Outer -->
+        <circle cx="138" cy="52" r="10" fill="#ffffff" stroke="#047857" stroke-width="1.5" />
+        <!-- Left Pupil -->
+        <circle cx="138" cy="46" r="5.5" fill="#0f172a" />
+        <circle cx="136" cy="44" r="2" fill="#ffffff" />
+        <!-- Right Eye Outer -->
+        <circle cx="162" cy="52" r="10" fill="#ffffff" stroke="#047857" stroke-width="1.5" />
+        <!-- Right Pupil -->
+        <circle cx="162" cy="46" r="5.5" fill="#0f172a" />
+        <circle cx="160" cy="44" r="2" fill="#ffffff" />
+      </g>
+    
+      <g id="cell-up-right">
+        
+    <!-- Ears / Tuft -->
+    <path d="M 226 28 L 216 12 L 236 22 Z" fill="#047857" />
+    <path d="M 274 28 L 284 12 L 264 22 Z" fill="#047857" />
+    <!-- Main Head / Body -->
+    <ellipse cx="250" cy="50" rx="36" ry="34" fill="#10b981" />
+    <ellipse cx="250" cy="56" rx="28" ry="24" fill="#ecfdf5" />
+    <!-- Graduation Cap / Scholar Hat -->
+    <polygon points="250,12 274,20 250,28 226,20" fill="#0f172a" />
+    <rect x="242" y="25" width="16" height="6" rx="2" fill="#1e293b" />
+    <circle cx="250" cy="20" r="2.5" fill="#f59e0b" />
+    <path d="M 250 20 Q 268 22 270 34" stroke="#f59e0b" stroke-width="2" fill="none" />
+    <circle cx="270" cy="34" r="2" fill="#f59e0b" />
+    <!-- Cheeks Blush -->
+    <ellipse cx="230" cy="62" rx="5" ry="3" fill="#f43f5e" opacity="0.35" />
+    <ellipse cx="270" cy="62" rx="5" ry="3" fill="#f43f5e" opacity="0.35" />
+    <!-- Beak -->
+    <polygon points="250,64 245,57 255,57" fill="#f59e0b" />
+  
+        <!-- Left Eye Outer -->
+        <circle cx="238" cy="52" r="10" fill="#ffffff" stroke="#047857" stroke-width="1.5" />
+        <!-- Left Pupil -->
+        <circle cx="243" cy="47" r="5.5" fill="#0f172a" />
+        <circle cx="241" cy="45" r="2" fill="#ffffff" />
+        <!-- Right Eye Outer -->
+        <circle cx="262" cy="52" r="10" fill="#ffffff" stroke="#047857" stroke-width="1.5" />
+        <!-- Right Pupil -->
+        <circle cx="267" cy="47" r="5.5" fill="#0f172a" />
+        <circle cx="265" cy="45" r="2" fill="#ffffff" />
+      </g>
+    
+      <g id="cell-left">
+        
+    <!-- Ears / Tuft -->
+    <path d="M 26 128 L 16 112 L 36 122 Z" fill="#047857" />
+    <path d="M 74 128 L 84 112 L 64 122 Z" fill="#047857" />
+    <!-- Main Head / Body -->
+    <ellipse cx="50" cy="150" rx="36" ry="34" fill="#10b981" />
+    <ellipse cx="50" cy="156" rx="28" ry="24" fill="#ecfdf5" />
+    <!-- Graduation Cap / Scholar Hat -->
+    <polygon points="50,112 74,120 50,128 26,120" fill="#0f172a" />
+    <rect x="42" y="125" width="16" height="6" rx="2" fill="#1e293b" />
+    <circle cx="50" cy="120" r="2.5" fill="#f59e0b" />
+    <path d="M 50 120 Q 68 122 70 134" stroke="#f59e0b" stroke-width="2" fill="none" />
+    <circle cx="70" cy="134" r="2" fill="#f59e0b" />
+    <!-- Cheeks Blush -->
+    <ellipse cx="30" cy="162" rx="5" ry="3" fill="#f43f5e" opacity="0.35" />
+    <ellipse cx="70" cy="162" rx="5" ry="3" fill="#f43f5e" opacity="0.35" />
+    <!-- Beak -->
+    <polygon points="50,164 45,157 55,157" fill="#f59e0b" />
+  
+        <!-- Left Eye Outer -->
+        <circle cx="38" cy="152" r="10" fill="#ffffff" stroke="#047857" stroke-width="1.5" />
+        <!-- Left Pupil -->
+        <circle cx="32" cy="152" r="5.5" fill="#0f172a" />
+        <circle cx="30" cy="150" r="2" fill="#ffffff" />
+        <!-- Right Eye Outer -->
+        <circle cx="62" cy="152" r="10" fill="#ffffff" stroke="#047857" stroke-width="1.5" />
+        <!-- Right Pupil -->
+        <circle cx="56" cy="152" r="5.5" fill="#0f172a" />
+        <circle cx="54" cy="150" r="2" fill="#ffffff" />
+      </g>
+    
+      <g id="cell-center">
+        
+    <!-- Ears / Tuft -->
+    <path d="M 126 128 L 116 112 L 136 122 Z" fill="#047857" />
+    <path d="M 174 128 L 184 112 L 164 122 Z" fill="#047857" />
+    <!-- Main Head / Body -->
+    <ellipse cx="150" cy="150" rx="36" ry="34" fill="#10b981" />
+    <ellipse cx="150" cy="156" rx="28" ry="24" fill="#ecfdf5" />
+    <!-- Graduation Cap / Scholar Hat -->
+    <polygon points="150,112 174,120 150,128 126,120" fill="#0f172a" />
+    <rect x="142" y="125" width="16" height="6" rx="2" fill="#1e293b" />
+    <circle cx="150" cy="120" r="2.5" fill="#f59e0b" />
+    <path d="M 150 120 Q 168 122 170 134" stroke="#f59e0b" stroke-width="2" fill="none" />
+    <circle cx="170" cy="134" r="2" fill="#f59e0b" />
+    <!-- Cheeks Blush -->
+    <ellipse cx="130" cy="162" rx="5" ry="3" fill="#f43f5e" opacity="0.35" />
+    <ellipse cx="170" cy="162" rx="5" ry="3" fill="#f43f5e" opacity="0.35" />
+    <!-- Beak -->
+    <polygon points="150,164 145,157 155,157" fill="#f59e0b" />
+  
+        <!-- Left Eye Outer -->
+        <circle cx="138" cy="152" r="10" fill="#ffffff" stroke="#047857" stroke-width="1.5" />
+        <!-- Left Pupil -->
+        <circle cx="138" cy="152" r="5.5" fill="#0f172a" />
+        <circle cx="136" cy="150" r="2" fill="#ffffff" />
+        <!-- Right Eye Outer -->
+        <circle cx="162" cy="152" r="10" fill="#ffffff" stroke="#047857" stroke-width="1.5" />
+        <!-- Right Pupil -->
+        <circle cx="162" cy="152" r="5.5" fill="#0f172a" />
+        <circle cx="160" cy="150" r="2" fill="#ffffff" />
+      </g>
+    
+      <g id="cell-right">
+        
+    <!-- Ears / Tuft -->
+    <path d="M 226 128 L 216 112 L 236 122 Z" fill="#047857" />
+    <path d="M 274 128 L 284 112 L 264 122 Z" fill="#047857" />
+    <!-- Main Head / Body -->
+    <ellipse cx="250" cy="150" rx="36" ry="34" fill="#10b981" />
+    <ellipse cx="250" cy="156" rx="28" ry="24" fill="#ecfdf5" />
+    <!-- Graduation Cap / Scholar Hat -->
+    <polygon points="250,112 274,120 250,128 226,120" fill="#0f172a" />
+    <rect x="242" y="125" width="16" height="6" rx="2" fill="#1e293b" />
+    <circle cx="250" cy="120" r="2.5" fill="#f59e0b" />
+    <path d="M 250 120 Q 268 122 270 134" stroke="#f59e0b" stroke-width="2" fill="none" />
+    <circle cx="270" cy="134" r="2" fill="#f59e0b" />
+    <!-- Cheeks Blush -->
+    <ellipse cx="230" cy="162" rx="5" ry="3" fill="#f43f5e" opacity="0.35" />
+    <ellipse cx="270" cy="162" rx="5" ry="3" fill="#f43f5e" opacity="0.35" />
+    <!-- Beak -->
+    <polygon points="250,164 245,157 255,157" fill="#f59e0b" />
+  
+        <!-- Left Eye Outer -->
+        <circle cx="238" cy="152" r="10" fill="#ffffff" stroke="#047857" stroke-width="1.5" />
+        <!-- Left Pupil -->
+        <circle cx="244" cy="152" r="5.5" fill="#0f172a" />
+        <circle cx="242" cy="150" r="2" fill="#ffffff" />
+        <!-- Right Eye Outer -->
+        <circle cx="262" cy="152" r="10" fill="#ffffff" stroke="#047857" stroke-width="1.5" />
+        <!-- Right Pupil -->
+        <circle cx="268" cy="152" r="5.5" fill="#0f172a" />
+        <circle cx="266" cy="150" r="2" fill="#ffffff" />
+      </g>
+    
+      <g id="cell-down-left">
+        
+    <!-- Ears / Tuft -->
+    <path d="M 26 228 L 16 212 L 36 222 Z" fill="#047857" />
+    <path d="M 74 228 L 84 212 L 64 222 Z" fill="#047857" />
+    <!-- Main Head / Body -->
+    <ellipse cx="50" cy="250" rx="36" ry="34" fill="#10b981" />
+    <ellipse cx="50" cy="256" rx="28" ry="24" fill="#ecfdf5" />
+    <!-- Graduation Cap / Scholar Hat -->
+    <polygon points="50,212 74,220 50,228 26,220" fill="#0f172a" />
+    <rect x="42" y="225" width="16" height="6" rx="2" fill="#1e293b" />
+    <circle cx="50" cy="220" r="2.5" fill="#f59e0b" />
+    <path d="M 50 220 Q 68 222 70 234" stroke="#f59e0b" stroke-width="2" fill="none" />
+    <circle cx="70" cy="234" r="2" fill="#f59e0b" />
+    <!-- Cheeks Blush -->
+    <ellipse cx="30" cy="262" rx="5" ry="3" fill="#f43f5e" opacity="0.35" />
+    <ellipse cx="70" cy="262" rx="5" ry="3" fill="#f43f5e" opacity="0.35" />
+    <!-- Beak -->
+    <polygon points="50,264 45,257 55,257" fill="#f59e0b" />
+  
+        <!-- Left Eye Outer -->
+        <circle cx="38" cy="252" r="10" fill="#ffffff" stroke="#047857" stroke-width="1.5" />
+        <!-- Left Pupil -->
+        <circle cx="33" cy="257" r="5.5" fill="#0f172a" />
+        <circle cx="31" cy="255" r="2" fill="#ffffff" />
+        <!-- Right Eye Outer -->
+        <circle cx="62" cy="252" r="10" fill="#ffffff" stroke="#047857" stroke-width="1.5" />
+        <!-- Right Pupil -->
+        <circle cx="57" cy="257" r="5.5" fill="#0f172a" />
+        <circle cx="55" cy="255" r="2" fill="#ffffff" />
+      </g>
+    
+      <g id="cell-down">
+        
+    <!-- Ears / Tuft -->
+    <path d="M 126 228 L 116 212 L 136 222 Z" fill="#047857" />
+    <path d="M 174 228 L 184 212 L 164 222 Z" fill="#047857" />
+    <!-- Main Head / Body -->
+    <ellipse cx="150" cy="250" rx="36" ry="34" fill="#10b981" />
+    <ellipse cx="150" cy="256" rx="28" ry="24" fill="#ecfdf5" />
+    <!-- Graduation Cap / Scholar Hat -->
+    <polygon points="150,212 174,220 150,228 126,220" fill="#0f172a" />
+    <rect x="142" y="225" width="16" height="6" rx="2" fill="#1e293b" />
+    <circle cx="150" cy="220" r="2.5" fill="#f59e0b" />
+    <path d="M 150 220 Q 168 222 170 234" stroke="#f59e0b" stroke-width="2" fill="none" />
+    <circle cx="170" cy="234" r="2" fill="#f59e0b" />
+    <!-- Cheeks Blush -->
+    <ellipse cx="130" cy="262" rx="5" ry="3" fill="#f43f5e" opacity="0.35" />
+    <ellipse cx="170" cy="262" rx="5" ry="3" fill="#f43f5e" opacity="0.35" />
+    <!-- Beak -->
+    <polygon points="150,264 145,257 155,257" fill="#f59e0b" />
+  
+        <!-- Left Eye Outer -->
+        <circle cx="138" cy="252" r="10" fill="#ffffff" stroke="#047857" stroke-width="1.5" />
+        <!-- Left Pupil -->
+        <circle cx="138" cy="258" r="5.5" fill="#0f172a" />
+        <circle cx="136" cy="256" r="2" fill="#ffffff" />
+        <!-- Right Eye Outer -->
+        <circle cx="162" cy="252" r="10" fill="#ffffff" stroke="#047857" stroke-width="1.5" />
+        <!-- Right Pupil -->
+        <circle cx="162" cy="258" r="5.5" fill="#0f172a" />
+        <circle cx="160" cy="256" r="2" fill="#ffffff" />
+      </g>
+    
+      <g id="cell-down-right">
+        
+    <!-- Ears / Tuft -->
+    <path d="M 226 228 L 216 212 L 236 222 Z" fill="#047857" />
+    <path d="M 274 228 L 284 212 L 264 222 Z" fill="#047857" />
+    <!-- Main Head / Body -->
+    <ellipse cx="250" cy="250" rx="36" ry="34" fill="#10b981" />
+    <ellipse cx="250" cy="256" rx="28" ry="24" fill="#ecfdf5" />
+    <!-- Graduation Cap / Scholar Hat -->
+    <polygon points="250,212 274,220 250,228 226,220" fill="#0f172a" />
+    <rect x="242" y="225" width="16" height="6" rx="2" fill="#1e293b" />
+    <circle cx="250" cy="220" r="2.5" fill="#f59e0b" />
+    <path d="M 250 220 Q 268 222 270 234" stroke="#f59e0b" stroke-width="2" fill="none" />
+    <circle cx="270" cy="234" r="2" fill="#f59e0b" />
+    <!-- Cheeks Blush -->
+    <ellipse cx="230" cy="262" rx="5" ry="3" fill="#f43f5e" opacity="0.35" />
+    <ellipse cx="270" cy="262" rx="5" ry="3" fill="#f43f5e" opacity="0.35" />
+    <!-- Beak -->
+    <polygon points="250,264 245,257 255,257" fill="#f59e0b" />
+  
+        <!-- Left Eye Outer -->
+        <circle cx="238" cy="252" r="10" fill="#ffffff" stroke="#047857" stroke-width="1.5" />
+        <!-- Left Pupil -->
+        <circle cx="243" cy="257" r="5.5" fill="#0f172a" />
+        <circle cx="241" cy="255" r="2" fill="#ffffff" />
+        <!-- Right Eye Outer -->
+        <circle cx="262" cy="252" r="10" fill="#ffffff" stroke="#047857" stroke-width="1.5" />
+        <!-- Right Pupil -->
+        <circle cx="267" cy="257" r="5.5" fill="#0f172a" />
+        <circle cx="265" cy="255" r="2" fill="#ffffff" />
+      </g>
+    </svg>

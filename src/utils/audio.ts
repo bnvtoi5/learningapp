@@ -69,6 +69,32 @@ class SoundManager {
       // Ignore audio failure
     }
   }
+
+  playMascotPoke() {
+    const ctx = this.getContext();
+    if (!ctx) return;
+    try {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523.25, now); // C5
+      osc.frequency.exponentialRampToValueAtTime(783.99, now + 0.07); // G5
+      osc.frequency.exponentialRampToValueAtTime(1046.50, now + 0.14); // C6
+
+      gain.gain.setValueAtTime(0.07, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.28);
+    } catch {
+      // Ignore audio failure
+    }
+  }
 }
 
 export const soundManager = new SoundManager();

@@ -22,7 +22,8 @@ import {
   ArrowLeft,
   Folder,
   FolderOpen,
-  Shuffle
+  Shuffle,
+  Printer
 } from 'lucide-react';
 import { Topic, Lesson, Exercise, SkillCategory, User, Classroom } from '../types';
 import { useTheme } from '../context/ThemeContext';
@@ -30,6 +31,7 @@ import { ConfirmModal } from './ConfirmModal';
 import { TopicEditModal } from './TopicEditModal';
 import { LessonLectureModal } from './LessonLectureModal';
 import { LessonContentEditorModal } from './LessonContentEditorModal';
+import { LessonPrintModal } from './LessonPrintModal';
 
 interface TopicListProps {
   topics: Topic[];
@@ -81,6 +83,7 @@ export const TopicList: React.FC<TopicListProps> = ({
   const [activeLessonDetail, setActiveLessonDetail] = useState<Lesson | null>(null);
   const [selectedLectureLesson, setSelectedLectureLesson] = useState<Lesson | null>(null);
   const [selectedEditorLesson, setSelectedEditorLesson] = useState<Lesson | null>(null);
+  const [selectedPrintLesson, setSelectedPrintLesson] = useState<Lesson | null>(null);
   const [isCreateTopicOpen, setIsCreateTopicOpen] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
@@ -570,21 +573,33 @@ export const TopicList: React.FC<TopicListProps> = ({
                     <div className="flex flex-wrap items-center gap-1.5 shrink-0">
                       {/* 1. Nút Xem bài giảng (khi nhấn vào sẽ thấy toàn bộ kiến thức cốt lõi & slide bài giảng) */}
                       {canViewTheory && (
-                        <button
-                          id={`btn-view-lecture-${lesson.id}`}
-                          type="button"
-                          onClick={() => setSelectedLectureLesson(lesson)}
-                          className="px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-sky-500/40 text-sky-500 hover:bg-sky-500/10 flex items-center gap-1 transition-colors cursor-pointer shrink-0"
-                          title="Xem bài giảng lý thuyết & kiến thức cốt lõi"
-                        >
-                          <BookOpen className="w-3.5 h-3.5" />
-                          <span className="hidden sm:inline">Bài giảng</span>
-                          {lesson.slides && lesson.slides.length > 0 && (
-                            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-sky-500/20 text-sky-400 font-bold">
-                              {lesson.slides.length}
-                            </span>
-                          )}
-                        </button>
+                        <>
+                          <button
+                            id={`btn-view-lecture-${lesson.id}`}
+                            type="button"
+                            onClick={() => setSelectedLectureLesson(lesson)}
+                            className="px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-sky-500/40 text-sky-500 hover:bg-sky-500/10 flex items-center gap-1 transition-colors cursor-pointer shrink-0"
+                            title="Xem bài giảng lý thuyết & kiến thức cốt lõi"
+                          >
+                            <BookOpen className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Bài giảng</span>
+                            {lesson.slides && lesson.slides.length > 0 && (
+                              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-sky-500/20 text-sky-400 font-bold">
+                                {lesson.slides.length}
+                              </span>
+                            )}
+                          </button>
+
+                          <button
+                            id={`btn-print-lesson-${lesson.id}`}
+                            type="button"
+                            onClick={() => setSelectedPrintLesson(lesson)}
+                            className="p-1.5 rounded-lg text-xs font-semibold border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/10 flex items-center gap-1 transition-colors cursor-pointer shrink-0"
+                            title="In nội dung bài học ra file PDF (chọn trang tùy thích)"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                          </button>
+                        </>
                       )}
 
                       {/* 2. Admin actions */}
@@ -743,6 +758,13 @@ export const TopicList: React.FC<TopicListProps> = ({
           }
           setSelectedEditorLesson(null);
         }}
+      />
+
+      {/* Lesson Print PDF Modal */}
+      <LessonPrintModal
+        isOpen={!!selectedPrintLesson}
+        onClose={() => setSelectedPrintLesson(null)}
+        lesson={selectedPrintLesson}
       />
     </div>
   );

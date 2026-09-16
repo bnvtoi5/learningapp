@@ -36,12 +36,14 @@ import {
   Minimize2,
   Rows,
   Columns,
-  Check
+  Check,
+  Printer
 } from 'lucide-react';
 import { Lesson, LessonSlide, MediaAsset } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import { MediaLibraryModal } from './MediaLibraryModal';
 import { attachAudioBarListeners } from '../utils/audioBarController';
+import { LessonPrintModal } from './LessonPrintModal';
 
 interface LessonContentEditorModalProps {
   isOpen: boolean;
@@ -141,6 +143,7 @@ export const LessonContentEditorModal: React.FC<LessonContentEditorModalProps> =
   const [activeSlideIndex, setActiveSlideIndex] = useState<number>(0);
   const [viewMode, setViewMode] = useState<'edit' | 'preview'>('edit');
   const [activeSlideTitle, setActiveSlideTitle] = useState<string>('');
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
 
   // Media Library Modal
   const [isMediaLibraryOpen, setIsMediaLibraryOpen] = useState(false);
@@ -706,6 +709,18 @@ export const LessonContentEditorModal: React.FC<LessonContentEditorModalProps> =
                 <span>Xem trước</span>
               </button>
             </div>
+
+            {/* Print / Export PDF button */}
+            <button
+              type="button"
+              id="btn-print-lesson-content-from-editor"
+              onClick={() => setIsPrintModalOpen(true)}
+              className="px-3 py-1.5 rounded-xl border border-indigo-500/40 text-indigo-400 hover:bg-indigo-500/10 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="In nội dung bài học ra file PDF (có thể chọn trang)"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">In PDF</span>
+            </button>
 
             {/* Save Button */}
             <button
@@ -1480,6 +1495,13 @@ export const LessonContentEditorModal: React.FC<LessonContentEditorModalProps> =
           </div>
         </div>
       )}
+
+      {/* Print PDF Modal */}
+      <LessonPrintModal
+        isOpen={isPrintModalOpen}
+        onClose={() => setIsPrintModalOpen(false)}
+        lesson={lesson ? { ...lesson, slides } : null}
+      />
     </div>
   );
 };

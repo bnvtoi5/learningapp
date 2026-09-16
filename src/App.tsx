@@ -76,6 +76,7 @@ import { ProgressView } from './components/ProgressView';
 import { ExerciseBuilder } from './components/ExerciseBuilder';
 import { ContentManager } from './components/ContentManager';
 import { SettingsModal } from './components/SettingsModal';
+import { FloatingMascot } from './components/FloatingMascot';
 import { AuthScreen } from './components/AuthScreen';
 import { PendingApprovalScreen } from './components/PendingApprovalScreen';
 import { AdminPortal } from './components/AdminPortal';
@@ -700,7 +701,7 @@ function MainApp() {
             onLogout={handleLogout}
           />
 
-          <main className="max-w-4xl mx-auto px-4 pt-4 sm:pt-6">
+          <main className="max-w-5xl mx-auto px-4 sm:px-6 pt-4 sm:pt-6">
             {currentTab === 'dashboard' && (
               <Dashboard
                 topics={topics}
@@ -874,6 +875,12 @@ function MainApp() {
               />
             )}
           </main>
+
+          {/* Floating Study Mascot Companion (powered by page-mascot) */}
+          <FloatingMascot 
+            currentTab={currentTab} 
+            onNavigateTab={tab => setCurrentTab(tab)} 
+          />
 
           {/* Settings Modal */}
           <SettingsModal

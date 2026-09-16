@@ -229,6 +229,8 @@ export interface Classroom {
 
 export type VoiceGenderPreference = 'auto' | 'female' | 'male' | 'uk_female' | 'uk_male';
 
+export type MascotType = 'owl' | 'cat' | 'fox' | 'bear' | 'bunny' | 'robot' | 'shiba' | 'penguin';
+
 export interface AppSettings {
   theme: ThemeMode;
   fontSize: FontSize;
@@ -240,4 +242,6 @@ export interface AppSettings {
   voiceSpeed?: number; // Tốc độ đọc (0.8, 0.9, 1.0, 1.15)
   selectedVoiceURI?: string; // Tên voice URI cụ thể nếu người dùng chọn
   defaultPenaltyCount?: number; // Số lần làm đúng bắt buộc để hoàn thành lỗi sai (mặc định: 2)
+  mascotType?: MascotType; // Linh vật học tập đồng hành (owl, cat, fox, bear, bunny, robot, shiba, penguin)
+  mascotFloatingEnabled?: boolean; // Bật/tắt linh vật nổi ở góc màn hình (mặc định: true)
 }

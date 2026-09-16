@@ -11,11 +11,13 @@ import {
   Edit3,
   Bookmark,
   Share2,
-  Maximize2
+  Maximize2,
+  Printer
 } from 'lucide-react';
 import { Lesson, LessonSlide } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import { attachAudioBarListeners } from '../utils/audioBarController';
+import { LessonPrintModal } from './LessonPrintModal';
 
 interface LessonLectureModalProps {
   isOpen: boolean;
@@ -38,6 +40,7 @@ export const LessonLectureModal: React.FC<LessonLectureModalProps> = ({
   const theme = getThemeClasses();
 
   const [currentSlideIndex, setCurrentSlideIndex] = useState<number>(0);
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState<boolean>(false);
 
   // Reset slide index to 0 whenever a new lesson is viewed
   useEffect(() => {
@@ -93,6 +96,18 @@ export const LessonLectureModal: React.FC<LessonLectureModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Print / Export PDF button */}
+            <button
+              id="btn-print-lecture-from-modal"
+              type="button"
+              onClick={() => setIsPrintModalOpen(true)}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-indigo-500/40 text-indigo-400 hover:bg-indigo-500/10 flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="In nội dung bài học ra file PDF (có thể chọn trang nào thích)"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">In PDF</span>
+            </button>
+
             {/* Admin Edit Content Button */}
             {isAdmin && onEditContent && (
               <button
@@ -285,6 +300,13 @@ export const LessonLectureModal: React.FC<LessonLectureModalProps> = ({
         )}
 
       </div>
+
+      {/* Lesson Print PDF Modal */}
+      <LessonPrintModal
+        isOpen={isPrintModalOpen}
+        onClose={() => setIsPrintModalOpen(false)}
+        lesson={lesson}
+      />
     </div>
   );
 };

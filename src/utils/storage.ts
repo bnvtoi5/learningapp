@@ -60,6 +60,8 @@ export const defaultSettings: AppSettings = {
   voiceGender: 'female', // Mặc định: Giọng Nữ dễ nghe, tự nhiên nhất
   voiceSpeed: 0.9, // Tốc độ chuẩn 0.9x cho người học tiếng Anh
   defaultPenaltyCount: 2, // Mặc định phải làm đúng 2 lần để gỡ lỗi sai
+  mascotType: 'owl', // Linh vật Cú Học Giả mặc định
+  mascotFloatingEnabled: true,
 };
 
 export const initialStats: UserStats = {
