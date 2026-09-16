@@ -62,6 +62,9 @@ export const defaultSettings: AppSettings = {
   defaultPenaltyCount: 2, // Mặc định phải làm đúng 2 lần để gỡ lỗi sai
   mascotType: 'owl', // Linh vật Cú Học Giả mặc định
   mascotFloatingEnabled: true,
+  aiProvider: 'custom',
+  aiProviderType: 'gemini',
+  aiModel: 'gemini-3.8-flash',
 };
 
 export const initialStats: UserStats = {
@@ -208,11 +211,38 @@ export function saveStats(stats: UserStats, userId?: string) {
   }
 }
 
-export function loadSettings(): AppSettings {
+export function loadSettings(userId?: string): AppSettings {
+  const activeUserId = userId || getCurrentUser()?.id;
+  if (activeUserId) {
+    const userSettingsKey = `${STORAGE_KEYS.SETTINGS}_${activeUserId}`;
+    const userSpecific = safeParse<AppSettings | null>(userSettingsKey, null);
+    if (userSpecific) {
+      return { ...defaultSettings, ...userSpecific };
+    }
+    const currentUser = getCurrentUser();
+    if (currentUser && currentUser.id === activeUserId && currentUser.settings) {
+      return { ...defaultSettings, ...currentUser.settings };
+    }
+  }
   return safeParse<AppSettings>(STORAGE_KEYS.SETTINGS, defaultSettings);
 }
 
-export function saveSettings(settings: AppSettings) {
+export function saveSettings(settings: AppSettings, userId?: string) {
+  const activeUserId = userId || getCurrentUser()?.id;
+  if (activeUserId) {
+    const userSettingsKey = `${STORAGE_KEYS.SETTINGS}_${activeUserId}`;
+    localStorage.setItem(userSettingsKey, JSON.stringify(settings));
+
+    // Update currentUser object with new settings & sync
+    const currentUser = getCurrentUser();
+    if (currentUser && currentUser.id === activeUserId) {
+      currentUser.settings = settings;
+      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser));
+      const allUsers = loadUsers();
+      const updatedUsers = allUsers.map(u => u.id === activeUserId ? { ...u, settings } : u);
+      saveUsers(updatedUsers);
+    }
+  }
   localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
 }
 
@@ -679,6 +709,9 @@ export function setCurrentUser(user: User | null) {
     localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
   } else {
     localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+  }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('app_user_changed', { detail: user }));
   }
 }
 

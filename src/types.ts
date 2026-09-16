@@ -216,6 +216,7 @@ export interface User {
   registeredAt: number;
   approvedAt?: number;
   permissions?: StudentPermissions;
+  settings?: Partial<AppSettings>;
 }
 
 export interface Classroom {
@@ -231,6 +232,8 @@ export type VoiceGenderPreference = 'auto' | 'female' | 'male' | 'uk_female' | '
 
 export type MascotType = 'owl' | 'cat' | 'fox' | 'bear' | 'bunny' | 'robot' | 'shiba' | 'penguin';
 
+export type AIProviderType = 'gemini' | 'openai' | 'anthropic' | 'deepseek' | 'openrouter' | 'custom';
+
 export interface AppSettings {
   theme: ThemeMode;
   fontSize: FontSize;
@@ -244,4 +247,74 @@ export interface AppSettings {
   defaultPenaltyCount?: number; // Số lần làm đúng bắt buộc để hoàn thành lỗi sai (mặc định: 2)
   mascotType?: MascotType; // Linh vật học tập đồng hành (owl, cat, fox, bear, bunny, robot, shiba, penguin)
   mascotFloatingEnabled?: boolean; // Bật/tắt linh vật nổi ở góc màn hình (mặc định: true)
+  aiProvider?: 'server' | 'custom'; // Nguồn API: 'server' (Dùng key máy chủ) hoặc 'custom' (Key cá nhân)
+  aiProviderType?: AIProviderType; // Nhà cung cấp AI: gemini, openai, anthropic, deepseek, openrouter, custom
+  aiModel?: string; // Model ID được chọn
+  customApiKey?: string; // API Key cá nhân
+  customBaseUrl?: string; // Base URL tùy chỉnh (OpenRouter hoặc endpoint riêng)
+  customGeminiApiKey?: string; // Gemini API Key cá nhân (legacy alias)
+  providerApiKeys?: Partial<Record<AIProviderType, string>>; // Lưu riêng API Key theo từng nhà cung cấp
+  providerBaseUrls?: Partial<Record<AIProviderType, string>>; // Lưu riêng Base URL theo từng nhà cung cấp
+  customProviderModels?: Partial<Record<AIProviderType, CustomAIModel[]>>; // Danh sách các model tự thêm của người dùng theo từng nhà cung cấp
+  mascotCustomPrompts?: Partial<Record<MascotType, string>>; // Tùy biến tính cách từng mascot cho riêng tài khoản này
+}
+
+export interface CustomAIModel {
+  id: string;
+  name: string;
+  provider: AIProviderType;
+  description?: string;
+  badge?: string;
+  createdAt?: number;
+}
+
+export interface QuickCommandItem {
+  id: string;
+  command: string; // VD: /dich, /nguphap, /soisai
+  label: string; // VD: Dịch thuật thông minh
+  description: string; // VD: Dịch thoát ý tự nhiên...
+  iconName?: string; // Tên icon Lucide (Languages, BookOpenCheck, AlertTriangle, Lightbulb, Sparkles, Trash2, Zap, Brain, HelpCircle...)
+  isSystem?: boolean; // Lệnh hệ thống (ví dụ /clear)
+  promptTemplate?: string; // Tùy chọn template chỉ dẫn phụ khi gọi lệnh
+}
+
+export interface ChatAttachment {
+  name: string;
+  type: 'image' | 'file';
+  mimeType: string;
+  dataUrl: string; // Base64 dataURL cho ảnh hoặc file
+  size?: number;
+  textContent?: string; // Nội dung text trích xuất nếu là file văn bản/code
+}
+
+export interface ChatMessage {
+  id: string;
+  sender: 'user' | 'mascot';
+  text: string;
+  timestamp: number;
+  quotedMessage?: {
+    id: string;
+    sender: 'user' | 'mascot';
+    text: string;
+  };
+  attachment?: ChatAttachment;
+}
+
+export interface MascotPersonalityConfig {
+  mascotId: MascotType;
+  handle: string; // Tên ngắn không dấu: @cuhocgia, @caolanhloi,...
+  name: string;
+  systemPrompt: string;
+}
+
+export interface SystemAISettings {
+  systemDefaultProvider?: AIProviderType;
+  systemDefaultModel?: string;
+  systemGeminiApiKey?: string;
+  systemOpenAIApiKey?: string;
+  systemAnthropicApiKey?: string;
+  systemDeepSeekApiKey?: string;
+  systemOpenRouterApiKey?: string;
+  systemCustomBaseUrl?: string;
+  mascotPrompts?: Partial<Record<MascotType, string>>;
 }

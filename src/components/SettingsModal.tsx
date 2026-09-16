@@ -22,7 +22,9 @@ import {
   Square,
   Mic,
   VolumeX,
-  Info
+  Info,
+  Sliders,
+  ChevronDown
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { ThemeMode, FontSize, LineSpacing, VoiceGenderPreference, User, MascotType } from '../types';

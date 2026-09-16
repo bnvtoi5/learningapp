@@ -4,15 +4,22 @@ import { getMascotDirectionsUri, getMascotReactionsUri, MASCOT_LIST } from '../u
 import { soundManager } from '../utils/audio';
 import { Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
+import { User } from '../types';
+import { MASCOT_HANDLES } from '../utils/mascotAI';
+import { MascotChatDrawer } from './MascotChatDrawer';
 
 interface FloatingMascotProps {
   currentTab?: string;
   onNavigateTab?: (tab: string) => void;
+  currentUser?: User | null;
+  onOpenSettings?: () => void;
 }
 
 export const FloatingMascot: React.FC<FloatingMascotProps> = ({
   currentTab,
-  onNavigateTab
+  onNavigateTab,
+  currentUser,
+  onOpenSettings,
 }) => {
   const { settings, getThemeClasses } = useTheme();
   const theme = getThemeClasses();
@@ -24,6 +31,9 @@ export const FloatingMascot: React.FC<FloatingMascotProps> = ({
 
   const currentMascotId = settings.mascotType || 'owl';
   const mascotInfo = MASCOT_LIST.find(m => m.id === currentMascotId) || MASCOT_LIST[0];
+  const mascotHandle = MASCOT_HANDLES[currentMascotId] || '@cuhocgia';
+
+  const [isChatOpen, setIsChatOpen] = useState(false);
 
   // Default minimized on mobile (<640px) to prevent covering any content/tabs
   const [isMinimized, setIsMinimized] = useState<boolean>(() => {
@@ -141,10 +151,17 @@ export const FloatingMascot: React.FC<FloatingMascotProps> = ({
       >
         {/* Speech Balloon */}
         {showSpeech && !isMinimized && (
-          <div className="mb-2 max-w-[200px] sm:max-w-[230px] p-2.5 rounded-2xl bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 text-xs shadow-xl border border-emerald-500/30 pointer-events-auto animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <div 
+            onClick={() => setIsChatOpen(true)}
+            className="mb-2 max-w-[200px] sm:max-w-[230px] p-2.5 rounded-2xl bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 text-xs shadow-xl border border-emerald-500/30 pointer-events-auto animate-in fade-in slide-in-from-bottom-2 duration-200 cursor-pointer hover:border-emerald-500 transition-colors"
+            title="Bấm để chat với linh vật"
+          >
             <div className="flex items-start gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
-              <p className="leading-snug text-[11px] font-medium">{speech}</p>
+              <div className="min-w-0">
+                <p className="leading-snug text-[11px] font-medium">{speech}</p>
+                <span className="text-[9.5px] text-emerald-500 font-bold block mt-1">💬 Bấm để chat ngay</span>
+              </div>
             </div>
             <div className="absolute -bottom-1.5 right-6 w-3 h-3 bg-white dark:bg-slate-900 border-r border-b border-emerald-500/30 rotate-45"></div>
           </div>
@@ -184,7 +201,7 @@ export const FloatingMascot: React.FC<FloatingMascotProps> = ({
               <div 
                 onMouseDown={handleMascotBoop}
                 className="relative cursor-pointer transition-transform hover:scale-105 active:scale-95"
-                title={`${mascotInfo.name}: Rê chuột để nhìn theo, bấm để chọc!`}
+                title={`${mascotInfo.name}: Rê chuột để nhìn theo, bấm để tương tác!`}
               >
                 <Mascot
                   directions={directionsUri}
@@ -195,13 +212,26 @@ export const FloatingMascot: React.FC<FloatingMascotProps> = ({
               </div>
 
               {/* Mascot Name Pill Badge */}
-              <div className="mt-1 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10.5px] font-bold tracking-tight whitespace-nowrap">
+              <div 
+                onClick={() => setIsChatOpen(true)}
+                className="mt-1 px-2.5 py-0.5 rounded-full bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[10.5px] font-bold tracking-tight whitespace-nowrap cursor-pointer transition-colors"
+                title="Bấm để chat với linh vật"
+              >
                 {mascotInfo.name}
               </div>
             </div>
           )}
         </div>
       </div>
+
+      {/* Mascot AI Chat Drawer */}
+      <MascotChatDrawer
+        isOpen={isChatOpen}
+        onClose={() => setIsChatOpen(false)}
+        mascotId={currentMascotId}
+        currentUser={currentUser}
+        onOpenSettings={onOpenSettings}
+      />
     </>
   );
 };

@@ -25,7 +25,8 @@ import {
   Filter,
   Layers,
   ChevronRight,
-  FolderPlus
+  FolderPlus,
+  Sparkles
 } from 'lucide-react';
 import { User, Classroom, Topic, StudentPermissions, UserStatus, ErrorLog } from '../types';
 import { useTheme } from '../context/ThemeContext';
@@ -33,6 +34,7 @@ import { defaultStudentPermissions } from '../utils/storage';
 import { ConfirmModal } from './ConfirmModal';
 import { AdminErrorManager } from './AdminErrorManager';
 import { ClassroomCascadingFilter } from './ClassroomCascadingFilter';
+import { AdminQuickCommandsManager } from './AdminQuickCommandsManager';
 import { 
   getDistinctClassNames, 
   getClassroomsByName, 
@@ -76,7 +78,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const { getThemeClasses } = useTheme();
   const theme = getThemeClasses();
 
-  const [activeTab, setActiveTab] = useState<'pending' | 'students' | 'classes'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'students' | 'classes' | 'ai_bot'>('pending');
 
   // Search & 2-tier filter states for Students tab
   const [searchQuery, setSearchQuery] = useState('');
@@ -294,6 +296,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             id: 'classes', 
             label: '3. Quản lý Lớp & Mã lớp (2 Tầng)', 
             icon: School 
+          },
+          { 
+            id: 'ai_bot', 
+            label: '4. Menu Lệnh Nhanh Chatbot', 
+            icon: Sparkles 
           },
         ].map(tab => {
           const Icon = tab.icon;
@@ -932,6 +939,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             </div>
           )}
         </div>
+      )}
+
+      {/* Tab 4: Quản lý Menu Lệnh Nhanh Chatbot (dùng chung toàn trường) */}
+      {activeTab === 'ai_bot' && (
+        <AdminQuickCommandsManager />
       )}
 
       {/* Confirm Action Dialog */}

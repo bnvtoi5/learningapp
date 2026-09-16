@@ -29,6 +29,19 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
 
+  // Listen for account changes (login, switch account, logout)
+  useEffect(() => {
+    const handleUserChanged = (e: Event) => {
+      const customEvent = e as CustomEvent<any>;
+      const user = customEvent.detail;
+      const userSettings = loadSettings(user?.id);
+      setSettings(userSettings);
+    };
+
+    window.addEventListener('app_user_changed', handleUserChanged);
+    return () => window.removeEventListener('app_user_changed', handleUserChanged);
+  }, []);
+
   useEffect(() => {
     saveSettings(settings);
     // Add class to body/html if needed
@@ -41,7 +54,11 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [settings]);
 
   const updateSettings = (partial: Partial<AppSettings>) => {
-    setSettings(prev => ({ ...prev, ...partial }));
+    setSettings(prev => {
+      const next = { ...prev, ...partial };
+      saveSettings(next);
+      return next;
+    });
   };
 
   const getThemeClasses = () => {

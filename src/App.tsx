@@ -876,10 +876,12 @@ function MainApp() {
             )}
           </main>
 
-          {/* Floating Study Mascot Companion (powered by page-mascot) */}
+          {/* Floating Study Mascot Companion (powered by page-mascot with AI Chatbot) */}
           <FloatingMascot 
             currentTab={currentTab} 
             onNavigateTab={tab => setCurrentTab(tab)} 
+            currentUser={currentUser}
+            onOpenSettings={() => setIsSettingsOpen(true)}
           />
 
           {/* Settings Modal */}
