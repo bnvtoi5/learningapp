@@ -245,15 +245,38 @@ export function saveSettings(settings: AppSettings, userId?: string) {
 
     // Update currentUser object with new settings & sync to cloud
     const currentUser = getCurrentUser();
+    let updatedUser: User | null = null;
     if (currentUser && currentUser.id === activeUserId) {
       currentUser.settings = settings;
       localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser));
+      updatedUser = currentUser;
     }
     const allUsers = loadUsers();
-    const updatedUsers = allUsers.map(u => u.id === activeUserId ? { ...u, settings } : u);
+    const updatedUsers = allUsers.map(u => {
+      if (u.id === activeUserId) {
+        const uWithSettings = { ...u, settings };
+        if (!updatedUser) updatedUser = uWithSettings;
+        return uWithSettings;
+      }
+      return u;
+    });
     saveUsers(updatedUsers);
+
+    // Explicitly sync to user_settings in Firestore for guaranteed multi-device persistence
+    syncDocToCloud('user_settings', activeUserId, {
+      userId: activeUserId,
+      settings,
+      updatedAt: Date.now(),
+    });
+    if (updatedUser) {
+      syncDocToCloud('users', activeUserId, updatedUser);
+    }
   } else {
     localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+    syncDocToCloud('system_settings', 'global', {
+      settings,
+      updatedAt: Date.now(),
+    });
   }
 }
 
@@ -718,6 +741,9 @@ export function getCurrentUser(): User | null {
 export function setCurrentUser(user: User | null) {
   if (user) {
     localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
+    if (user.settings) {
+      localStorage.setItem(`${STORAGE_KEYS.SETTINGS}_${user.id}`, JSON.stringify(user.settings));
+    }
   } else {
     localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
   }
@@ -1298,6 +1324,28 @@ export async function syncDatabaseWithCloud(onDataChanged?: () => void): Promise
       localStorage.setItem(STORAGE_KEYS.EXERCISES, JSON.stringify(cloudData.exercises || []));
       if (cloudData.users && cloudData.users.length > 0) {
         localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(cloudData.users));
+        
+        // Sync individual user settings in LocalStorage for each user
+        cloudData.users.forEach(u => {
+          if (u.settings) {
+            localStorage.setItem(`${STORAGE_KEYS.SETTINGS}_${u.id}`, JSON.stringify(u.settings));
+          }
+        });
+
+        // If current user is logged in, refresh currentUser with latest cloud user info and fire event
+        const cur = getCurrentUser();
+        if (cur) {
+          const freshUser = cloudData.users.find(u => u.id === cur.id);
+          if (freshUser) {
+            localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(freshUser));
+            if (freshUser.settings) {
+              localStorage.setItem(`${STORAGE_KEYS.SETTINGS}_${freshUser.id}`, JSON.stringify(freshUser.settings));
+            }
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('app_user_changed', { detail: freshUser }));
+            }
+          }
+        }
       }
       localStorage.setItem(STORAGE_KEYS.ERRORS, JSON.stringify(cloudData.errors || []));
       localStorage.setItem(STORAGE_KEYS.MEDIA, JSON.stringify(cloudData.media || []));

@@ -44,6 +44,7 @@ import { soundManager } from '../utils/audio';
 import { OpenCodeModelPicker } from './OpenCodeModelPicker';
 import { getModelInfo } from '../utils/aiProviders';
 import { QUICK_COMMAND_ICONS } from './AdminQuickCommandsManager';
+import { ConfirmModal } from './ConfirmModal';
 
 interface MascotChatDrawerProps {
   isOpen: boolean;
@@ -116,6 +117,7 @@ export const MascotChatDrawer: React.FC<MascotChatDrawerProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const [showClearConfirmModal, setShowClearConfirmModal] = useState(false);
 
   // Trích dẫn / Reply tin nhắn
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
@@ -404,7 +406,7 @@ ${activePromptText}
 
   const handleSelectCommand = (cmd: QuickCommandItem) => {
     if (cmd.command === '/clear') {
-      handleClearChat();
+      setShowClearConfirmModal(true);
       setInputVal('');
       setShowCommandsMenu(false);
       return;
@@ -447,9 +449,9 @@ ${activePromptText}
 
     if ((!rawText && !currentAttachment) || isLoading) return;
 
-    // Kiểm tra nếu là lệnh /clear
+    // Kiểm tra nếu là lệnh /clear -> Mở modal xác nhận
     if (rawText.toLowerCase() === '/clear') {
-      handleClearChat();
+      setShowClearConfirmModal(true);
       setInputVal('');
       setPendingAttachment(null);
       return;
@@ -684,7 +686,7 @@ ${activePromptText}
             </button>
             <button
               type="button"
-              onClick={handleClearChat}
+              onClick={() => setShowClearConfirmModal(true)}
               title="Xóa lịch sử trò chuyện của tài khoản này"
               className="p-2 rounded-xl text-neutral-400 hover:text-neutral-200 hover:bg-black/10 dark:hover:bg-white/10 active:scale-95 transition-all cursor-pointer"
             >
@@ -1064,6 +1066,19 @@ ${activePromptText}
             ...(updatedCustomModels ? { customProviderModels: updatedCustomModels } : {}),
           });
         }}
+      />
+
+      {/* Confirm Clear Chat History Modal */}
+      <ConfirmModal
+        isOpen={showClearConfirmModal}
+        title="Xóa Lịch Sử Trò Chuyện?"
+        message={`Bạn có chắc chắn muốn xóa toàn bộ lịch sử trò chuyện với linh vật ${mascotInfo.name} không? Toàn bộ tin nhắn với linh vật này của tài khoản sẽ được làm mới hoàn toàn.`}
+        confirmText="Xác nhận xóa"
+        cancelText="Hủy"
+        isDanger={true}
+        iconType="danger"
+        onConfirm={handleClearChat}
+        onCancel={() => setShowClearConfirmModal(false)}
       />
 
       {/* Lightbox Preview Modal for Images */}

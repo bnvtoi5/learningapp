@@ -54,6 +54,21 @@ service cloud.firestore {
       allow write: if true; // Teachers upload media
     }
 
+    // Media folders
+    match /media_folders/{folderId} {
+      allow read, write: if true;
+    }
+
+    // User personal settings & Mascot personality prompts
+    match /user_settings/{userId} {
+      allow read, write: if true;
+    }
+
+    // System settings
+    match /system_settings/{docId} {
+      allow read, write: if true;
+    }
+
     // System connection test doc
     match /test/{docId} {
       allow read, write: if true;

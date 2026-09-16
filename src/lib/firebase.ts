@@ -85,7 +85,17 @@ export async function testFirestoreConnection(): Promise<boolean> {
 
 export async function fetchAllFromCloud() {
   try {
-    const [classroomsSnap, topicsSnap, lessonsSnap, exercisesSnap, usersSnap, errorsSnap, mediaSnap] = await Promise.all([
+    const [
+      classroomsSnap, 
+      topicsSnap, 
+      lessonsSnap, 
+      exercisesSnap, 
+      usersSnap, 
+      errorsSnap, 
+      mediaSnap,
+      mediaFoldersSnap,
+      userSettingsSnap,
+    ] = await Promise.all([
       getDocs(collection(db, 'classrooms')),
       getDocs(collection(db, 'topics')),
       getDocs(collection(db, 'lessons')),
@@ -93,15 +103,43 @@ export async function fetchAllFromCloud() {
       getDocs(collection(db, 'users')),
       getDocs(collection(db, 'errors')),
       getDocs(collection(db, 'media')),
+      getDocs(collection(db, 'media_folders')),
+      getDocs(collection(db, 'user_settings')),
     ]);
 
     const classrooms = classroomsSnap.docs.map(d => d.data() as Classroom);
     const topics = topicsSnap.docs.map(d => d.data() as Topic);
     const lessons = lessonsSnap.docs.map(d => d.data() as Lesson);
     const exercises = exercisesSnap.docs.map(d => d.data() as Exercise);
-    const users = usersSnap.docs.map(d => d.data() as User);
+    let users = usersSnap.docs.map(d => d.data() as User);
     const errors = errorsSnap.docs.map(d => d.data() as ErrorLog);
     const media = mediaSnap.docs.map(d => d.data() as MediaAsset);
+    const mediaFolders = mediaFoldersSnap.docs.map(d => d.data());
+    
+    // Map individual user settings from user_settings collection onto users
+    const userSettingsMap = new Map<string, any>();
+    userSettingsSnap.docs.forEach(d => {
+      const data = d.data();
+      if (data && data.settings) {
+        userSettingsMap.set(d.id, data.settings);
+      }
+    });
+
+    if (userSettingsMap.size > 0) {
+      users = users.map(u => {
+        const extraSettings = userSettingsMap.get(u.id);
+        if (extraSettings) {
+          return {
+            ...u,
+            settings: {
+              ...(u.settings || {}),
+              ...extraSettings,
+            },
+          };
+        }
+        return u;
+      });
+    }
 
     return {
       hasData: classrooms.length > 0 || topics.length > 0 || lessons.length > 0 || exercises.length > 0 || users.length > 0 || media.length > 0,
@@ -112,6 +150,8 @@ export async function fetchAllFromCloud() {
       users,
       errors,
       media,
+      mediaFolders,
+      userSettingsMap,
     };
   } catch (err) {
     handleFirestoreError(err, OperationType.GET, 'all_collections');
@@ -196,7 +236,18 @@ export async function syncAllToCloud(data: {
 // Clear cloud collections completely (as requested: "xóa sạch db hiện có để tránh xung đột")
 export async function clearCloudDatabase() {
   try {
-    const collectionsToClear = ['classrooms', 'topics', 'lessons', 'exercises', 'users', 'errors', 'media'];
+    const collectionsToClear = [
+      'classrooms', 
+      'topics', 
+      'lessons', 
+      'exercises', 
+      'users', 
+      'errors', 
+      'media', 
+      'media_folders', 
+      'user_settings',
+      'system_settings'
+    ];
     for (const coll of collectionsToClear) {
       const snap = await getDocs(collection(db, coll));
       const batch = writeBatch(db);
