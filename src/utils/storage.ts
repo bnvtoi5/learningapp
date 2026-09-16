@@ -221,8 +221,18 @@ export function loadSettings(userId?: string): AppSettings {
     }
     const currentUser = getCurrentUser();
     if (currentUser && currentUser.id === activeUserId && currentUser.settings) {
+      localStorage.setItem(userSettingsKey, JSON.stringify(currentUser.settings));
       return { ...defaultSettings, ...currentUser.settings };
     }
+    // Also check all loaded users (e.g. synced from cloud)
+    const allUsers = safeParse<User[]>(STORAGE_KEYS.USERS, []);
+    const found = allUsers.find(u => u.id === activeUserId);
+    if (found && found.settings) {
+      localStorage.setItem(userSettingsKey, JSON.stringify(found.settings));
+      return { ...defaultSettings, ...found.settings };
+    }
+    // Return pristine default settings for this account without leaking other accounts' keys/models
+    return { ...defaultSettings };
   }
   return safeParse<AppSettings>(STORAGE_KEYS.SETTINGS, defaultSettings);
 }
@@ -233,17 +243,18 @@ export function saveSettings(settings: AppSettings, userId?: string) {
     const userSettingsKey = `${STORAGE_KEYS.SETTINGS}_${activeUserId}`;
     localStorage.setItem(userSettingsKey, JSON.stringify(settings));
 
-    // Update currentUser object with new settings & sync
+    // Update currentUser object with new settings & sync to cloud
     const currentUser = getCurrentUser();
     if (currentUser && currentUser.id === activeUserId) {
       currentUser.settings = settings;
       localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser));
-      const allUsers = loadUsers();
-      const updatedUsers = allUsers.map(u => u.id === activeUserId ? { ...u, settings } : u);
-      saveUsers(updatedUsers);
     }
+    const allUsers = loadUsers();
+    const updatedUsers = allUsers.map(u => u.id === activeUserId ? { ...u, settings } : u);
+    saveUsers(updatedUsers);
+  } else {
+    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
   }
-  localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
 }
 
 export function getLastActiveLessonId(): string | null {

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { AppSettings, ThemeMode, FontSize, LineSpacing } from '../types';
-import { loadSettings, saveSettings, defaultSettings } from '../utils/storage';
+import { loadSettings, saveSettings, defaultSettings, getCurrentUser } from '../utils/storage';
 
 interface ThemeContextType {
   settings: AppSettings;
@@ -43,7 +43,8 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   useEffect(() => {
-    saveSettings(settings);
+    const activeUserId = getCurrentUser()?.id;
+    saveSettings(settings, activeUserId);
     // Add class to body/html if needed
     const root = document.documentElement;
     root.classList.remove('theme-light', 'theme-dark', 'theme-oled', 'theme-sepia', 'dark');
@@ -56,7 +57,8 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const updateSettings = (partial: Partial<AppSettings>) => {
     setSettings(prev => {
       const next = { ...prev, ...partial };
-      saveSettings(next);
+      const activeUserId = getCurrentUser()?.id;
+      saveSettings(next, activeUserId);
       return next;
     });
   };

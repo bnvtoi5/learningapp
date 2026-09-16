@@ -187,7 +187,312 @@ export function getActiveMascotPrompt(
 }
 
 /**
- * Gửi tin nhắn đến server /api/mascot-chat: Hoàn toàn sử dụng cài đặt & API của từng tài khoản người dùng
+ * Trực tiếp gọi Google Gemini từ client-side khi ở môi trường mobile/shared không có backend proxy
+ */
+async function callDirectGemini(params: {
+  apiKey: string;
+  model: string;
+  fallbackModels?: string[];
+  systemInstruction: string;
+  message: string;
+  history: ChatMessage[];
+  attachment?: ChatAttachment;
+  signal?: AbortSignal;
+}): Promise<string> {
+  const { apiKey, model, fallbackModels = [], systemInstruction, message, history, attachment, signal } = params;
+
+  const contents: Array<{ role: 'user' | 'model'; parts: any[] }> = [];
+  if (Array.isArray(history) && history.length > 0) {
+    const recent = history.slice(-8);
+    for (const item of recent) {
+      if (item && (item.sender === 'user' || item.sender === 'mascot') && item.text) {
+        contents.push({
+          role: item.sender === 'user' ? 'user' : 'model',
+          parts: [{ text: String(item.text) }],
+        });
+      }
+    }
+  }
+
+  const userParts: any[] = [{ text: message }];
+  if (attachment && attachment.dataUrl) {
+    if (attachment.type === 'image') {
+      const match = String(attachment.dataUrl).match(/^data:([^;]+);base64,(.+)$/);
+      if (match) {
+        userParts.push({
+          inlineData: {
+            mimeType: match[1],
+            data: match[2],
+          },
+        });
+      }
+    } else if (attachment.textContent) {
+      userParts.push({
+        text: `\n\n[Nội dung tệp đính kèm "${attachment.name || 'tệp'}"]:\n${attachment.textContent}`,
+      });
+    }
+  }
+
+  contents.push({
+    role: 'user',
+    parts: userParts,
+  });
+
+  const candidates = [
+    model,
+    ...fallbackModels,
+    'gemini-3.1-flash-lite',
+    'gemini-flash-latest',
+    'gemini-3.8-flash',
+    'gemini-3.1-pro-preview',
+  ].filter((m, idx, arr) => m && arr.indexOf(m) === idx);
+
+  let lastError = '';
+
+  for (const candidateModel of candidates) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${candidateModel}:generateContent?key=${encodeURIComponent(apiKey)}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        signal,
+        body: JSON.stringify({
+          contents,
+          systemInstruction: {
+            parts: [{ text: systemInstruction }],
+          },
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 1500,
+          },
+        }),
+      });
+
+      const rawText = await res.text();
+      let data: any;
+      try {
+        data = JSON.parse(rawText);
+      } catch (e) {
+        throw new Error(`Phản hồi máy chủ không hợp lệ (${res.status})`);
+      }
+
+      if (!res.ok || data.error) {
+        const msg = data.error?.message || `Lỗi API (${res.status})`;
+        if (msg.includes('API_KEY_INVALID') || msg.includes('API key not valid')) {
+          throw new Error('API Key Google Gemini không chính xác hoặc đã hết hạn. Vui lòng kiểm tra lại trong phần chọn Mô hình.');
+        }
+        lastError = msg;
+        continue;
+      }
+
+      const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (reply && reply.trim()) {
+        return reply.trim();
+      }
+    } catch (err: any) {
+      if (err.name === 'AbortError' || signal?.aborted) throw err;
+      lastError = err.message || String(err);
+      if (lastError.includes('API Key Google Gemini không chính xác')) {
+        throw err;
+      }
+    }
+  }
+
+  if (lastError.includes('503') || lastError.includes('high demand') || lastError.includes('UNAVAILABLE')) {
+    throw new Error('Máy chủ Google AI hiện đang chịu tải cao. Bạn vui lòng thử lại sau vài giây nhé.');
+  }
+  throw new Error(lastError || 'Không nhận được câu trả lời từ Gemini.');
+}
+
+/**
+ * Trực tiếp gọi OpenAI / DeepSeek / OpenRouter / Custom từ client-side
+ */
+async function callDirectOpenAICompatible(params: {
+  apiKey: string;
+  baseUrl?: string;
+  provider: AIProviderType;
+  model: string;
+  systemInstruction: string;
+  message: string;
+  history: ChatMessage[];
+  attachment?: ChatAttachment;
+  signal?: AbortSignal;
+}): Promise<string> {
+  const { apiKey, baseUrl, provider, model, systemInstruction, message, history, attachment, signal } = params;
+
+  let defaultUrl = 'https://api.openai.com/v1';
+  if (provider === 'deepseek') defaultUrl = 'https://api.deepseek.com/v1';
+  else if (provider === 'openrouter') defaultUrl = 'https://openrouter.ai/api/v1';
+
+  const resolvedBaseUrl = (baseUrl && baseUrl.trim().length > 0)
+    ? baseUrl.trim().replace(/\/+$/, '')
+    : defaultUrl;
+
+  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: any }> = [
+    { role: 'system', content: systemInstruction }
+  ];
+
+  if (Array.isArray(history) && history.length > 0) {
+    const recent = history.slice(-10);
+    for (const item of recent) {
+      if (item && (item.sender === 'user' || item.sender === 'mascot') && item.text) {
+        messages.push({
+          role: item.sender === 'user' ? 'user' : 'assistant',
+          content: String(item.text),
+        });
+      }
+    }
+  }
+
+  let userContent: any = message;
+  if (attachment && attachment.dataUrl) {
+    if (attachment.type === 'image') {
+      userContent = [
+        { type: 'text', text: message },
+        { type: 'image_url', image_url: { url: attachment.dataUrl } },
+      ];
+    } else if (attachment.textContent) {
+      userContent = `${message}\n\n[Nội dung tệp đính kèm "${attachment.name || 'tệp'}"]:\n${attachment.textContent}`;
+    }
+  }
+
+  messages.push({ role: 'user', content: userContent });
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${apiKey.trim()}`,
+  };
+
+  if (provider === 'openrouter') {
+    headers['HTTP-Referer'] = window.location.origin;
+    headers['X-Title'] = 'AI Study Assistant';
+  }
+
+  const res = await fetch(`${resolvedBaseUrl}/chat/completions`, {
+    method: 'POST',
+    headers,
+    signal,
+    body: JSON.stringify({
+      model,
+      messages,
+      temperature: 0.7,
+      max_tokens: 1500,
+    }),
+  });
+
+  const rawText = await res.text();
+  let data: any;
+  try {
+    data = JSON.parse(rawText);
+  } catch (e) {
+    throw new Error(`Máy chủ (${provider}) trả về phản hồi không hợp lệ (${res.status}). Vui lòng kiểm tra lại Đường dẫn Base URL hoặc API Key.`);
+  }
+
+  if (!res.ok || data.error) {
+    const errText = data.error?.message || (typeof data.error === 'string' ? data.error : `Lỗi API (${res.status})`);
+    throw new Error(`${provider.toUpperCase()} (${model}): ${errText}`);
+  }
+
+  const reply = data.choices?.[0]?.message?.content;
+  if (!reply) {
+    throw new Error('Không nhận được nội dung trả lời từ mô hình AI.');
+  }
+
+  return reply;
+}
+
+/**
+ * Trực tiếp gọi Anthropic Claude từ client-side
+ */
+async function callDirectClaude(params: {
+  apiKey: string;
+  model: string;
+  systemInstruction: string;
+  message: string;
+  history: ChatMessage[];
+  attachment?: ChatAttachment;
+  signal?: AbortSignal;
+}): Promise<string> {
+  const { apiKey, model, systemInstruction, message, history, attachment, signal } = params;
+
+  const claudeMessages: Array<{ role: 'user' | 'assistant'; content: any }> = [];
+  if (Array.isArray(history) && history.length > 0) {
+    const recent = history.slice(-10);
+    for (const item of recent) {
+      if (item && (item.sender === 'user' || item.sender === 'mascot') && item.text) {
+        claudeMessages.push({
+          role: item.sender === 'user' ? 'user' : 'assistant',
+          content: String(item.text),
+        });
+      }
+    }
+  }
+
+  let claudeUserContent: any = message;
+  if (attachment && attachment.dataUrl) {
+    if (attachment.type === 'image') {
+      const match = String(attachment.dataUrl).match(/^data:([^;]+);base64,(.+)$/);
+      if (match) {
+        claudeUserContent = [
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: match[1],
+              data: match[2],
+            },
+          },
+          {
+            type: 'text',
+            text: message,
+          },
+        ];
+      }
+    } else if (attachment.textContent) {
+      claudeUserContent = `${message}\n\n[Nội dung tệp đính kèm "${attachment.name || 'tệp'}"]:\n${attachment.textContent}`;
+    }
+  }
+
+  claudeMessages.push({ role: 'user', content: claudeUserContent });
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey.trim(),
+      'anthropic-version': '2023-06-01',
+      'dangerously-allow-browser': 'true',
+    },
+    signal,
+    body: JSON.stringify({
+      model: model || 'claude-opus-4-8',
+      system: systemInstruction,
+      messages: claudeMessages,
+      max_tokens: 1500,
+      temperature: 0.7,
+    }),
+  });
+
+  const rawText = await res.text();
+  let data: any;
+  try {
+    data = JSON.parse(rawText);
+  } catch (e) {
+    throw new Error(`Claude API trả về phản hồi không hợp lệ (${res.status}).`);
+  }
+
+  if (!res.ok || data.error) {
+    const errText = data.error?.message || `Lỗi API (${res.status})`;
+    throw new Error(`Claude: ${errText}`);
+  }
+
+  return data.content?.[0]?.text || 'Không có phản hồi từ Claude';
+}
+
+/**
+ * Gửi tin nhắn đến server /api/mascot-chat và tự động Fallback gọi trực tiếp an toàn từ Client trên mọi thiết bị
  */
 export async function sendMascotChatMessage(params: {
   message: string;
@@ -214,8 +519,8 @@ export async function sendMascotChatMessage(params: {
     mascotId, 
     customApiKey, 
     provider = 'gemini', 
-    model, 
-    fallbackModels,
+    model = 'gemini-3.8-flash', 
+    fallbackModels = [],
     baseUrl,
     userPromptOverride,
     quotedMessage, 
@@ -231,29 +536,125 @@ export async function sendMascotChatMessage(params: {
     basePrompt += `\n\nNgười đang trò chuyện với bạn là học sinh tên là: "${studentName}". Hãy xưng hô tự nhiên, thân thiết.`;
   }
 
-  const response = await fetch('/api/mascot-chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    signal,
-    body: JSON.stringify({
-      message,
-      history,
-      mascotId,
-      systemInstruction: basePrompt,
-      customApiKey: customApiKey?.trim() || undefined,
-      quotedMessage,
-      provider,
-      model,
-      fallbackModels,
-      baseUrl: baseUrl?.trim() || undefined,
-      attachment,
-    }),
-  });
-
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data.error || 'Lỗi kết nối máy chủ AI');
+  // Chuẩn bị tin nhắn hiện tại có kèm ngữ cảnh quote
+  let currentPrompt = message.trim();
+  if (quotedMessage && quotedMessage.text) {
+    const quotedAuthor = quotedMessage.sender === 'user' ? 'Người dùng' : 'Bạn (Linh vật)';
+    currentPrompt = `[TRÍCH DẪN ĐANG ĐƯỢC TRẢ LỜI TỪ (${quotedAuthor}): "${quotedMessage.text}"]\n\nPhản hồi / câu hỏi trực tiếp của người dùng:\n${currentPrompt}`;
   }
 
-  return data.reply;
+  let serverCallFailed = false;
+  let serverErrorMessage = '';
+
+  // 1. Thử gửi qua Server Proxy /api/mascot-chat trước
+  try {
+    const response = await fetch('/api/mascot-chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal,
+      body: JSON.stringify({
+        message,
+        history,
+        mascotId,
+        systemInstruction: basePrompt,
+        customApiKey: customApiKey?.trim() || undefined,
+        quotedMessage,
+        provider,
+        model,
+        fallbackModels,
+        baseUrl: baseUrl?.trim() || undefined,
+        attachment,
+      }),
+    });
+
+    const rawText = await response.text();
+    let data: any = null;
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      // Phản hồi không phải JSON (VD: 404 HTML "The page cannot be found" trên điện thoại hoặc môi trường tĩnh)
+      serverCallFailed = true;
+      serverErrorMessage = `Máy chủ cục bộ không khả dụng (${response.status})`;
+    }
+
+    if (data) {
+      if (response.ok && data.reply) {
+        return data.reply;
+      }
+      if (data.error) {
+        // Nếu server báo lỗi API KEY hoặc lỗi cụ thể
+        if (data.error.includes('Vui lòng bấm') || data.error.includes('không hợp lệ')) {
+          throw new Error(data.error);
+        }
+        serverErrorMessage = data.error;
+        serverCallFailed = true;
+      }
+    }
+  } catch (fetchErr: any) {
+    if (fetchErr.name === 'AbortError' || signal?.aborted) {
+      throw fetchErr;
+    }
+    // Nếu lỗi là do key không hợp lệ được ném ở trên, rethrow luôn
+    if (fetchErr.message?.includes('API Key') || fetchErr.message?.includes('Vui lòng')) {
+      throw fetchErr;
+    }
+    serverCallFailed = true;
+    serverErrorMessage = fetchErr.message || 'Không thể kết nối đến server proxy';
+  }
+
+  // 2. Tự động Fallback: Gọi trực tiếp từ Client nếu máy chủ backend proxy không phản hồi JSON (VD: Trên điện thoại / máy khác)
+  const activeKey = customApiKey?.trim();
+
+  if (provider === 'gemini') {
+    if (activeKey) {
+      return await callDirectGemini({
+        apiKey: activeKey,
+        model,
+        fallbackModels,
+        systemInstruction: basePrompt,
+        message: currentPrompt,
+        history,
+        attachment,
+        signal,
+      });
+    } else {
+      throw new Error(
+        'Không thể kết nối máy chủ AI tự động trên thiết bị này. Vui lòng bấm vào biểu tượng "Mô hình" (ở góc trên khung chat) và nhập API Key cá nhân của bạn (Google Gemini / OpenAI / DeepSeek / Claude / OpenRouter) để trò chuyện trực tiếp nhé!'
+      );
+    }
+  }
+
+  if (provider === 'anthropic') {
+    if (activeKey) {
+      return await callDirectClaude({
+        apiKey: activeKey,
+        model,
+        systemInstruction: basePrompt,
+        message: currentPrompt,
+        history,
+        attachment,
+        signal,
+      });
+    } else {
+      throw new Error('Chưa có Anthropic Claude API Key. Vui lòng bấm vào nút "Mô hình" ở góc trên khung chat để nhập API Key của bạn (sk-ant-...).');
+    }
+  }
+
+  // OpenAI / DeepSeek / OpenRouter / Custom
+  if (activeKey) {
+    return await callDirectOpenAICompatible({
+      apiKey: activeKey,
+      baseUrl,
+      provider,
+      model,
+      systemInstruction: basePrompt,
+      message: currentPrompt,
+      history,
+      attachment,
+      signal,
+    });
+  }
+
+  const providerName = provider === 'deepseek' ? 'DeepSeek' : provider === 'openrouter' ? 'OpenRouter' : 'OpenAI';
+  throw new Error(`Chưa có API Key cho ${providerName}. Vui lòng bấm vào nút "Mô hình" ở góc trên khung chat để nhập API Key cá nhân của bạn nhé!`);
 }

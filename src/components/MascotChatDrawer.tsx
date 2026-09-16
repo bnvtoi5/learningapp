@@ -504,13 +504,16 @@ export const MascotChatDrawer: React.FC<MascotChatDrawerProps> = ({
 
       if (errorText.includes('503') || errorText.includes('high demand') || errorText.includes('UNAVAILABLE')) {
         errorText = 'Máy chủ AI hiện đang chịu tải cao tạm thời. Bạn vui lòng thử lại sau vài giây nhé.';
+      } else if (errorText.includes('Unexpected token') || errorText.includes('not valid JSON') || errorText.includes('The page c')) {
+        errorText = 'Không thể kết nối đến máy chủ AI (Mạng hoặc cấu hình chưa sẵn sàng). Vui lòng bấm biểu tượng "Mô hình" để nhập API Key cá nhân (Google Gemini, OpenAI, DeepSeek...) và thử lại nhé.';
       }
 
       setErrorMsg(errorText);
+      const isCustomKeyHint = errorText.includes('API Key') || errorText.includes('Mô hình');
       const errorMsgItem: ChatMessage = {
         id: 'msg_err_' + Date.now(),
         sender: 'mascot',
-        text: `⚠️ **Thông báo**: ${errorText}\n\n*Gợi ý: Vui lòng bấm vào nút biểu tượng "Mô hình" ở góc trên khung chat để kiểm tra hoặc nhập API Key cá nhân của bạn nhé!*`,
+        text: `⚠️ **Thông báo**: ${errorText}${!isCustomKeyHint ? '\n\n*Gợi ý: Vui lòng bấm vào nút biểu tượng "Mô hình" ở góc trên khung chat để kiểm tra hoặc nhập API Key cá nhân của bạn nhé!*' : ''}`,
         timestamp: Date.now(),
       };
       setMessages(prev => [...prev, errorMsgItem]);

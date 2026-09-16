@@ -246,7 +246,17 @@ async function startServer() {
           }),
         });
 
-        const data: any = await resp.json();
+        const rawRespText = await resp.text();
+        let data: any = {};
+        try {
+          data = JSON.parse(rawRespText);
+        } catch (parseErr) {
+          console.error("Anthropic response is not JSON:", rawRespText.slice(0, 300));
+          return res.status(resp.status || 502).json({
+            error: `Máy chủ Anthropic trả về lỗi (${resp.status} ${resp.statusText || 'Không hợp lệ'}). Vui lòng kiểm tra lại API Key hoặc đổi sang mô hình khác.`
+          });
+        }
+
         if (!resp.ok || data.error) {
           const errText = data.error?.message || "Lỗi kết nối máy chủ Claude";
           return res.status(resp.status || 500).json({ error: `Anthropic Claude: ${errText}` });
@@ -335,7 +345,17 @@ async function startServer() {
         }),
       });
 
-      const data: any = await resp.json();
+      const rawRespText = await resp.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(rawRespText);
+      } catch (parseErr) {
+        console.error("Upstream AI response is not JSON:", rawRespText.slice(0, 300));
+        return res.status(resp.status || 502).json({
+          error: `Đường dẫn API hoặc máy chủ (${targetModel}) phản hồi không đúng chuẩn JSON (${resp.status} ${resp.statusText || ''}). Vui lòng kiểm tra lại Đường dẫn Base URL và API Key của bạn.`
+        });
+      }
+
       if (!resp.ok || data.error) {
         const errText = data.error?.message || (typeof data.error === "string" ? data.error : "Lỗi kết nối API");
         return res.status(resp.status || 500).json({ error: `API (${targetModel}): ${errText}` });
