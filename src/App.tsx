@@ -89,9 +89,9 @@ function MainApp() {
   const theme = getThemeClasses();
 
   // Authentication & Classrooms
-  const [currentUser, setCurrentUserState] = useState<User | null>(getCurrentUser());
-  const [users, setUsers] = useState<User[]>(loadUsers());
-  const [classrooms, setClassrooms] = useState<Classroom[]>(loadClassrooms());
+  const [currentUser, setCurrentUserState] = useState<User | null>(() => getCurrentUser());
+  const [users, setUsers] = useState<User[]>(() => loadUsers());
+  const [classrooms, setClassrooms] = useState<Classroom[]>(() => loadClassrooms());
 
   // Navigation tab: dashboard | topics | admin | manager | builder | errors | progress
   const [currentTab, setCurrentTab] = useState<string>('dashboard');
@@ -148,6 +148,7 @@ function MainApp() {
 
     // 2. Perform clean migration if DB version updated
     checkAndMigrateCleanDatabase().then(() => {
+      setCurrentUserState(getCurrentUser());
       reloadAllData();
     }).catch(e => console.warn('Clean migration error:', e));
 

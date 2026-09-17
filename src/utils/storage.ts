@@ -1269,11 +1269,11 @@ export async function clearAllDatabase(clearCloud = false) {
   saveErrors(initialErrors);
   saveStats(initialStats);
 
-  if (initialUsers[0]) {
-    setCurrentUser(initialUsers[0]);
-    if (clearCloud) {
-      await syncDocToCloud('users', initialUsers[0].id, initialUsers[0]);
-    }
+  // Ensure NO user is logged in by default - visitor must explicitly log in via AuthScreen
+  setCurrentUser(null);
+
+  if (clearCloud && initialUsers[0]) {
+    await syncDocToCloud('users', initialUsers[0].id, initialUsers[0]);
   }
 }
 
@@ -1314,11 +1314,11 @@ export function importData(jsonString: string): { success: boolean; message?: st
   }
 }
 
-const DB_VERSION_TAG = `clean_system_proj_${defaultConfig.projectId || 'learning-3ac9a'}_v1`;
+const DB_VERSION_TAG = `clean_auth_required_proj_${defaultConfig.projectId || 'learning-3ac9a'}_v3`;
 export async function checkAndMigrateCleanDatabase() {
   const cur = localStorage.getItem(STORAGE_KEYS.CLEAN_TAG);
   if (cur !== DB_VERSION_TAG) {
-    console.log(`[Storage] Switched to Firebase project: ${defaultConfig.projectId}. Resetting local cache to clean state.`);
+    console.log(`[Storage] Switched to Firebase project: ${defaultConfig.projectId}. Resetting local cache to pristine state (requiring login).`);
     await clearAllDatabase(false);
     localStorage.setItem(STORAGE_KEYS.CLEAN_TAG, DB_VERSION_TAG);
   }
