@@ -126,11 +126,17 @@ export const DEFAULT_QUICK_COMMANDS: QuickCommandItem[] = [
 ];
 
 const QUICK_COMMANDS_LOCAL_KEY = 'app_system_quick_commands';
+let cachedSystemQuickCommands: { items: QuickCommandItem[]; fetchedAt: number } | null = null;
 
 /**
- * Lấy danh sách Lệnh Nhanh Hệ Thống (LocalStorage + Firestore)
+ * Lấy danh sách Lệnh Nhanh Hệ Thống (LocalStorage + Firestore có Cache 10 phút)
  */
 export async function getSystemQuickCommands(): Promise<QuickCommandItem[]> {
+  const now = Date.now();
+  if (cachedSystemQuickCommands && (now - cachedSystemQuickCommands.fetchedAt < 10 * 60 * 1000)) {
+    return cachedSystemQuickCommands.items;
+  }
+
   let commands: QuickCommandItem[] = [...DEFAULT_QUICK_COMMANDS];
 
   try {
@@ -138,7 +144,6 @@ export async function getSystemQuickCommands(): Promise<QuickCommandItem[]> {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        // Đảm bảo các lệnh hệ thống như /tinhcach và /clear luôn hiện diện
         const existingCmds = new Set(parsed.map(c => c.command));
         const missingSystemCmds = DEFAULT_QUICK_COMMANDS.filter(d => d.isSystem && !existingCmds.has(d.command));
         commands = [...parsed, ...missingSystemCmds];
@@ -148,6 +153,7 @@ export async function getSystemQuickCommands(): Promise<QuickCommandItem[]> {
     console.warn('Lỗi đọc local quick commands:', e);
   }
 
+  // Nếu local đã có và còn mới, không cần gọi Firestore ngay trừ khi cache quá hạn
   try {
     const docRef = doc(db, 'system_config', 'quick_commands');
     const snap = await getDoc(docRef);
@@ -161,9 +167,10 @@ export async function getSystemQuickCommands(): Promise<QuickCommandItem[]> {
       }
     }
   } catch (e) {
-    // Không chặn nếu offline
+    // Không chặn nếu offline hoặc quota limit
   }
 
+  cachedSystemQuickCommands = { items: commands, fetchedAt: now };
   return commands;
 }
 
@@ -171,6 +178,7 @@ export async function getSystemQuickCommands(): Promise<QuickCommandItem[]> {
  * Admin lưu danh sách Lệnh Nhanh dùng chung toàn trường
  */
 export async function saveSystemQuickCommands(commands: QuickCommandItem[]): Promise<void> {
+  cachedSystemQuickCommands = { items: commands, fetchedAt: Date.now() };
   try {
     localStorage.setItem(QUICK_COMMANDS_LOCAL_KEY, JSON.stringify(commands));
   } catch (e) {
