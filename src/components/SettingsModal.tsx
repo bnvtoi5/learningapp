@@ -174,10 +174,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  const handleClearAll = () => {
-    clearAllDatabase(true);
-    onDataReload();
-    onClose();
+  const handleClearAll = async () => {
+    setIsSyncingCloud(true);
+    try {
+      await clearAllDatabase(true);
+      onDataReload();
+      onClose();
+    } finally {
+      setIsSyncingCloud(false);
+    }
   };
 
   return (

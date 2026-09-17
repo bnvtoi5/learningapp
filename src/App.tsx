@@ -64,8 +64,10 @@ import {
   deleteClassroom as storageDeleteClassroom,
   getCurrentUser,
   setCurrentUser as storageSetCurrentUser,
-  syncDatabaseWithCloud
+  syncDatabaseWithCloud,
+  checkAndMigrateCleanDatabase,
 } from './utils/storage';
+import { subscribeToAllCollections } from './lib/firebase';
 
 import { Navbar } from './components/Navbar';
 import { Dashboard } from './components/Dashboard';
@@ -141,11 +143,67 @@ function MainApp() {
   }, [currentUser?.id]);
 
   useEffect(() => {
+    // 1. Initial local load
     reloadAllData();
-    // Sync with Firebase Cloud Database
+
+    // 2. Perform clean migration if DB version updated
+    checkAndMigrateCleanDatabase().then(() => {
+      reloadAllData();
+    }).catch(e => console.warn('Clean migration error:', e));
+
+    // 3. Initial Cloud sync
     syncDatabaseWithCloud(() => {
       reloadAllData();
     }).catch(err => console.warn('Cloud sync on launch:', err));
+
+    // 4. Real-time live listener from Firestore across all devices and tabs
+    const unsubscribe = subscribeToAllCollections((cloudData) => {
+      if (cloudData.classrooms) {
+        setClassrooms(cloudData.classrooms);
+        localStorage.setItem('study_app_classrooms', JSON.stringify(cloudData.classrooms));
+      }
+      if (cloudData.topics) {
+        setTopics(cloudData.topics);
+        localStorage.setItem('study_app_topics', JSON.stringify(cloudData.topics));
+      }
+      if (cloudData.lessons) {
+        setLessons(cloudData.lessons);
+        localStorage.setItem('study_app_lessons', JSON.stringify(cloudData.lessons));
+      }
+      if (cloudData.exercises) {
+        setExercises(cloudData.exercises);
+        localStorage.setItem('study_app_exercises', JSON.stringify(cloudData.exercises));
+      }
+      if (cloudData.errors) {
+        setErrors(cloudData.errors);
+        localStorage.setItem('study_app_errors', JSON.stringify(cloudData.errors));
+      }
+      if (cloudData.users && cloudData.users.length > 0) {
+        setUsers(cloudData.users);
+        localStorage.setItem('study_app_users', JSON.stringify(cloudData.users));
+
+        // Sync individual user settings
+        cloudData.users.forEach(u => {
+          if (u.settings) {
+            localStorage.setItem(`study_app_settings_${u.id}`, JSON.stringify(u.settings));
+          }
+        });
+
+        // Sync logged in user if changed or update their info
+        const cur = getCurrentUser();
+        if (cur) {
+          const freshUser = cloudData.users.find(u => u.id === cur.id);
+          if (freshUser) {
+            setCurrentUserState(freshUser);
+            storageSetCurrentUser(freshUser);
+          }
+        }
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   // Sync current user status if changed in users list

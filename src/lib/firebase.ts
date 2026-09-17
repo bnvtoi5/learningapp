@@ -250,11 +250,13 @@ export async function clearCloudDatabase() {
     ];
     for (const coll of collectionsToClear) {
       const snap = await getDocs(collection(db, coll));
-      const batch = writeBatch(db);
-      snap.docs.forEach(d => {
-        batch.delete(d.ref);
-      });
-      await batch.commit();
+      if (!snap.empty) {
+        const batch = writeBatch(db);
+        snap.docs.forEach(d => {
+          batch.delete(d.ref);
+        });
+        await batch.commit();
+      }
     }
     console.log('Cleared all Cloud Database collections.');
     return true;
@@ -262,4 +264,119 @@ export async function clearCloudDatabase() {
     handleFirestoreError(err, OperationType.DELETE, 'clear_cloud_database');
     return false;
   }
+}
+
+// Subscribe to real-time updates across all Firestore collections
+export function subscribeToAllCollections(onUpdate: (data: {
+  classrooms: Classroom[];
+  topics: Topic[];
+  lessons: Lesson[];
+  exercises: Exercise[];
+  users: User[];
+  errors: ErrorLog[];
+  media: MediaAsset[];
+  userSettingsMap: Map<string, any>;
+}) => void) {
+  let isSubscribed = true;
+  const state = {
+    classrooms: [] as Classroom[],
+    topics: [] as Topic[],
+    lessons: [] as Lesson[],
+    exercises: [] as Exercise[],
+    users: [] as User[],
+    errors: [] as ErrorLog[],
+    media: [] as MediaAsset[],
+    userSettingsMap: new Map<string, any>(),
+  };
+
+  const notify = () => {
+    if (!isSubscribed) return;
+    // Merge user_settings into users
+    let mergedUsers = state.users;
+    if (state.userSettingsMap.size > 0) {
+      mergedUsers = state.users.map(u => {
+        const extraSettings = state.userSettingsMap.get(u.id);
+        if (extraSettings) {
+          return {
+            ...u,
+            settings: {
+              ...(u.settings || {}),
+              ...extraSettings,
+            },
+          };
+        }
+        return u;
+      });
+    }
+
+    onUpdate({
+      classrooms: state.classrooms,
+      topics: state.topics,
+      lessons: state.lessons,
+      exercises: state.exercises,
+      users: mergedUsers,
+      errors: state.errors,
+      media: state.media,
+      userSettingsMap: state.userSettingsMap,
+    });
+  };
+
+  const unsubClassrooms = onSnapshot(collection(db, 'classrooms'), snap => {
+    state.classrooms = snap.docs.map(d => d.data() as Classroom);
+    notify();
+  }, err => console.warn('Classrooms real-time listener error:', err));
+
+  const unsubTopics = onSnapshot(collection(db, 'topics'), snap => {
+    state.topics = snap.docs.map(d => d.data() as Topic);
+    notify();
+  }, err => console.warn('Topics real-time listener error:', err));
+
+  const unsubLessons = onSnapshot(collection(db, 'lessons'), snap => {
+    state.lessons = snap.docs.map(d => d.data() as Lesson);
+    notify();
+  }, err => console.warn('Lessons real-time listener error:', err));
+
+  const unsubExercises = onSnapshot(collection(db, 'exercises'), snap => {
+    state.exercises = snap.docs.map(d => d.data() as Exercise);
+    notify();
+  }, err => console.warn('Exercises real-time listener error:', err));
+
+  const unsubUsers = onSnapshot(collection(db, 'users'), snap => {
+    state.users = snap.docs.map(d => d.data() as User);
+    notify();
+  }, err => console.warn('Users real-time listener error:', err));
+
+  const unsubUserSettings = onSnapshot(collection(db, 'user_settings'), snap => {
+    const newMap = new Map<string, any>();
+    snap.docs.forEach(d => {
+      const data = d.data();
+      if (data?.settings) {
+        newMap.set(d.id, data.settings);
+      }
+    });
+    state.userSettingsMap = newMap;
+    notify();
+  }, err => console.warn('UserSettings real-time listener error:', err));
+
+  const unsubErrors = onSnapshot(collection(db, 'errors'), snap => {
+    state.errors = snap.docs.map(d => d.data() as ErrorLog);
+    notify();
+  }, err => console.warn('Errors real-time listener error:', err));
+
+  const unsubMedia = onSnapshot(collection(db, 'media'), snap => {
+    state.media = snap.docs.map(d => d.data() as MediaAsset);
+    notify();
+  }, err => console.warn('Media real-time listener error:', err));
+
+  return () => {
+    isSubscribed = false;
+    unsubClassrooms();
+    unsubTopics();
+    unsubLessons();
+    unsubExercises();
+    unsubUsers();
+    unsubUserSettings();
+    unsubErrors();
+    unsubMedia();
+  };
 }

@@ -230,7 +230,64 @@ export interface Classroom {
 
 export type VoiceGenderPreference = 'auto' | 'female' | 'male' | 'uk_female' | 'uk_male';
 
-export type MascotType = 'owl' | 'cat' | 'fox' | 'bear' | 'bunny' | 'robot' | 'shiba' | 'penguin';
+export type MascotCategory = 'ALL' | 'HUMAN' | 'ANIMAL' | 'POWER' | 'COOL' | 'FRIEND' | 'FUN' | 'FANTASY' | 'SPECIAL';
+
+export type MascotType = 
+  // POWER
+  | 'president' 
+  | 'leader' 
+  | 'queen' 
+  | 'headmaster' 
+  | 'young_ceo' 
+  // COOL
+  | 'dragon' 
+  | 'kuudere' 
+  | 'tsundere' 
+  | 'noble' 
+  | 'villain' 
+  | 'ninja'
+  // FRIEND
+  | 'osananajimi' 
+  | 'bestie' 
+  | 'oneesan' 
+  | 'imouto' 
+  | 'classmate' 
+  | 'student_boy'
+  // FUN
+  | 'shiba' 
+  | 'chaotic' 
+  | 'memegirl' 
+  | 'gamer' 
+  | 'chuuni' 
+  // FANTASY
+  | 'mage' 
+  | 'princess' 
+  | 'knight' 
+  | 'demon_lord' 
+  | 'vampire' 
+  | 'slime'
+  | 'ghost'
+  // SPECIAL
+  | 'idol' 
+  | 'maid' 
+  | 'detective' 
+  | 'hacker' 
+  | 'dj_girl' 
+  | 'streamer' 
+  | 'yandere'
+  // Classic & Aliases
+  | 'owl' 
+  | 'cat' 
+  | 'fox' 
+  | 'bear' 
+  | 'bunny' 
+  | 'robot' 
+  | 'penguin'
+  | 'wolf'
+  | 'swan'
+  | 'lion'
+  | 'deer'
+  | 'panther';
 
 export type AIProviderType = 'gemini' | 'openai' | 'anthropic' | 'deepseek' | 'openrouter' | 'custom';
 

@@ -1225,7 +1225,8 @@ export function bulkDuplicateExercises(
 // Database Reset & Self-Healing Cloud Migration
 // -------------------------------------------------------------
 
-export function clearAllDatabase(clearCloud = false) {
+export async function clearAllDatabase(clearCloud = false) {
+  // Clear all structured storage items
   localStorage.removeItem(STORAGE_KEYS.TOPICS);
   localStorage.removeItem(STORAGE_KEYS.LESSONS);
   localStorage.removeItem(STORAGE_KEYS.EXERCISES);
@@ -1235,6 +1236,30 @@ export function clearAllDatabase(clearCloud = false) {
   localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
   localStorage.removeItem(STORAGE_KEYS.CLASSROOMS);
   localStorage.removeItem(STORAGE_KEYS.MEDIA);
+  localStorage.removeItem(STORAGE_KEYS.MEDIA_FOLDERS);
+
+  // Clear all user-specific settings and chat history keys
+  if (typeof window !== 'undefined' && window.localStorage) {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (
+        k.startsWith(`${STORAGE_KEYS.SETTINGS}_`) || 
+        k.startsWith('study_app_chat_') || 
+        k.startsWith('study_app_ai_key_')
+      )) {
+        keysToRemove.push(k);
+      }
+    }
+    keysToRemove.forEach(k => localStorage.removeItem(k));
+  }
+
+  // Clear cloud database if requested
+  if (clearCloud) {
+    await clearCloudDatabase();
+  }
+
+  // Set pristine initial state
   saveUsers(initialUsers);
   saveClassrooms(initialClassrooms);
   saveTopics(initialTopics);
@@ -1242,11 +1267,12 @@ export function clearAllDatabase(clearCloud = false) {
   saveExercises(initialExercises);
   saveErrors(initialErrors);
   saveStats(initialStats);
+
   if (initialUsers[0]) {
     setCurrentUser(initialUsers[0]);
-  }
-  if (clearCloud) {
-    clearCloudDatabase();
+    if (clearCloud) {
+      await syncDocToCloud('users', initialUsers[0].id, initialUsers[0]);
+    }
   }
 }
 
@@ -1287,11 +1313,11 @@ export function importData(jsonString: string): { success: boolean; message?: st
   }
 }
 
-const DB_VERSION_TAG = 'clean_system_v10_firebase_cloud_ready';
-export function checkAndMigrateCleanDatabase() {
+const DB_VERSION_TAG = 'clean_system_v20_realtime_cloud_synced_clean_reset';
+export async function checkAndMigrateCleanDatabase() {
   const cur = localStorage.getItem(STORAGE_KEYS.CLEAN_TAG);
   if (cur !== DB_VERSION_TAG) {
-    clearAllDatabase(false);
+    await clearAllDatabase(true);
     localStorage.setItem(STORAGE_KEYS.CLEAN_TAG, DB_VERSION_TAG);
   }
 }

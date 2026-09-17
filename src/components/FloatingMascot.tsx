@@ -109,7 +109,49 @@ export const FloatingMascot: React.FC<FloatingMascotProps> = ({
       'Có chức năng in PDF bài giảng ăn theo nền giao diện rồi đó! 📄',
       'Làm bài tốt nhé! Tớ luôn đồng hành cùng bạn! 💚',
       'Úi chao, bạn bấm nhiều quá tớ chóng mặt rùi nè! 🌀',
-    ]
+    ],
+    dragon: [
+      'Hừm, kiến thức là sức mạnh tối thượng. Đừng để ta thất vọng! 🐲',
+      'Muốn đứng trên đỉnh cao thì phải chăm chỉ luyện đề! 👑',
+      'Bản vương cho phép ngươi nghỉ 3 phút rồi quay lại học tiếp! ⚔️',
+      'Làm sai câu nào, ta sẽ đích thân soi lỗi cho ngươi! 🔥',
+      'Tiến bộ tốt đấy, xứng đáng là học trò của Long Đế! 🌟',
+    ],
+    wolf: [
+      'Tập trung vào mục tiêu. Không được lơ là. 🐺',
+      'Hiệu suất học tập của cậu đang tăng 15%. Tiếp tục phát huy. 📊',
+      'Phân tích kỹ đề bài. Đừng để cảm xúc đánh lừa logic. ❄️',
+      'Mệt rồi thì nghỉ một lát. Tôi không muốn cậu kiệt sức. 💼',
+      'Làm tốt lắm. Tôi đã ghi nhận kết quả này. ✔️',
+    ],
+    swan: [
+      'Trang nhã và chuẩn xác, đó là phong cách của người dẫn đầu! 🦢',
+      'Chớ vội vàng, kiểm tra lại ngữ pháp từng câu một nhé. 💜',
+      'Hội đồng học sinh luôn kỳ vọng vào sự bứt phá của bạn! 👑',
+      'Không phải tớ lo cho bạn đâu... chỉ là không muốn điểm bạn thấp thôi! ✨',
+      'Tuyệt vời! Kết quả hoàn hảo không một vết xước! 💎',
+    ],
+    lion: [
+      'Bản lĩnh của một thủ lĩnh là không bao giờ gục ngã trước bài khó! 🦁',
+      'Mỗi bài tập hôm nay là một bước tiến dẫn đầu ngày mai! 🏆',
+      'Tự tin lên trò! Cả ngôi trường này đang nhìn vào sự nỗ lực của em! ⚡',
+      'Khí chất ngút trời! Tiếp tục quét sạch các bài tập nào! 🥇',
+      'Thầy rất tự hào về tinh thần quyết tâm của trò hôm nay! 🌟',
+    ],
+    deer: [
+      'Tĩnh tâm lại, câu trả lời nằm ngay trong sự quan sát sâu sắc. 🦌',
+      'Biết mình biết ta, trăm trận trăm thắng. Nắm chắc cốt lõi ngữ pháp nhé. 🍃',
+      'Một chiến lược gia giỏi là người biết rút kinh nghiệm từ lỗi sai. 🔮',
+      'Cậu đã tiến bộ rất nhiều, hãy tin vào trực giác của mình. 🌿',
+      'Nhẹ nhàng nhưng sắc sảo, đó chính là vẻ đẹp của tri thức. 💎',
+    ],
+    panther: [
+      'Im lặng và hành động. Kết quả sẽ tự lên tiếng. 🐆',
+      'Nhìn thẳng vào trọng tâm đề. Chọn đáp án dứt khoát. 🎯',
+      'Không lý do. Chỉ có hoàn thành. ⚡',
+      '...Làm đúng rồi đấy. Khá lắm. 🌙',
+      'Nghỉ ngơi đi. Đừng cố quá sức. 🐾',
+    ],
   };
 
   const currentTips = tipsByMascot[currentMascotId] || tipsByMascot.owl;
