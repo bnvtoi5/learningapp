@@ -225,8 +225,8 @@ function generateMascotCell(
           <path d="M ${cx - 5} ${cy + 13} Q ${cx} ${cy + 20} ${cx + 5} ${cy + 13} Z" fill="#e11d48" />
         `;
         extraDecor = `
-          <text x="${cx + 20}" y="${cy - 10}" font-size="12" fill="#10b981">♪</text>
-          <text x="${cx - 26}" y="${cy - 10}" font-size="10" fill="#f59e0b">✨</text>
+          <path d="M ${cx + 20} ${cy - 12} L ${cx + 24} ${cy - 14} L ${cx + 24} ${cy - 8} L ${cx + 20} ${cy - 6} Z" fill="#10b981" />
+          <polygon points="${cx - 24},${cy - 14} ${cx - 22},${cy - 8} ${cx - 20},${cy - 14} ${cx - 22},${cy - 20}" fill="#f59e0b" />
         `;
         break;
     }
@@ -284,10 +284,21 @@ export function buildMascotReactionsSvg(mascot: MascotType): string {
 const cacheDirections: Partial<Record<MascotType, string>> = {};
 const cacheReactions: Partial<Record<MascotType, string>> = {};
 
+function toSvgDataUri(svg: string): string {
+  // Strip XML comments and collapse excessive whitespace
+  const cleanSvg = svg.replace(/<!--[\s\S]*?-->/g, '').replace(/\s+/g, ' ').trim();
+  // Ensure quotes, parentheses and special chars are percent-encoded for CSS url() safety
+  const encoded = encodeURIComponent(cleanSvg)
+    .replace(/'/g, '%27')
+    .replace(/\(/g, '%28')
+    .replace(/\)/g, '%29');
+  return `data:image/svg+xml;utf8,${encoded}`;
+}
+
 export function getMascotDirectionsUri(mascot: MascotType = 'osananajimi'): string {
   const key = mascot || 'osananajimi';
   if (!cacheDirections[key]) {
-    cacheDirections[key] = `data:image/svg+xml;utf8,${encodeURIComponent(buildMascotDirectionsSvg(key))}`;
+    cacheDirections[key] = toSvgDataUri(buildMascotDirectionsSvg(key));
   }
   return cacheDirections[key]!;
 }
@@ -295,7 +306,7 @@ export function getMascotDirectionsUri(mascot: MascotType = 'osananajimi'): stri
 export function getMascotReactionsUri(mascot: MascotType = 'osananajimi'): string {
   const key = mascot || 'osananajimi';
   if (!cacheReactions[key]) {
-    cacheReactions[key] = `data:image/svg+xml;utf8,${encodeURIComponent(buildMascotReactionsSvg(key))}`;
+    cacheReactions[key] = toSvgDataUri(buildMascotReactionsSvg(key));
   }
   return cacheReactions[key]!;
 }

@@ -16,8 +16,8 @@ export function getMascotBaseSvg(effectiveSprite: string, cx: number, cy: number
         <!-- Anime Bangs & Hair Front -->
         <path d="M ${cx - 30} ${cy - 4} Q ${cx - 24} ${cy - 28} ${cx} ${cy - 30} Q ${cx + 24} ${cy - 28} ${cx + 30} ${cy - 4} Q ${cx + 20} ${cy - 12} ${cx + 12} ${cy - 6} Q ${cx} ${cy - 16} ${cx - 12} ${cy - 6} Q ${cx - 20} ${cy - 12} ${cx - 30} ${cy - 4} Z" fill="#8d6e63" />
         <!-- Hair Clips -->
-        <rect x="${cx - 24}" y="${cy - 16}" width="8" height="3" rx="1.5" fill="#fbbf24" transform="rotate(-20 ${cx - 20} ${cy - 14})" />
-        <rect x="${cx - 24}" y="${cy - 10}" width="8" height="3" rx="1.5" fill="#f43f5e" transform="rotate(-20 ${cx - 20} ${cy - 8})" />
+        <polygon points="${cx - 25},${cy - 15} ${cx - 17},${cy - 18} ${cx - 16},${cy - 14} ${cx - 24},${cy - 11}" fill="#fbbf24" />
+        <polygon points="${cx - 25},${cy - 9} ${cx - 17},${cy - 12} ${cx - 16},${cy - 8} ${cx - 24},${cy - 5}" fill="#f43f5e" />
         <!-- Blushes & Tiny Smile -->
         <ellipse cx="${cx - 18}" cy="${cy + 10}" rx="5" ry="3" fill="#fb7185" opacity="0.5" />
         <ellipse cx="${cx + 18}" cy="${cy + 10}" rx="5" ry="3" fill="#fb7185" opacity="0.5" />
@@ -98,7 +98,7 @@ export function getMascotBaseSvg(effectiveSprite: string, cx: number, cy: number
         <circle cx="${cx + 12}" cy="${cy + 2}" r="11" fill="none" stroke="#f59e0b" stroke-width="1.8" />
         <line x1="${cx - 1}" y1="${cy + 2}" x2="${cx + 1}" y2="${cy + 2}" stroke="#f59e0b" stroke-width="1.8" />
         <!-- Composed Smile -->
-        <path d="M ${cx - 3}" y="${cy + 14}" Q ${cx} ${cy + 16} ${cx + 3} ${cy + 14}" stroke="#0f172a" stroke-width="1.5" stroke-linecap="round" fill="none" />
+        <path d="M ${cx - 3} ${cy + 14} Q ${cx} ${cy + 16} ${cx + 3} ${cy + 14}" stroke="#0f172a" stroke-width="1.5" stroke-linecap="round" fill="none" />
       `;
 
     case 'young_ceo':
@@ -364,7 +364,7 @@ export function getMascotBaseSvg(effectiveSprite: string, cx: number, cy: number
       // Vampire Count: Pale skin, high-collared red Dracula cape, pointed ears, fangs
       return `
         <!-- High Dracula Cape Collar -->
-        <polygon points="${cx - 32},${cy - 12} ${cx - 24},${cy + 28} ${cx + 24},${cy + 28} ${cx + 32},${cy - 12} ${cx + 20},${cy + 34} ${cx - 20},${cy + 34}" fill="#881337" stroke="#4c0519" stroke-width="1.5" />
+        <path d="M ${cx - 34} ${cy - 10} L ${cx - 22} ${cy + 28} L ${cx - 16} ${cy + 38} L ${cx + 16} ${cy + 38} L ${cx + 22} ${cy + 28} L ${cx + 34} ${cy - 10} L ${cx + 20} ${cy + 22} L ${cx - 20} ${cy + 22} Z" fill="#881337" stroke="#4c0519" stroke-width="1.5" />
         <!-- Pointed Vampire Ears -->
         <polygon points="${cx - 26},${cy - 6} ${cx - 36},${cy - 14} ${cx - 26},${cy + 4}" fill="#f8fafc" />
         <polygon points="${cx + 26},${cy - 6} ${cx + 36},${cy - 14} ${cx + 26},${cy + 4}" fill="#f8fafc" />
@@ -373,10 +373,10 @@ export function getMascotBaseSvg(effectiveSprite: string, cx: number, cy: number
         <!-- Dark Vampire Velvet Vest & Ruby -->
         <polygon points="${cx - 18},${cy + 20} ${cx + 18},${cy + 20} ${cx},${cy + 38}" fill="#0f172a" />
         <circle cx="${cx}" cy="${cy + 28}" r="3" fill="#e11d48" />
-        <!-- Slick Black Hair with Widow's Peak -->
+        <!-- Slick Black Hair with Widows Peak -->
         <path d="M ${cx - 26} ${cy - 4} Q ${cx - 20} ${cy - 30} ${cx} ${cy - 30} Q ${cx + 20} ${cy - 30} ${cx + 26} ${cy - 4} L ${cx + 12} ${cy - 12} L ${cx} ${cy - 8} L ${cx - 12} ${cy - 12} Z" fill="#0f172a" />
         <!-- Vampire Smile with Tiny Fangs -->
-        <path d="M ${cx - 4} ${cy + 13} Q ${cx} ${cy + 16} ${cx + 4} ${cy + 13}" stroke="#4c0519" stroke-width="1.5" fill="none" />
+        <path d="M ${cx - 4} ${cy + 13} Q ${cx} ${cy + 16} ${cx + 4} ${cy + 13}" stroke="#4c0519" stroke-width="1.5" stroke-linecap="round" fill="none" />
         <polygon points="${cx - 3},${cy + 14} ${cx - 2},${cy + 18} ${cx - 1},${cy + 14}" fill="#ffffff" />
         <polygon points="${cx + 1},${cy + 14} ${cx + 2},${cy + 18} ${cx + 3},${cy + 14}" fill="#ffffff" />
       `;
@@ -422,8 +422,8 @@ export function getMascotBaseSvg(effectiveSprite: string, cx: number, cy: number
         <!-- Mini Crown -->
         <polygon points="${cx - 8},${cy - 26} ${cx - 10},${cy - 36} ${cx - 4},${cy - 30} ${cx},${cy - 38} ${cx + 4},${cy - 30} ${cx + 10},${cy - 36} ${cx + 8},${cy - 26}" fill="#fbbf24" />
         <!-- Glistening Shine -->
-        <ellipse cx="${cx - 16}" cy="${cy - 14}" rx="5" ry="3" fill="#ffffff" opacity="0.8" transform="rotate(-30 ${cx - 16} ${cy - 14})" />
-        <circle cx="${cx - 8}" cy="${cy - 20}" r="2" fill="#ffffff" opacity="0.8" />
+        <polygon points="${cx - 20},${cy - 12} ${cx - 15},${cy - 18} ${cx - 11},${cy - 15} ${cx - 16},${cy - 9}" fill="#ffffff" opacity="0.8" />
+        <circle cx="${cx - 8}" cy="${cy - 20}" r="2.5" fill="#ffffff" opacity="0.8" />
         <!-- Cute Blushes & Smile -->
         <ellipse cx="${cx - 18}" cy="${cy + 10}" rx="5" ry="3" fill="#f43f5e" opacity="0.5" />
         <ellipse cx="${cx + 18}" cy="${cy + 10}" rx="5" ry="3" fill="#f43f5e" opacity="0.5" />
