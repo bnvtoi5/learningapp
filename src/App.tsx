@@ -66,6 +66,7 @@ import {
   setCurrentUser as storageSetCurrentUser,
   syncDatabaseWithCloud,
   checkAndMigrateCleanDatabase,
+  syncDocToCloud,
 } from './utils/storage';
 import { subscribeToAllCollections } from './lib/firebase';
 
@@ -244,6 +245,7 @@ function MainApp() {
   const handleRegisterUser = (newUser: User) => {
     const nextUsers = [...users, newUser];
     saveUsers(nextUsers);
+    syncDocToCloud('users', newUser.id, newUser);
     setUsers(nextUsers);
   };
 
@@ -270,10 +272,18 @@ function MainApp() {
     const adminUser = users.find(u => u.role === 'admin');
     if (adminUser) {
       // Approve this student
-      const nextUsers = users.map(u => 
-        u.id === studentId ? { ...u, status: 'approved' as const, approvedAt: Date.now() } : u
-      );
+      let approvedUser: User | null = null;
+      const nextUsers = users.map(u => {
+        if (u.id === studentId) {
+          approvedUser = { ...u, status: 'approved' as const, approvedAt: Date.now() };
+          return approvedUser;
+        }
+        return u;
+      });
       saveUsers(nextUsers);
+      if (approvedUser) {
+        syncDocToCloud('users', studentId, approvedUser);
+      }
       setUsers(nextUsers);
 
       // Switch to admin and navigate to admin portal

@@ -33,7 +33,7 @@ import {
 } from '../lib/firebase';
 import defaultConfig from '../../firebase-applet-config.json';
 
-export { defaultStudentPermissions };
+export { defaultStudentPermissions, syncDocToCloud, deleteDocFromCloud };
 
 const STORAGE_KEYS = {
   TOPICS: 'study_app_topics',
@@ -119,7 +119,6 @@ export function loadTopics(): Topic[] {
 
 export function saveTopics(topics: Topic[]) {
   localStorage.setItem(STORAGE_KEYS.TOPICS, JSON.stringify(topics || []));
-  topics?.forEach(t => syncDocToCloud('topics', t.id, t));
 }
 
 export function loadLessons(): Lesson[] {
@@ -138,7 +137,6 @@ export function loadLessons(): Lesson[] {
 
 export function saveLessons(lessons: Lesson[]) {
   localStorage.setItem(STORAGE_KEYS.LESSONS, JSON.stringify(lessons || []));
-  lessons?.forEach(l => syncDocToCloud('lessons', l.id, l));
 }
 
 export function loadExercises(): Exercise[] {
@@ -157,7 +155,6 @@ export function loadExercises(): Exercise[] {
 
 export function saveExercises(exercises: Exercise[]) {
   localStorage.setItem(STORAGE_KEYS.EXERCISES, JSON.stringify(exercises || []));
-  exercises?.forEach(e => syncDocToCloud('exercises', e.id, e));
 }
 
 export function loadErrors(): ErrorLog[] {
@@ -176,7 +173,6 @@ export function loadErrors(): ErrorLog[] {
 
 export function saveErrors(errors: ErrorLog[]) {
   localStorage.setItem(STORAGE_KEYS.ERRORS, JSON.stringify(errors || []));
-  errors?.forEach(err => syncDocToCloud('errors', err.id, err));
 }
 
 export function loadStats(userId?: string): UserStats {
@@ -354,6 +350,10 @@ export function recordError(
   }
 
   saveErrors(errors);
+  const errorToSync = existingIdx >= 0 ? errors[existingIdx] : errors[0];
+  if (errorToSync) {
+    syncDocToCloud('errors', errorToSync.id, errorToSync);
+  }
 }
 
 /**
@@ -427,6 +427,7 @@ export function recordErrorRetrySuccess(
   }
 
   saveErrors(errors);
+  syncDocToCloud('errors', err.id, err);
   return {
     isErrorRetry: true,
     resolved: err.resolved,
@@ -449,6 +450,10 @@ export function updateErrorPenalty(errorId: string, requiredCount: number) {
     };
   });
   saveErrors(updated);
+  const changed = updated.find(e => e.id === errorId);
+  if (changed) {
+    syncDocToCloud('errors', errorId, changed);
+  }
   return updated;
 }
 
@@ -525,6 +530,7 @@ export function updateTopic(updatedTopic: Topic): Topic[] {
     ? topics.map(t => t.id === updatedTopic.id ? updatedTopic : t)
     : [...topics, updatedTopic];
   saveTopics(next);
+  syncDocToCloud('topics', updatedTopic.id, updatedTopic);
   return next;
 }
 
@@ -539,6 +545,7 @@ export function updateLesson(updatedLesson: Lesson): Lesson[] {
     ? lessons.map(l => l.id === updatedLesson.id ? updatedLesson : l)
     : [...lessons, updatedLesson];
   saveLessons(next);
+  syncDocToCloud('lessons', updatedLesson.id, updatedLesson);
   return next;
 }
 
@@ -553,6 +560,7 @@ export function updateExercise(updatedExercise: Exercise): Exercise[] {
     ? exercises.map(e => e.id === updatedExercise.id ? updatedExercise : e)
     : [...exercises, updatedExercise];
   saveExercises(next);
+  syncDocToCloud('exercises', updatedExercise.id, updatedExercise);
   return next;
 }
 
@@ -698,13 +706,13 @@ export function loadUsers(): User[] {
 
 export function saveUsers(users: User[]) {
   localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users || []));
-  users?.forEach(u => syncDocToCloud('users', u.id, u));
 }
 
 export function updateUser(updatedUser: User) {
   const users = loadUsers();
   const next = users.map(u => (u.id === updatedUser.id ? updatedUser : u));
   saveUsers(next);
+  syncDocToCloud('users', updatedUser.id, updatedUser);
   
   const cur = getCurrentUser();
   if (cur && cur.id === updatedUser.id) {
@@ -761,7 +769,6 @@ export function loadClassrooms(): Classroom[] {
 
 export function saveClassrooms(classrooms: Classroom[]) {
   localStorage.setItem(STORAGE_KEYS.CLASSROOMS, JSON.stringify(classrooms || []));
-  classrooms?.forEach(c => syncDocToCloud('classrooms', c.id, c));
 }
 
 export function createClassroom(newClassroom: Classroom) {
@@ -772,6 +779,7 @@ export function createClassroom(newClassroom: Classroom) {
     throw new Error(`Mã lớp "${newClassroom.code}" đã tồn tại trên hệ thống. Không thể tạo trùng mã lớp.`);
   }
   saveClassrooms([...classrooms, newClassroom]);
+  syncDocToCloud('classrooms', newClassroom.id, newClassroom);
 }
 
 export function updateClassroom(updatedClassroom: Classroom) {
@@ -783,6 +791,7 @@ export function updateClassroom(updatedClassroom: Classroom) {
   }
   const next = classrooms.map(c => (c.id === updatedClassroom.id ? updatedClassroom : c));
   saveClassrooms(next);
+  syncDocToCloud('classrooms', updatedClassroom.id, updatedClassroom);
 }
 
 export function deleteClassroom(classroomId: string) {
@@ -1439,7 +1448,6 @@ export function saveMediaAssets(assets: MediaAsset[]): void {
       return a;
     });
     localStorage.setItem(STORAGE_KEYS.MEDIA, JSON.stringify(safeAssets));
-    assets?.forEach(m => syncDocToCloud('media', m.id, m));
   } catch (err) {
     console.warn('LocalStorage saveMediaAssets error:', err);
   }
@@ -1449,6 +1457,7 @@ export function addMediaAsset(asset: MediaAsset): MediaAsset[] {
   const assets = loadMediaAssets();
   const next = [asset, ...assets];
   saveMediaAssets(next);
+  syncDocToCloud('media', asset.id, asset);
   return next;
 }
 
@@ -1482,7 +1491,6 @@ export function loadMediaFolders(): MediaFolder[] {
 export function saveMediaFolders(folders: MediaFolder[]): void {
   try {
     localStorage.setItem(STORAGE_KEYS.MEDIA_FOLDERS, JSON.stringify(folders || []));
-    folders?.forEach(f => syncDocToCloud('media_folders', f.id, f));
   } catch (err) {
     console.warn('LocalStorage saveMediaFolders error:', err);
   }
@@ -1498,6 +1506,7 @@ export function createMediaFolder(name: string, color?: string): MediaFolder {
   };
   const next = [...folders, newFolder];
   saveMediaFolders(next);
+  syncDocToCloud('media_folders', newFolder.id, newFolder);
   return newFolder;
 }
 

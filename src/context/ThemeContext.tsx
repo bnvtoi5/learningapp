@@ -42,16 +42,24 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return () => window.removeEventListener('app_user_changed', handleUserChanged);
   }, []);
 
+  const isFirstMount = React.useRef(true);
   useEffect(() => {
-    const activeUserId = getCurrentUser()?.id;
-    saveSettings(settings, activeUserId);
-    // Add class to body/html if needed
+    // Add class to body/html
     const root = document.documentElement;
     root.classList.remove('theme-light', 'theme-dark', 'theme-oled', 'theme-sepia', 'dark');
     if (settings.theme === 'dark' || settings.theme === 'oled') {
       root.classList.add('dark');
     }
     root.classList.add(`theme-${settings.theme}`);
+
+    // Skip redundant save on initial mount
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      return;
+    }
+
+    const activeUserId = getCurrentUser()?.id;
+    saveSettings(settings, activeUserId);
   }, [settings]);
 
   const updateSettings = (partial: Partial<AppSettings>) => {

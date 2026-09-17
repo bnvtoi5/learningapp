@@ -291,36 +291,41 @@ export function subscribeToAllCollections(onUpdate: (data: {
     userSettingsMap: new Map<string, any>(),
   };
 
+  let debounceTimer: any = null;
   const notify = () => {
     if (!isSubscribed) return;
-    // Merge user_settings into users
-    let mergedUsers = state.users;
-    if (state.userSettingsMap.size > 0) {
-      mergedUsers = state.users.map(u => {
-        const extraSettings = state.userSettingsMap.get(u.id);
-        if (extraSettings) {
-          return {
-            ...u,
-            settings: {
-              ...(u.settings || {}),
-              ...extraSettings,
-            },
-          };
-        }
-        return u;
-      });
-    }
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      if (!isSubscribed) return;
+      // Merge user_settings into users
+      let mergedUsers = state.users;
+      if (state.userSettingsMap.size > 0) {
+        mergedUsers = state.users.map(u => {
+          const extraSettings = state.userSettingsMap.get(u.id);
+          if (extraSettings) {
+            return {
+              ...u,
+              settings: {
+                ...(u.settings || {}),
+                ...extraSettings,
+              },
+            };
+          }
+          return u;
+        });
+      }
 
-    onUpdate({
-      classrooms: state.classrooms,
-      topics: state.topics,
-      lessons: state.lessons,
-      exercises: state.exercises,
-      users: mergedUsers,
-      errors: state.errors,
-      media: state.media,
-      userSettingsMap: state.userSettingsMap,
-    });
+      onUpdate({
+        classrooms: state.classrooms,
+        topics: state.topics,
+        lessons: state.lessons,
+        exercises: state.exercises,
+        users: mergedUsers,
+        errors: state.errors,
+        media: state.media,
+        userSettingsMap: state.userSettingsMap,
+      });
+    }, 150);
   };
 
   const unsubClassrooms = onSnapshot(collection(db, 'classrooms'), snap => {
