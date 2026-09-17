@@ -1,12 +1,12 @@
 {
-  "projectId": "superb-verve-6jhcx",
-  "appId": "1:603445093569:web:5180cc9f0518c15a3ee040",
-  "apiKey": "AIzaSyCvxeJ6xZO86HhJxnD-Va6Rxd_g6k25X7I",
-  "authDomain": "superb-verve-6jhcx.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-learningapp-3f228944-1bf7-42af-ab63-bf2a05566ec8",
-  "storageBucket": "superb-verve-6jhcx.firebasestorage.app",
-  "messagingSenderId": "603445093569",
-  "measurementId": "",
-  "oAuthClientId": "603445093569-uocs3f9jcea72q51gp2hgneths87u5vf.apps.googleusercontent.com",
+  "projectId": "learning-3ac9a",
+  "appId": "1:201572653638:web:ae80d84456ae51b3ed4847",
+  "apiKey": "AIzaSyD745qctv1_VXue76M2ExwHWAwSr00t3aA",
+  "authDomain": "learning-3ac9a.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "learning-3ac9a.firebasestorage.app",
+  "messagingSenderId": "201572653638",
+  "measurementId": "G-Y7R8687NK1",
+  "oAuthClientId": "",
   "recaptchaSiteKey": ""
 }

@@ -31,6 +31,7 @@ import {
   clearCloudDatabase,
   testFirestoreConnection,
 } from '../lib/firebase';
+import defaultConfig from '../../firebase-applet-config.json';
 
 export { defaultStudentPermissions };
 
@@ -1313,11 +1314,12 @@ export function importData(jsonString: string): { success: boolean; message?: st
   }
 }
 
-const DB_VERSION_TAG = 'clean_system_v20_realtime_cloud_synced_clean_reset';
+const DB_VERSION_TAG = `clean_system_proj_${defaultConfig.projectId || 'learning-3ac9a'}_v1`;
 export async function checkAndMigrateCleanDatabase() {
   const cur = localStorage.getItem(STORAGE_KEYS.CLEAN_TAG);
   if (cur !== DB_VERSION_TAG) {
-    await clearAllDatabase(true);
+    console.log(`[Storage] Switched to Firebase project: ${defaultConfig.projectId}. Resetting local cache to clean state.`);
+    await clearAllDatabase(false);
     localStorage.setItem(STORAGE_KEYS.CLEAN_TAG, DB_VERSION_TAG);
   }
 }

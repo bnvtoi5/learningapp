@@ -33,6 +33,7 @@ import { syncAllToCloud } from '../lib/firebase';
 import { speakText, getAvailableSpeechVoices } from '../utils/audio';
 import { ConfirmModal } from './ConfirmModal';
 import { MASCOT_LIST } from '../utils/mascotSprites';
+import defaultConfig from '../../firebase-applet-config.json';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -578,9 +579,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <label className={`text-xs font-semibold ${theme.textMuted} uppercase tracking-wider block`}>
                     Cơ sở dữ liệu Đám Mây (Firebase Cloud)
                   </label>
-                  <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                    Đã kết nối
+                    {defaultConfig.projectId || 'Firebase'}
                   </span>
                 </div>
 
