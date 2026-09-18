@@ -84,8 +84,10 @@ const TYPE_NAMES: Record<string, string> = {
   vocab_cloze: 'Khuyết ký tự (Recall)',
   flashcard_recall: 'Lật thẻ ghi nhớ',
   listen_spell: 'Nghe & gõ từ (Dictation)',
-  anagram: 'Xếp chữ cái (Anagram)',
-  collocation: 'Ghép cụm từ',
+  spelling: 'Xếp ký tự (Spelling)',
+  typing: 'Tự gõ từ (Typing)',
+  anagram: 'Xếp ký tự (Anagram cũ)',
+  collocation: 'Trắc nghiệm (Cụm từ)',
   multiple_choice: 'Trắc nghiệm',
   true_false: 'Đúng / Sai',
   fill_blank: 'Điền từ',
@@ -1223,19 +1225,20 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
 
                         {/* Options preview if multiple choice */}
                         {ex.options && ex.options.length > 0 && (
-                          <div className="grid grid-cols-2 gap-1 text-[11px]">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px] pt-1">
                             {ex.options.map((opt, oIdx) => {
                               const isCorrect = ex.correctOptions?.includes(oIdx);
                               return (
                                 <div
                                   key={oIdx}
-                                  className={`p-1.5 rounded-lg border text-[11px] truncate ${
+                                  className={`p-2 rounded-lg border text-[11px] break-words whitespace-normal leading-relaxed flex items-start gap-1.5 ${
                                     isCorrect 
                                       ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500 font-semibold' 
-                                      : `${theme.border}`
+                                      : `${theme.border} ${theme.text}`
                                   }`}
                                 >
-                                  {String.fromCharCode(65 + oIdx)}. {opt}
+                                  <span className="font-bold shrink-0">{String.fromCharCode(65 + oIdx)}.</span>
+                                  <span className="flex-1 break-words">{opt}</span>
                                 </div>
                               );
                             })}

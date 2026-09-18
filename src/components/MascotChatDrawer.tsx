@@ -65,7 +65,7 @@ export const MascotChatDrawer: React.FC<MascotChatDrawerProps> = ({
   const theme = getThemeClasses();
 
   const [activeProvider, setActiveProvider] = useState<AIProviderType>(settings.aiProviderType || 'gemini');
-  const [activeModel, setActiveModel] = useState<string>(settings.aiModel || 'gemini-3.8-flash');
+  const [activeModel, setActiveModel] = useState<string>(settings.aiModel || 'gemini-3.1-flash-lite');
   const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
 
   // Sync if settings change externally

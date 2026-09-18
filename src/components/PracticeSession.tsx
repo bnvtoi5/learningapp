@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   X, 
   Volume2, 
@@ -18,13 +18,19 @@ import {
   RefreshCw,
   Eye,
   ThumbsDown,
-  ThumbsUp
+  ThumbsUp,
+  SlidersHorizontal,
+  LayoutGrid,
+  List,
+  Settings2,
+  Info
 } from 'lucide-react';
 import { Exercise, DifficultyLevel, ErrorLog, User } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import { soundManager, triggerHaptic, speakText } from '../utils/audio';
 import { ListeningAudioPlayer } from './ListeningAudioPlayer';
 import { InteractiveMatchingBoard } from './InteractiveMatchingBoard';
+import { CHUNK_SIZE, QUIZ_TYPES_PER_WORD, orderStandardExercisesInBatches } from '../utils/memriseGenerator';
 
 interface PracticeSessionProps {
   exercises: Exercise[];
@@ -106,13 +112,105 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
   const [clozeAnswers, setClozeAnswers] = useState<{ [blankIdx: number]: string }>({});
   const [subAnswers, setSubAnswers] = useState<{ [subId: string]: string | number | boolean }>({});
 
-  // Filter exercises: students cannot access hidden exercises
-  const availableExercises = React.useMemo(() => {
+  // Cài đặt trắc nghiệm (Multiple Choice settings): Bố cục xếp chồng / 4 ô vuông và Bật/tắt nhãn ABCD
+  const [mcLayout, setMcLayout] = useState<'stacked' | 'grid_2x2'>(() => {
+    const saved = localStorage.getItem('app_quiz_mc_layout');
+    return (saved === 'grid_2x2' || saved === 'stacked') ? saved : 'stacked';
+  });
+  const [showABCD, setShowABCD] = useState<boolean>(() => {
+    const saved = localStorage.getItem('app_quiz_show_abcd');
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [showMcSettingsModal, setShowMcSettingsModal] = useState<boolean>(false);
+  const [showRoundCompleteModal, setShowRoundCompleteModal] = useState<boolean>(false);
+
+  // Filter and order exercises according to round-based learning flow:
+  const availableExercises = useMemo(() => {
+    let filtered = exercises;
     if (currentUser?.role === 'student') {
-      return exercises.filter(ex => !ex.isHidden);
+      filtered = exercises.filter(ex => !ex.isHidden);
     }
-    return exercises;
+    // Check if exercises contains vocabulary / memrise drills to order in rounds
+    const hasVocabOrMemrise = filtered.some(ex => 
+      ex.type === 'flashcard_recall' || 
+      ex.type === 'typing' || 
+      ex.type === 'spelling' || 
+      ex.memriseStage || 
+      ex.vocabWord ||
+      ex.word
+    );
+    if (hasVocabOrMemrise) {
+      return orderStandardExercisesInBatches(filtered, CHUNK_SIZE);
+    }
+    return filtered;
   }, [exercises, currentUser?.role]);
+
+  // Calculate round segments
+  const roundData = useMemo(() => {
+    // Collect all unique words
+    const uniqueWords: string[] = [];
+    availableExercises.forEach(ex => {
+      const w = (ex.vocabWord || ex.word || (ex.type === 'flashcard_recall' ? ex.question : '') || '').trim();
+      if (w && !uniqueWords.includes(w)) {
+        uniqueWords.push(w);
+      }
+    });
+
+    if (uniqueWords.length === 0) {
+      return { 
+        totalRounds: 1, 
+        currentRound: 1, 
+        roundStartIdx: 0, 
+        roundEndIdx: Math.max(0, availableExercises.length - 1), 
+        roundItemIndex: currentIndex,
+        roundTotalItems: availableExercises.length,
+        roundWords: [],
+        allRounds: []
+      };
+    }
+
+    // Chunks of unique words
+    const rounds: { roundNumber: number; words: string[]; startIdx: number; endIdx: number; count: number }[] = [];
+    let currentIdxInList = 0;
+
+    for (let i = 0; i < uniqueWords.length; i += CHUNK_SIZE) {
+      const chunkWords = uniqueWords.slice(i, i + CHUNK_SIZE);
+      const roundExs = availableExercises.filter(ex => {
+        const w = (ex.vocabWord || ex.word || (ex.type === 'flashcard_recall' ? ex.question : '') || '').trim();
+        return chunkWords.includes(w);
+      });
+      const start = currentIdxInList;
+      const end = currentIdxInList + Math.max(0, roundExs.length - 1);
+      rounds.push({
+        roundNumber: Math.floor(i / CHUNK_SIZE) + 1,
+        words: chunkWords,
+        startIdx: start,
+        endIdx: end,
+        count: roundExs.length,
+      });
+      currentIdxInList += roundExs.length;
+    }
+
+    // Find current round
+    const activeRound = rounds.find(r => currentIndex >= r.startIdx && currentIndex <= r.endIdx) || rounds[0] || {
+      roundNumber: 1,
+      words: [],
+      startIdx: 0,
+      endIdx: Math.max(0, availableExercises.length - 1),
+      count: availableExercises.length,
+    };
+
+    return {
+      totalRounds: rounds.length,
+      currentRound: activeRound.roundNumber,
+      roundStartIdx: activeRound.startIdx,
+      roundEndIdx: activeRound.endIdx,
+      roundItemIndex: currentIndex - activeRound.startIdx,
+      roundTotalItems: activeRound.count,
+      roundWords: activeRound.words,
+      allRounds: rounds,
+    };
+  }, [availableExercises, currentIndex]);
 
   const currentEx = availableExercises[currentIndex];
 
@@ -186,12 +284,18 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
       setAssembledWords([]);
     }
 
-    // Anagram letters
-    if (currentEx.type === 'anagram') {
-      const target = currentEx.vocabWord || currentEx.correctText || '';
-      const letters = target.split('').map((l, i) => ({ id: `${l}_${i}_${Math.random()}`, letter: l }));
-      const shuffled = [...letters].sort(() => Math.random() - 0.5);
-      setAvailableLetters(shuffled);
+    // Anagram / Spelling (Memrise) letters
+    if (currentEx.type === 'anagram' || currentEx.type === 'spelling') {
+      const target = currentEx.correct_answer || currentEx.vocabWord || currentEx.correctText || currentEx.word || '';
+      let letters: { id: string; letter: string }[] = [];
+      const shuffled = currentEx.shuffled_letters || currentEx.shuffledLetters;
+      if (shuffled && shuffled.length > 0) {
+        letters = shuffled.map((l, i) => ({ id: `${l}_${i}_${Math.random().toString(36).substring(2, 6)}`, letter: l }));
+      } else {
+        const raw = target.split('').filter(c => c !== ' ').map((l, i) => ({ id: `${l}_${i}_${Math.random().toString(36).substring(2, 6)}`, letter: l }));
+        letters = [...raw].sort(() => Math.random() - 0.5);
+      }
+      setAvailableLetters(letters);
       setAssembledLetters([]);
     }
 
@@ -258,21 +362,23 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
     } else {
       switch (currentEx.type) {
         case 'vocab_cloze':
-        case 'listen_spell': {
-          const target = (currentEx.vocabWord || currentEx.correctText || '').trim().toLowerCase();
+        case 'listen_spell':
+        case 'typing': {
+          const target = (currentEx.correct_answer || currentEx.vocabWord || currentEx.correctText || currentEx.word || '').trim().toLowerCase();
           const user = textAnswer.trim().toLowerCase();
           correct = user === target;
           userAnsStr = textAnswer.trim() || 'Chưa nhập';
-          correctAnsStr = currentEx.vocabWord || currentEx.correctText || '';
+          correctAnsStr = currentEx.correct_answer || currentEx.vocabWord || currentEx.correctText || currentEx.word || '';
           break;
         }
 
-        case 'anagram': {
-          const target = (currentEx.vocabWord || currentEx.correctText || '').trim().toLowerCase();
+        case 'anagram':
+        case 'spelling': {
+          const target = (currentEx.correct_answer || currentEx.vocabWord || currentEx.correctText || currentEx.word || '').trim().toLowerCase();
           const user = assembledLetters.join('').trim().toLowerCase();
           correct = user === target;
           userAnsStr = assembledLetters.join('');
-          correctAnsStr = currentEx.vocabWord || currentEx.correctText || '';
+          correctAnsStr = currentEx.correct_answer || currentEx.vocabWord || currentEx.correctText || currentEx.word || '';
           break;
         }
 
@@ -342,7 +448,16 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
             userAnsStr = userResults.join('; ');
             correctAnsStr = correctResults.join('; ');
           } else {
-            const targetOptions = currentEx.correctOptions || [0];
+            let targetOptions = currentEx.correctOptions;
+            if (!targetOptions || targetOptions.length === 0) {
+              const targetVal = (currentEx.correct_answer || currentEx.correctText || '').trim().toLowerCase();
+              if (targetVal && currentEx.options) {
+                const foundIdx = currentEx.options.findIndex(o => o.trim().toLowerCase() === targetVal);
+                targetOptions = foundIdx >= 0 ? [foundIdx] : [0];
+              } else {
+                targetOptions = [0];
+              }
+            }
             const sortedSelected = [...selectedOptions].sort();
             const sortedTarget = [...targetOptions].sort();
             correct = JSON.stringify(sortedSelected) === JSON.stringify(sortedTarget);
@@ -353,12 +468,14 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
         }
 
         case 'fill_blank':
+        case 'fill_in_blank':
         case 'translation': {
           const cleanedUser = textAnswer.trim().toLowerCase().replace(/[.,!?;:]/g, '');
-          const cleanedTarget = (currentEx.correctText || '').trim().toLowerCase().replace(/[.,!?;:]/g, '');
+          const targetAnswer = currentEx.correct_answer || currentEx.correctText || currentEx.word || currentEx.vocabWord || '';
+          const cleanedTarget = targetAnswer.trim().toLowerCase().replace(/[.,!?;:]/g, '');
           correct = cleanedUser === cleanedTarget;
           userAnsStr = textAnswer.trim() || 'Chưa nhập';
-          correctAnsStr = currentEx.correctText || '';
+          correctAnsStr = targetAnswer;
           break;
         }
 
@@ -453,10 +570,24 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
 
   // Next question
   const handleNext = () => {
-    if (currentIndex < exercises.length - 1) {
+    // If we reached the end of the current round and there are further rounds remaining
+    if (currentIndex === roundData.roundEndIdx && currentIndex < availableExercises.length - 1) {
+      setShowRoundCompleteModal(true);
+      return;
+    }
+
+    if (currentIndex < availableExercises.length - 1) {
       setCurrentIndex(prev => prev + 1);
     } else {
       onComplete(results);
+    }
+  };
+
+  // Start next round from completion modal
+  const handleStartNextRound = () => {
+    setShowRoundCompleteModal(false);
+    if (currentIndex < availableExercises.length - 1) {
+      setCurrentIndex(prev => prev + 1);
     }
   };
 
@@ -472,10 +603,17 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
       setAvailableWords([...words].sort(() => Math.random() - 0.5));
       setAssembledWords([]);
     }
-    if (currentEx.type === 'anagram') {
-      const target = currentEx.vocabWord || currentEx.correctText || '';
-      const letters = target.split('').map((l, i) => ({ id: `${l}_${i}_${Math.random()}`, letter: l }));
-      setAvailableLetters([...letters].sort(() => Math.random() - 0.5));
+    if (currentEx.type === 'anagram' || currentEx.type === 'spelling') {
+      const target = (currentEx as any).correct_answer || currentEx.vocabWord || currentEx.correctText || (currentEx as any).word || '';
+      const shuffled = (currentEx as any).shuffled_letters || currentEx.shuffledLetters;
+      let letters: { id: string; letter: string }[] = [];
+      if (shuffled && shuffled.length > 0) {
+        letters = shuffled.map((l: string, i: number) => ({ id: `${l}_${i}_${Math.random().toString(36).substring(2, 6)}`, letter: l }));
+      } else {
+        const raw = target.split('').filter((c: string) => c !== ' ').map((l: string, i: number) => ({ id: `${l}_${i}_${Math.random().toString(36).substring(2, 6)}`, letter: l }));
+        letters = [...raw].sort(() => Math.random() - 0.5);
+      }
+      setAvailableLetters(letters);
       setAssembledLetters([]);
     }
   };
@@ -507,9 +645,16 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
         {/* Progress Bar */}
         <div className="flex-1">
           <div className="flex items-center justify-between text-xs mb-1 font-medium">
-            <span className={theme.textMuted}>
-              {title} • Câu {currentIndex + 1} / {availableExercises.length}
-            </span>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {roundData.totalRounds > 1 && (
+                <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold text-[11px] border border-emerald-500/20">
+                  Đợt {roundData.currentRound}/{roundData.totalRounds}
+                </span>
+              )}
+              <span className={theme.textMuted}>
+                {title} • {roundData.totalRounds > 1 ? `Câu ${roundData.roundItemIndex + 1}/${roundData.roundTotalItems}` : `Câu ${currentIndex + 1}/${availableExercises.length}`}
+              </span>
+            </div>
             <span className="text-emerald-500 font-semibold">
               {Math.round(((currentIndex + 1) / availableExercises.length) * 100)}%
             </span>
@@ -623,9 +768,11 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
         )}
 
         {/* Question Title */}
-        <div className="text-base sm:text-lg font-bold leading-snug">
-          {currentEx.question}
-        </div>
+        {currentEx.type !== 'flashcard_recall' && (
+          <div className="text-base sm:text-lg font-bold leading-snug">
+            {currentEx.question}
+          </div>
+        )}
 
         {/* Hint Box */}
         {showHint && (
@@ -675,49 +822,104 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
           </div>
         )}
 
-        {/* 2. FLASHCARD RECALL (Spaced Repetition & Self Rating) */}
+        {/* 2. FLASHCARD RECALL (Học từ vựng trước khi vào Quiz / Spaced Repetition) */}
         {currentEx.type === 'flashcard_recall' && (
           <div className="space-y-4 pt-2">
+            {/* Flip Card Container */}
             <div 
               onClick={() => setIsCardFlipped(!isCardFlipped)}
-              className={`p-6 rounded-2xl border ${theme.border} ${theme.highlight} cursor-pointer hover:border-emerald-500/50 transition-all text-center min-h-[160px] flex flex-col items-center justify-center space-y-3 select-none`}
+              className={`p-6 sm:p-8 rounded-2xl border ${theme.border} ${theme.highlight} cursor-pointer hover:border-emerald-500/50 transition-all text-center min-h-[220px] flex flex-col items-center justify-center space-y-4 select-none relative shadow-sm`}
             >
+              {/* Top Side Badge */}
+              <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none">
+                <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-500/20 flex items-center gap-1">
+                  <BookOpen className="w-3 h-3" />
+                  {!isCardFlipped ? 'Mặt trước: Tiếng Anh' : 'Mặt sau: Tiếng Việt & Ví dụ'}
+                </span>
+                <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                  <RefreshCw className="w-3 h-3 animate-spin-slow" />
+                  Chạm để lật thẻ
+                </span>
+              </div>
+
               {!isCardFlipped ? (
-                <>
-                  <Eye className="w-6 h-6 text-emerald-500 opacity-80" />
-                  <div className="text-lg font-bold">
-                    {currentEx.vocabMeaning || currentEx.question}
+                /* ================= MẶT TRƯỚC: CHỈ CÓ TIẾNG ANH & PHÁT ÂM ================= */
+                <div className="w-full flex flex-col items-center justify-center space-y-3 pt-4 animate-in fade-in zoom-in-95 duration-200">
+                  <div className="text-3xl sm:text-4xl font-black text-emerald-600 dark:text-emerald-400 tracking-wide">
+                    {currentEx.vocabWord || currentEx.correctText || currentEx.question}
                   </div>
-                  <span className="text-[11px] text-emerald-500 font-medium">
-                    (Chạm vào thẻ để lật xem đáp án & phiên âm)
-                  </span>
-                </>
-              ) : (
-                <>
-                  <div className="text-2xl font-extrabold text-emerald-500">
-                    {currentEx.vocabWord || currentEx.correctText}
-                  </div>
+                  
                   {currentEx.phonetic && (
-                    <div className={`text-xs font-mono ${theme.textMuted}`}>
+                    <div className={`text-sm sm:text-base font-mono ${theme.textMuted} tracking-wider font-semibold px-3 py-0.5 rounded-lg bg-black/5 dark:bg-white/5`}>
                       {currentEx.phonetic}
                     </div>
                   )}
-                  {currentEx.vocabMeaning && (
-                    <div className="text-sm font-medium">
-                      {currentEx.vocabMeaning}
+
+                  <div className="flex items-center gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={e => {
+                        e.stopPropagation();
+                        speakText(currentEx.vocabWord || currentEx.correctText || currentEx.question);
+                      }}
+                      className="px-4 py-2 rounded-xl bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/25 inline-flex items-center gap-2 text-xs font-bold cursor-pointer transition-all active:scale-95 shadow-xs"
+                    >
+                      <Volume2 className="w-4 h-4" />
+                      <span>Phát âm tiếng Anh</span>
+                    </button>
+                  </div>
+
+                  <div className="pt-2 text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 opacity-90">
+                    <span>Nhấn vào thẻ để xem nghĩa & ví dụ thực tế</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </div>
+                </div>
+              ) : (
+                /* ================= MẶT SAU: CHỈ CÓ TIẾNG VIỆT & VÍ DỤ THỰC TẾ ================= */
+                <div className="w-full flex flex-col items-center justify-center space-y-3.5 pt-4 animate-in fade-in zoom-in-95 duration-200">
+                  {/* Nghĩa tiếng Việt */}
+                  <div className="text-2xl sm:text-3xl font-extrabold text-amber-500 dark:text-amber-400 px-5 py-2 rounded-2xl bg-amber-500/10 border border-amber-500/20 max-w-lg shadow-xs">
+                    {currentEx.vocabMeaning || (currentEx.options && currentEx.options[0]) || currentEx.question}
+                  </div>
+
+                  {/* Ví dụ thực tế nếu có */}
+                  {currentEx.context && (
+                    <div className={`text-xs sm:text-sm p-3.5 rounded-xl border ${theme.border} ${theme.card} text-left max-w-lg w-full shadow-xs space-y-1.5`}>
+                      <span className="font-bold text-amber-600 dark:text-amber-400 block text-[11px] uppercase tracking-wider">
+                        VÍ DỤ THỰC TẾ:
+                      </span>
+                      <p className="whitespace-pre-line leading-relaxed font-medium text-neutral-800 dark:text-neutral-200">
+                        {currentEx.context}
+                      </p>
                     </div>
                   )}
-                  <button
-                    onClick={e => {
-                      e.stopPropagation();
-                      speakText(currentEx.vocabWord || currentEx.correctText || '');
-                    }}
-                    className="p-2 rounded-lg bg-emerald-500/10 text-emerald-500 inline-flex items-center gap-1 text-xs"
-                  >
-                    <Volume2 className="w-3.5 h-3.5" />
-                    <span>Nghe phát âm</span>
-                  </button>
-                </>
+
+                  <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={e => {
+                        e.stopPropagation();
+                        speakText(currentEx.vocabWord || currentEx.correctText || currentEx.question);
+                      }}
+                      className="px-3.5 py-1.5 rounded-xl bg-neutral-500/10 hover:bg-neutral-500/20 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+                      title="Nghe lại phát âm tiếng Anh"
+                    >
+                      <Volume2 className="w-3.5 h-3.5" />
+                      <span>Phát âm lại</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={e => {
+                        e.stopPropagation();
+                        setIsCardFlipped(false);
+                      }}
+                      className="px-3.5 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Lật lại mặt tiếng Anh</span>
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
 
@@ -727,18 +929,18 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
                 <button
                   id="btn-flashcard-forget"
                   onClick={() => handleCheck(false, 'Chưa nhớ (Cần ôn lại)')}
-                  className="flex-1 py-3 px-4 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-500 font-semibold text-xs flex items-center justify-center gap-1.5 hover:bg-rose-500/20"
+                  className="flex-1 py-3 px-4 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-500 font-semibold text-xs flex items-center justify-center gap-1.5 hover:bg-rose-500/20 cursor-pointer transition-all active:scale-95"
                 >
                   <ThumbsDown className="w-4 h-4" />
-                  <span>Chưa thuộc (Ôn lại)</span>
+                  <span>Chưa thuộc (Cần xem lại)</span>
                 </button>
                 <button
                   id="btn-flashcard-remember"
                   onClick={() => handleCheck(true, 'Đã thuộc')}
-                  className="flex-1 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center justify-center gap-1.5 shadow-sm"
+                  className="flex-1 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center justify-center gap-1.5 shadow-sm cursor-pointer transition-all active:scale-95"
                 >
                   <ThumbsUp className="w-4 h-4" />
-                  <span>Đã nhớ chính xác</span>
+                  <span>Đã nắm vững (Bắt đầu Quiz) 🚀</span>
                 </button>
               </div>
             )}
@@ -777,9 +979,16 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
           </div>
         )}
 
-        {/* 4. ANAGRAM (Letter Unscramble) */}
-        {currentEx.type === 'anagram' && (
+        {/* 4. ANAGRAM / SPELLING (Memrise Letter Unscramble) */}
+        {(currentEx.type === 'anagram' || currentEx.type === 'spelling') && (
           <div className="space-y-4 pt-2">
+            {currentEx.hint && (
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-600 dark:text-amber-400 flex items-center gap-2">
+                <Sparkles className="w-4 h-4 shrink-0" />
+                <span><strong>Gợi ý:</strong> {currentEx.hint}</span>
+              </div>
+            )}
+
             {/* Assembled Letters Box */}
             <div className={`p-4 rounded-xl border ${theme.border} ${theme.highlight} min-h-[64px] flex items-center justify-center gap-1.5 flex-wrap`}>
               {assembledLetters.length === 0 ? (
@@ -835,6 +1044,36 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
                 </button>
               </div>
             )}
+          </div>
+        )}
+
+        {/* 4b. MEMRISE TYPING DRILL */}
+        {currentEx.type === 'typing' && (
+          <div className="space-y-4 pt-2">
+            {currentEx.hint && (
+              <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-600 dark:text-amber-400 flex items-center gap-2">
+                <Sparkles className="w-4 h-4 shrink-0" />
+                <span><strong>Gợi ý:</strong> {currentEx.hint}</span>
+              </div>
+            )}
+            <div className="space-y-2">
+              <label className={`text-xs font-semibold ${theme.textMuted} block`}>
+                Gõ chính xác từ vựng bằng tiếng Anh:
+              </label>
+              <input
+                id="input-memrise-typing"
+                type="text"
+                autoFocus
+                autoComplete="off"
+                spellCheck="false"
+                disabled={isChecked}
+                value={textAnswer}
+                onChange={e => setTextAnswer(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && !isChecked && handleCheck()}
+                placeholder="Gõ từ vựng tiếng Anh..."
+                className={`w-full p-4 rounded-xl ${theme.inputBg} text-lg font-bold text-center border ${theme.border} focus:border-emerald-500 transition-all`}
+              />
+            </div>
           </div>
         )}
 
@@ -940,7 +1179,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
 
                     {/* Multiple Choice SubQuestion */}
                     {subQ.type === 'multiple_choice' && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 pl-8">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 pl-0 sm:pl-8">
                         {(subQ.options || []).map((opt, optIdx) => {
                           const isSelected = subAnswers[subQ.id] === optIdx;
                           const isTarget = subQ.correctOptionIdx === optIdx;
@@ -963,13 +1202,15 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
                               type="button"
                               disabled={isChecked}
                               onClick={() => setSubAnswers(prev => ({ ...prev, [subQ.id]: optIdx }))}
-                              className={`p-2.5 rounded-lg border text-left text-xs flex items-center gap-2 transition-all cursor-pointer ${optStyle}`}
+                              className={`p-3 rounded-xl border text-left text-xs flex items-start gap-2.5 transition-all cursor-pointer ${optStyle}`}
                             >
-                              <span className="w-5 h-5 rounded bg-black/10 dark:bg-white/10 flex items-center justify-center font-bold text-[10px]">
-                                {String.fromCharCode(65 + optIdx)}
-                              </span>
-                              <span className="flex-1 truncate">{opt}</span>
-                              {isChecked && isTarget && <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />}
+                              {showABCD && (
+                                <span className="w-5 h-5 rounded bg-black/10 dark:bg-white/10 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5">
+                                  {String.fromCharCode(65 + optIdx)}
+                                </span>
+                              )}
+                              <span className="flex-1 break-words whitespace-normal leading-relaxed text-left">{opt}</span>
+                              {isChecked && isTarget && <Check className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />}
                             </button>
                           );
                         })}
@@ -1046,6 +1287,16 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
                         💡 <strong>Giải thích:</strong> {subQ.explanation}
                       </div>
                     )}
+
+                    {/* SubQuestion Evidence */}
+                    {isChecked && subQ.evidence && (
+                      <div className="mt-1.5 pl-8 text-[11px] text-sky-600 dark:text-sky-400 flex items-start gap-1">
+                        <span>🔍</span>
+                        <div>
+                          <strong>Dẫn chứng từ bài đọc:</strong> "{subQ.evidence}"
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -1054,52 +1305,192 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
         )}
 
         {/* 5. MULTIPLE CHOICE / COLLOCATION / TRUE_FALSE / READING / MIXED PRACTICE OPTIONS (STANDARD SINGLE-QUESTION) */}
-        {!currentEx.passageClozeText && !(currentEx.subQuestions && currentEx.subQuestions.length > 0) && (currentEx.type === 'multiple_choice' || currentEx.type === 'collocation' || currentEx.type === 'true_false' || currentEx.type === 'image_identify' || currentEx.type === 'reading' || currentEx.type === 'listening' || (currentEx.type === 'mixed_practice' && currentEx.options && currentEx.options.length > 0)) && (
-          <div className="space-y-2 pt-1">
-            {(currentEx.type === 'true_false' ? ['Đúng (True)', 'Sai (False)'] : currentEx.options || []).map((option, idx) => {
-              const isSelected = selectedOptions.includes(idx);
-              const isTargetCorrect = currentEx.correctOptions?.includes(idx);
+        {!currentEx.passageClozeText && !(currentEx.subQuestions && currentEx.subQuestions.length > 0) && (currentEx.type === 'multiple_choice' || currentEx.type === 'collocation' || currentEx.type === 'true_false' || currentEx.type === 'image_identify' || currentEx.type === 'reading' || currentEx.type === 'listening' || (currentEx.type === 'mixed_practice' && currentEx.options && currentEx.options.length > 0)) && (() => {
+          const effectiveLayout = currentEx.mcLayout || mcLayout;
+          const effectiveShowABCD = currentEx.showOptionLabels !== undefined ? currentEx.showOptionLabels : showABCD;
+          const optionList = currentEx.type === 'true_false' ? ['Đúng (True)', 'Sai (False)'] : (currentEx.options || []);
 
-              let buttonStyle = `${theme.card} ${theme.border} hover:border-emerald-500/50`;
-              if (isChecked) {
-                if (isTargetCorrect) {
-                  buttonStyle = 'border-emerald-500 bg-emerald-500/15 text-emerald-500 font-bold';
-                } else if (isSelected && !isTargetCorrect) {
-                  buttonStyle = 'border-rose-500 bg-rose-500/15 text-rose-500';
-                } else {
-                  buttonStyle = `${theme.card} opacity-50`;
-                }
-              } else if (isSelected) {
-                buttonStyle = 'border-emerald-500 bg-emerald-500/10 text-emerald-500 font-bold shadow-sm';
-              }
-
-              return (
-                <button
-                  key={idx}
-                  id={`btn-option-${idx}`}
-                  disabled={isChecked}
-                  onClick={() => {
-                    // Single choice
-                    setSelectedOptions([idx]);
-                  }}
-                  className={`w-full p-3.5 rounded-xl border text-left flex items-center justify-between text-xs font-medium transition-all ${buttonStyle}`}
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="w-6 h-6 rounded-lg bg-black/10 dark:bg-white/10 flex items-center justify-center font-bold text-[11px]">
-                      {String.fromCharCode(65 + idx)}
+          return (
+            <div className="space-y-2.5 pt-1">
+              {/* Question Header & Layout / ABCD Setting Bar */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-1 text-xs">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className={`text-[11px] font-semibold uppercase tracking-wider ${theme.textMuted}`}>
+                    Lựa chọn đáp án:
+                  </span>
+                  {currentEx.isReverseChoice && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 font-bold border border-amber-500/30">
+                      🔄 Trắc nghiệm đảo ngược (Nghĩa ➔ Từ)
                     </span>
-                    <span>{option}</span>
-                  </div>
-                  {isChecked && isTargetCorrect && <Check className="w-4 h-4 text-emerald-500" />}
-                </button>
-              );
-            })}
-          </div>
-        )}
+                  )}
+                </div>
 
-        {/* 6. FILL BLANK / TRANSLATION / MIXED PRACTICE TEXT */}
-        {(currentEx.type === 'fill_blank' || currentEx.type === 'translation' || (currentEx.type === 'mixed_practice' && !currentEx.options?.length && !currentEx.matchingPairs?.length)) && (
-          <div className="space-y-2 pt-1">
+                <div className="flex items-center gap-1.5 ml-auto flex-wrap">
+                  {/* Quick Toggle ABCD */}
+                  <button
+                    id="btn-toggle-abcd"
+                    type="button"
+                    onClick={() => {
+                      const next = !showABCD;
+                      setShowABCD(next);
+                      localStorage.setItem('app_quiz_show_abcd', String(next));
+                    }}
+                    className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold transition-all flex items-center gap-1 cursor-pointer ${
+                      effectiveShowABCD
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                        : 'bg-neutral-500/10 border-neutral-500/20 text-neutral-400 line-through'
+                    }`}
+                    title={effectiveShowABCD ? "Đang hiện nhãn A-B-C-D. Nhấn để tắt (giúp tránh nhiễu não, tập trung vào từ)" : "Đang ẩn nhãn ABCD. Nhấn để bật lại"}
+                  >
+                    <span className="font-bold">ABCD:</span>
+                    <span>{effectiveShowABCD ? 'Bật' : 'Tắt (Chống nhiễu)'}</span>
+                  </button>
+
+                  {/* Quick Switch Layout */}
+                  <button
+                    id="btn-switch-mc-layout"
+                    type="button"
+                    onClick={() => {
+                      const next = effectiveLayout === 'stacked' ? 'grid_2x2' : 'stacked';
+                      setMcLayout(next);
+                      localStorage.setItem('app_quiz_mc_layout', next);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold transition-all flex items-center gap-1 cursor-pointer ${
+                      effectiveLayout === 'grid_2x2'
+                        ? 'bg-sky-500/10 border-sky-500/30 text-sky-600 dark:text-sky-400'
+                        : `${theme.badgeBg} ${theme.border} text-neutral-600 dark:text-neutral-300`
+                    }`}
+                    title="Chuyển đổi kiểu: Khung chữ nhật xếp chồng (mặc định) / 4 ô vuông dạng Quiz"
+                  >
+                    {effectiveLayout === 'grid_2x2' ? (
+                      <>
+                        <LayoutGrid className="w-3.5 h-3.5" />
+                        <span>4 ô vuông</span>
+                      </>
+                    ) : (
+                      <>
+                        <List className="w-3.5 h-3.5" />
+                        <span>Xếp chồng</span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* Setting modal opener */}
+                  <button
+                    id="btn-open-mc-settings"
+                    type="button"
+                    onClick={() => setShowMcSettingsModal(true)}
+                    className={`p-1.5 rounded-lg border ${theme.border} ${theme.badgeBg} hover:opacity-80 text-neutral-500 hover:text-emerald-500 transition-all cursor-pointer`}
+                    title="Cài đặt bố cục & hiển thị câu hỏi trắc nghiệm"
+                  >
+                    <Settings2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Layout 1: 4 ô vuông (Lưới 2x2 như app Quiz) */}
+              {effectiveLayout === 'grid_2x2' ? (() => {
+                const hasLongOption = optionList.some(o => typeof o === 'string' && o.length > 35);
+                return (
+                  <div className={`grid ${hasLongOption ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-2'} gap-2.5 sm:gap-3 pt-1`}>
+                    {optionList.map((option, idx) => {
+                      const isSelected = selectedOptions.includes(idx);
+                      const isTargetCorrect = currentEx.correctOptions?.includes(idx);
+
+                      let buttonStyle = `${theme.card} ${theme.border} hover:border-emerald-500/60 hover:shadow-xs`;
+                      if (isChecked) {
+                        if (isTargetCorrect) {
+                          buttonStyle = 'border-emerald-500 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold ring-1 ring-emerald-500/30';
+                        } else if (isSelected && !isTargetCorrect) {
+                          buttonStyle = 'border-rose-500 bg-rose-500/15 text-rose-500 ring-1 ring-rose-500/30';
+                        } else {
+                          buttonStyle = `${theme.card} opacity-40`;
+                        }
+                      } else if (isSelected) {
+                        buttonStyle = 'border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold shadow-xs ring-1 ring-emerald-500/30';
+                      }
+
+                      return (
+                        <button
+                          key={idx}
+                          id={`btn-option-${idx}`}
+                          disabled={isChecked}
+                          onClick={() => setSelectedOptions([idx])}
+                          className={`p-4 sm:p-5 rounded-2xl border text-center flex flex-col items-center justify-center min-h-[90px] h-auto text-xs sm:text-sm font-semibold transition-all relative group cursor-pointer select-none ${buttonStyle}`}
+                        >
+                          {effectiveShowABCD && (
+                            <span className="absolute top-2.5 left-2.5 w-6 h-6 rounded-lg bg-black/10 dark:bg-white/10 flex items-center justify-center font-bold text-[10px] sm:text-[11px] text-neutral-600 dark:text-neutral-300">
+                              {String.fromCharCode(65 + idx)}
+                            </span>
+                          )}
+                          <span className="leading-relaxed break-words whitespace-normal px-4 max-w-full text-center">
+                            {option}
+                          </span>
+                          {isChecked && isTargetCorrect && (
+                            <span className="absolute top-2.5 right-2.5 w-5 h-5 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-xs">
+                              <Check className="w-3.5 h-3.5" />
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })() : (
+                /* Layout 2: Khung chữ nhật xếp chồng (Mặc định) */
+                <div className="space-y-2 pt-1">
+                  {optionList.map((option, idx) => {
+                    const isSelected = selectedOptions.includes(idx);
+                    const isTargetCorrect = currentEx.correctOptions?.includes(idx);
+
+                    let buttonStyle = `${theme.card} ${theme.border} hover:border-emerald-500/50`;
+                    if (isChecked) {
+                      if (isTargetCorrect) {
+                        buttonStyle = 'border-emerald-500 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold';
+                      } else if (isSelected && !isTargetCorrect) {
+                        buttonStyle = 'border-rose-500 bg-rose-500/15 text-rose-500';
+                      } else {
+                        buttonStyle = `${theme.card} opacity-50`;
+                      }
+                    } else if (isSelected) {
+                      buttonStyle = 'border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold shadow-xs';
+                    }
+
+                    return (
+                      <button
+                        key={idx}
+                        id={`btn-option-${idx}`}
+                        disabled={isChecked}
+                        onClick={() => setSelectedOptions([idx])}
+                        className={`w-full p-3.5 sm:p-4 rounded-xl border text-left flex items-start justify-between gap-3 text-xs sm:text-sm font-medium transition-all cursor-pointer select-none ${buttonStyle}`}
+                      >
+                        <div className="flex items-start gap-3 flex-1 min-w-0">
+                          {effectiveShowABCD && (
+                            <span className="w-6 h-6 rounded-lg bg-black/10 dark:bg-white/10 flex items-center justify-center font-bold text-[11px] shrink-0 text-neutral-600 dark:text-neutral-300 mt-0.5">
+                              {String.fromCharCode(65 + idx)}
+                            </span>
+                          )}
+                          <span className="leading-relaxed break-words whitespace-normal flex-1">{option}</span>
+                        </div>
+                        {isChecked && isTargetCorrect && <Check className="w-4 h-4 text-emerald-500 shrink-0 mt-1" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* 6. FILL BLANK / FILL IN BLANK / TRANSLATION / MIXED PRACTICE TEXT */}
+        {(currentEx.type === 'fill_blank' || currentEx.type === 'fill_in_blank' || currentEx.type === 'translation' || (currentEx.type === 'mixed_practice' && !currentEx.options?.length && !currentEx.matchingPairs?.length)) && (
+          <div className="space-y-3 pt-1">
+            {currentEx.hint && (
+              <div className={`p-3 rounded-xl border ${theme.border} bg-amber-500/10 border-amber-500/20 text-amber-500 text-xs flex items-center gap-2`}>
+                <Sparkles className="w-4 h-4 flex-shrink-0" />
+                <span>Gợi ý: <strong>{currentEx.hint}</strong></span>
+              </div>
+            )}
             <input
               id="input-text-answer"
               type="text"
@@ -1108,8 +1499,8 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
               value={textAnswer}
               onChange={e => setTextAnswer(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && !isChecked && handleCheck()}
-              placeholder="Nhập câu trả lời của bạn..."
-              className={`w-full p-3.5 rounded-xl ${theme.inputBg} text-sm font-medium border ${theme.border} focus:border-emerald-500`}
+              placeholder="Nhập câu trả lời hoặc từ cần điền..."
+              className={`w-full p-3.5 rounded-xl ${theme.inputBg} text-base font-semibold border ${theme.border} focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500`}
             />
           </div>
         )}
@@ -1345,13 +1736,239 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
                 onClick={handleNext}
                 className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-sm"
               >
-                <span>{currentIndex < exercises.length - 1 ? 'Câu tiếp theo' : 'Xem kết quả'}</span>
+                <span>{currentIndex < availableExercises.length - 1 ? 'Câu tiếp theo' : 'Xem kết quả'}</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
         )}
       </div>
+
+      {/* MODAL HOÀN THÀNH ĐỢT (Round Completion Interstitial Modal) */}
+      {showRoundCompleteModal && (
+        <div 
+          id="modal-round-complete"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200"
+        >
+          <div 
+            className={`w-full max-w-md ${theme.card} border ${theme.border} rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 text-center animate-in zoom-in-95 duration-200`}
+          >
+            {/* Header Icon */}
+            <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 flex items-center justify-center mx-auto shadow-inner">
+              <Sparkles className="w-8 h-8 animate-bounce" />
+            </div>
+
+            {/* Title & Info */}
+            <div className="space-y-2">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold border border-emerald-500/20">
+                <span>ĐỢT {roundData.currentRound} / {roundData.totalRounds} HOÀN TẤT</span>
+              </div>
+              <h3 className="text-xl sm:text-2xl font-black tracking-tight text-neutral-900 dark:text-neutral-100">
+                Hoàn thành xuất sắc Đợt {roundData.currentRound}!
+              </h3>
+              <p className={`text-xs sm:text-sm ${theme.textMuted} leading-relaxed`}>
+                Bạn đã nắm vững {roundData.roundWords.length} thẻ từ vựng và hoàn thành {roundData.roundTotalItems - roundData.roundWords.length} câu Quiz của đợt này.
+              </p>
+            </div>
+
+            {/* Mastered Words in this Round */}
+            {roundData.roundWords.length > 0 && (
+              <div className={`p-4 rounded-2xl ${theme.highlight} border ${theme.border} space-y-2 text-left`}>
+                <span className={`text-[11px] font-bold ${theme.textMuted} uppercase tracking-wider block`}>
+                  Từ vựng đã làm chủ ở đợt này:
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {roundData.roundWords.map((w, idx) => (
+                    <span
+                      key={idx}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold text-xs border border-emerald-500/25 flex items-center gap-1"
+                    >
+                      <Check className="w-3 h-3 text-emerald-500" />
+                      {w}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Action button: Proceed to next round */}
+            <button
+              id="btn-continue-next-round"
+              onClick={handleStartNextRound}
+              className="w-full py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm sm:text-base shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 active:scale-98 transition-all cursor-pointer"
+            >
+              <span>Bắt đầu Đợt {roundData.currentRound + 1} ({roundData.allRounds[roundData.currentRound]?.words.length || 3} từ tiếp theo)</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CÀI ĐẶT CÂU HỎI TRẮC NGHIỆM (Multiple Choice Settings Modal) */}
+      {showMcSettingsModal && (
+        <div 
+          id="modal-mc-settings"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn"
+          onClick={() => setShowMcSettingsModal(false)}
+        >
+          <div 
+            className={`w-full max-w-md ${theme.card} border ${theme.border} rounded-2xl p-5 sm:p-6 shadow-2xl space-y-5 animate-scaleUp`}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-inherit pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-500">
+                  <SlidersHorizontal className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-bold text-neutral-900 dark:text-neutral-100">
+                    Cài đặt câu hỏi trắc nghiệm
+                  </h3>
+                  <p className={`text-[11px] ${theme.textMuted}`}>
+                    Tùy chỉnh giao diện theo phong cách học tập của bạn
+                  </p>
+                </div>
+              </div>
+              <button
+                id="btn-close-mc-settings"
+                type="button"
+                onClick={() => setShowMcSettingsModal(false)}
+                className={`p-1.5 rounded-lg border ${theme.border} hover:opacity-75 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 cursor-pointer`}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Setting 1: Layout Selection */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-neutral-900 dark:text-neutral-100 flex items-center gap-1.5">
+                  <LayoutGrid className="w-3.5 h-3.5 text-sky-500" />
+                  <span>Bố cục các ô đáp án</span>
+                </span>
+                <span className="text-[10px] text-neutral-400 font-medium">
+                  {mcLayout === 'stacked' ? 'Mặc định: Xếp chồng' : 'Đang chọn: 4 ô vuông'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {/* Stacked Option */}
+                <button
+                  id="btn-setting-layout-stacked"
+                  type="button"
+                  onClick={() => {
+                    setMcLayout('stacked');
+                    localStorage.setItem('app_quiz_mc_layout', 'stacked');
+                  }}
+                  className={`p-3 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                    mcLayout === 'stacked'
+                      ? 'border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                      : `${theme.border} ${theme.badgeBg} hover:border-neutral-400 dark:hover:border-neutral-600`
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-xs font-bold flex items-center gap-1.5">
+                      <List className="w-4 h-4" />
+                      <span>Xếp chồng</span>
+                    </span>
+                    {mcLayout === 'stacked' && <Check className="w-4 h-4 text-emerald-500" />}
+                  </div>
+                  <p className={`text-[10px] leading-snug ${mcLayout === 'stacked' ? 'text-emerald-700/80 dark:text-emerald-300/80' : theme.textMuted}`}>
+                    Khung chữ nhật nằm ngang xếp dọc như bản cũ (dễ đọc câu dài).
+                  </p>
+                </button>
+
+                {/* 4 Square Grid Option */}
+                <button
+                  id="btn-setting-layout-grid"
+                  type="button"
+                  onClick={() => {
+                    setMcLayout('grid_2x2');
+                    localStorage.setItem('app_quiz_mc_layout', 'grid_2x2');
+                  }}
+                  className={`p-3 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                    mcLayout === 'grid_2x2'
+                      ? 'border-sky-500 bg-sky-500/10 ring-1 ring-sky-500/30 text-sky-600 dark:text-sky-400'
+                      : `${theme.border} ${theme.badgeBg} hover:border-neutral-400 dark:hover:border-neutral-600`
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-xs font-bold flex items-center gap-1.5">
+                      <LayoutGrid className="w-4 h-4" />
+                      <span>4 ô vuông (Quiz)</span>
+                    </span>
+                    {mcLayout === 'grid_2x2' && <Check className="w-4 h-4 text-sky-500" />}
+                  </div>
+                  <p className={`text-[10px] leading-snug ${mcLayout === 'grid_2x2' ? 'text-sky-700/80 dark:text-sky-300/80' : theme.textMuted}`}>
+                    Lưới 4 khối vuông cân xứng như app Quiz / Kahoot / Duolingo.
+                  </p>
+                </button>
+              </div>
+            </div>
+
+            {/* Setting 2: ABCD Toggle */}
+            <div className="space-y-2.5 pt-2 border-t border-inherit">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-bold text-neutral-900 dark:text-neutral-100 block">
+                    Hiển thị nhãn A, B, C, D
+                  </span>
+                  <p className={`text-[10px] ${theme.textMuted} mt-0.5 max-w-[260px]`}>
+                    Tắt đi khi bạn cảm thấy chữ cái làm <strong className="text-neutral-700 dark:text-neutral-300">nhiễu não</strong>, giúp tập trung 100% vào từ vựng.
+                  </p>
+                </div>
+
+                {/* Toggle switch button */}
+                <button
+                  id="btn-setting-toggle-abcd"
+                  type="button"
+                  onClick={() => {
+                    const next = !showABCD;
+                    setShowABCD(next);
+                    localStorage.setItem('app_quiz_show_abcd', String(next));
+                  }}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
+                    showABCD ? 'bg-emerald-500' : 'bg-neutral-300 dark:bg-neutral-700'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                      showABCD ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* Status explanation */}
+              <div className={`p-2.5 rounded-xl border text-[11px] leading-relaxed flex items-center gap-2 ${
+                showABCD 
+                  ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-300' 
+                  : 'bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-300'
+              }`}>
+                <Info className="w-4 h-4 shrink-0" />
+                <span>
+                  {showABCD 
+                    ? 'Đang BẬT nhãn: Mỗi ô sẽ có chữ A, B, C, D đứng đầu.' 
+                    : 'Đang TẮT nhãn (Chống nhiễu não): Chỉ hiển thị nội dung đáp án thuần túy.'}
+                </span>
+              </div>
+            </div>
+
+            {/* Footer / Apply */}
+            <div className="pt-2">
+              <button
+                id="btn-apply-mc-settings"
+                type="button"
+                onClick={() => setShowMcSettingsModal(false)}
+                className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm cursor-pointer transition-all"
+              >
+                Đã hiểu & Áp dụng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

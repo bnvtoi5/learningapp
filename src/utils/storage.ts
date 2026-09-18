@@ -66,7 +66,7 @@ export const defaultSettings: AppSettings = {
   mascotFloatingEnabled: true,
   aiProvider: 'custom',
   aiProviderType: 'gemini',
-  aiModel: 'gemini-3.8-flash',
+  aiModel: 'gemini-3.1-flash-lite',
 };
 
 export const initialStats: UserStats = {

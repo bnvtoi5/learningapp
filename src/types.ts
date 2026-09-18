@@ -22,10 +22,13 @@ export type ExerciseType =
   | 'matching'            // Nối cặp (từ - nghĩa, từ - ảnh, câu - đáp án)
   | 'image_identify'      // Nhận diện hình ảnh / từ vựng
   | 'fill_blank'          // Điền từ vào chỗ trống
+  | 'fill_in_blank'       // Điền từ vào câu ví dụ (Memrise style)
   | 'vocab_cloze'         // Active Recall: Điền khuyết ký tự trong từ (Spelling Cloze)
   | 'flashcard_recall'    // Active Recall: Lật thẻ ghi nhớ & tự đánh giá (Anki/Quizlet style)
   | 'listen_spell'        // Nghe phát âm & gõ lại từ (Dictation / Spelling)
   | 'anagram'             // Xếp chữ cái xáo trộn thành từ vựng đúng
+  | 'spelling'            // Memrise style: Sắp xếp ký tự thành từ đúng (Shuffled letters)
+  | 'typing'              // Memrise style: Tự gõ từ vựng theo nghĩa / định nghĩa
   | 'collocation'         // Ghép cụm từ cố định (make/do/take...)
   | 'sentence_builder'    // Sắp xếp từ thành câu đúng
   | 'error_correction'    // Tìm và sửa lỗi sai trong câu
@@ -58,6 +61,10 @@ export interface SubQuestion {
   correctTrueFalse?: boolean; // Cho true_false (true = Đúng, false = Sai)
   correctText?: string; // Cho fill_blank & info_gap (hỗ trợ nhiều đáp án phân tách bởi | hoặc /)
   explanation?: string;
+  readingQuestionType?: string; // main_idea, detail, vocabulary, reference, inference, paragraph_location, true_false, authors_purpose
+  evidence?: string; // Dẫn chứng trích dẫn nguyên văn từ bài đọc
+  paragraph?: number; // Đoạn văn chứa thông tin (1, 2, 3...)
+  difficulty?: DifficultyLevel; // Độ khó (scaffolded, guided, controlled...)
 }
 
 export interface Exercise {
@@ -86,6 +93,11 @@ export interface Exercise {
   phonetic?: string; // Phiên âm (VD: /ˈfrend.li/)
   clozeLetters?: string; // Ký tự khuyết hoặc mẫu (VD: f _ _ e n d l y)
 
+  // Memrise 4-Stage Drill:
+  shuffledLetters?: string[]; // Danh sách ký tự xáo trộn cho dạng spelling
+  hint?: string; // Gợi ý hoặc bản dịch nghĩa (Memrise style)
+  memriseStage?: 'multiple_choice' | 'fill_in_blank' | 'spelling' | 'typing';
+
   // Dữ liệu đáp án tùy theo loại bài:
   options?: string[]; // Cho multiple choice, image identify, collocation
   correctOptions?: number[]; // Chỉ số đáp án đúng (0-indexed, hỗ trợ 1 hoặc nhiều đáp án)
@@ -102,6 +114,85 @@ export interface Exercise {
   readingQuestionType?: string; // Main idea, Detail, Inference, Reason,...
   evidenceRegion?: string; // Vùng thông tin trong bài đọc giải thích câu trả lời
   order?: number; // Thứ tự hiển thị trong bài học
+
+  // Memrise Style fields:
+  word?: string; // Từ gốc
+  correct_answer?: string; // Đáp án chính xác theo Memrise JSON
+  shuffled_letters?: string[]; // Mảng chữ cái xáo trộn
+  mcLayout?: 'stacked' | 'grid_2x2'; // Bố cục trắc nghiệm: xếp chồng hoặc 4 ô vuông
+  showOptionLabels?: boolean; // Bật/tắt hiển thị nhãn ABCD
+  isReverseChoice?: boolean; // Trắc nghiệm đảo ngược: Nghĩa -> Chọn từ tiếng Anh
+}
+
+export interface MemriseExerciseItem {
+  id: string;
+  word: string;
+  type: 'flashcard' | 'multiple_choice' | 'fill_in_blank' | 'spelling' | 'typing';
+  question: string;
+  options?: string[];
+  correct_answer: string;
+  hint?: string;
+  shuffled_letters?: string[];
+  meaning?: string;
+  phonetic?: string;
+  example?: string;
+  example_translation?: string;
+  is_reverse?: boolean;
+}
+
+export interface MemriseGenerationResult {
+  status: 'success' | 'error';
+  total_words_processed?: number;
+  exercises?: MemriseExerciseItem[];
+  error?: string;
+}
+
+// ==========================================
+// AI READING EXERCISE GENERATOR TYPES
+// ==========================================
+export type ReadingQuestionType =
+  | 'main_idea'           // A. Main Idea (Ý chính toàn bài hoặc đoạn)
+  | 'detail'              // B. Detail (Chi tiết cụ thể theo paragraph)
+  | 'vocabulary'          // C. Vocabulary in Context (Nghĩa từ trong ngữ cảnh)
+  | 'reference'           // D. Reference (Từ quy chiếu: they, it, this refer to...)
+  | 'inference'           // E. Inference (Suy luận hợp lý có bằng chứng)
+  | 'paragraph_location'  // F. Paragraph / Info Location (Đoạn nào đề cập...)
+  | 'true_false'          // G. True / False / NOT TRUE
+  | 'authors_purpose';    // H. Author's Purpose / Tone (Mục đích / giọng điệu tác giả)
+
+export interface ReadingPassageAnalysis {
+  mainIdea: string;
+  keyPoints: string[];
+  paragraphCount: number;
+  wordCount: number;
+  readingLevel?: string; // A2, B1, B2, C1, IELTS 5.0-6.5...
+  causeEffect?: string[];
+  comparisonContrast?: string[];
+  importantVocabulary?: { word: string; contextualMeaning: string; paragraph?: number }[];
+  pronounReferences?: { pronoun: string; refersTo: string; paragraph?: number }[];
+  authorsToneOrPurpose?: string;
+}
+
+export interface ReadingGeneratedQuestion {
+  id: string;
+  type: ReadingQuestionType;
+  difficulty: 'easy' | 'medium' | 'hard';
+  question: string;
+  options: string[]; // 4 options A, B, C, D
+  correctAnswer: number; // 0, 1, 2, 3
+  explanation: string;
+  evidence: string; // Trích dẫn câu/vùng bằng chứng trong bài đọc
+  paragraph?: number;
+  isValidated?: boolean;
+  validationNotes?: string;
+}
+
+export interface ReadingGenerationResult {
+  status: 'success' | 'error';
+  passage: string;
+  passageAnalysis?: ReadingPassageAnalysis;
+  questions?: ReadingGeneratedQuestion[];
+  error?: string;
 }
 
 export interface LessonPhase {
@@ -403,3 +494,7 @@ export interface SystemAISettings {
   systemCustomBaseUrl?: string;
   mascotPrompts?: Partial<Record<MascotType, string>>;
 }
+
+export type MemriseGenerationResponse = MemriseGenerationResult;
+
+

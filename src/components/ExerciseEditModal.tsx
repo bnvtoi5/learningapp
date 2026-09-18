@@ -37,8 +37,8 @@ const EXERCISE_TYPES: { type: ExerciseType; label: string }[] = [
   { type: 'vocab_cloze', label: 'Khuyết ký tự từ vựng (Spelling Cloze)' },
   { type: 'flashcard_recall', label: 'Lật thẻ ghi nhớ (Flashcard Recall)' },
   { type: 'listen_spell', label: 'Nghe phát âm & gõ từ (Dictation)' },
-  { type: 'anagram', label: 'Xếp chữ cái thành từ (Anagram)' },
-  { type: 'collocation', label: 'Ghép cụm từ cố định (Collocation)' },
+  { type: 'spelling', label: 'Xếp ký tự (Spelling)' },
+  { type: 'typing', label: 'Tự gõ từ vựng (Typing)' },
   { type: 'multiple_choice', label: 'Trắc nghiệm chọn đáp án' },
   { type: 'true_false', label: 'Đúng / Sai (True/False)' },
   { type: 'fill_blank', label: 'Điền từ vào chỗ trống' },
@@ -135,10 +135,12 @@ export const ExerciseEditModal: React.FC<ExerciseEditModalProps> = ({
     setEvidenceRegion(exercise.evidenceRegion || '');
 
     // Vocab
-    setVocabWord(exercise.vocabWord || exercise.correctText || '');
+    setVocabWord(exercise.vocabWord || exercise.word || exercise.correct_answer || exercise.correctText || '');
     setVocabMeaning(exercise.vocabMeaning || '');
     setPhonetic(exercise.phonetic || '');
     setClozeLetters(exercise.clozeLetters || '');
+    setExCorrectText(exercise.correctText || exercise.correct_answer || exercise.word || '');
+    setExGrammarHint(exercise.grammarHint || exercise.hint || '');
 
     // Options
     if (exercise.options && exercise.options.length > 0) {
@@ -294,6 +296,21 @@ export const ExerciseEditModal: React.FC<ExerciseEditModalProps> = ({
       updated.errorType = exErrorType.trim();
     } else if (exType === 'sentence_builder') {
       updated.scrambledWords = (exCorrectText.trim() || vocabWord.trim()).split(/\s+/);
+    } else if (exType === 'spelling') {
+      const target = vocabWord.trim() || exCorrectText.trim();
+      updated.word = target;
+      updated.correct_answer = target;
+      updated.correctText = target;
+      updated.shuffled_letters = target.split('').sort(() => Math.random() - 0.5);
+      updated.shuffledLetters = updated.shuffled_letters;
+    } else if (exType === 'typing') {
+      const target = vocabWord.trim() || exCorrectText.trim();
+      updated.word = target;
+      updated.correct_answer = target;
+      updated.correctText = target;
+      if (exGrammarHint.trim()) {
+        updated.hint = exGrammarHint.trim();
+      }
     } else if (exType === 'listening') {
       updated.audioUrl = audioUrl.trim() || undefined;
       updated.audioTitle = audioTitle.trim() || undefined;

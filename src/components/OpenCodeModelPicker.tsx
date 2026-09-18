@@ -18,7 +18,10 @@ import {
   Copy,
   Edit3,
   Plus,
-  Trash2
+  Trash2,
+  Loader2,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 import { AIProviderType, MascotType, CustomAIModel } from '../types';
 import { AI_PROVIDERS, PROVIDER_LIST, getModelInfo } from '../utils/aiProviders';
@@ -110,6 +113,11 @@ export const OpenCodeModelPicker: React.FC<OpenCodeModelPickerProps> = ({
     providerBaseUrls[currentProvider] || savedBaseUrl || ''
   );
 
+  // Testing API Key connection state
+  const [testingStatus, setTestingStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
+  const [testResultMessage, setTestResultMessage] = useState<string>('');
+  const [testLatency, setTestLatency] = useState<number | null>(null);
+
   // Personality editing state
   const [selectedMascot, setSelectedMascot] = useState<MascotType>(currentMascotId);
   const [customPrompts, setCustomPrompts] = useState<Partial<Record<MascotType, string>>>(() => ({
@@ -164,16 +172,65 @@ export const OpenCodeModelPicker: React.FC<OpenCodeModelPickerProps> = ({
     setSelectedModelId(defaultMod);
     setCustomModelInput('');
     setIsManualTyping(false);
+    setTestingStatus('idle');
+    setTestResultMessage('');
+    setTestLatency(null);
   };
 
   const handleKeyChange = (val: string) => {
     setApiKeyInput(val);
     setKeysByProvider(prev => ({ ...prev, [activeProvider]: val }));
+    if (testingStatus !== 'idle') {
+      setTestingStatus('idle');
+      setTestResultMessage('');
+    }
   };
 
   const handleUrlChange = (val: string) => {
     setBaseUrlInput(val);
     setUrlsByProvider(prev => ({ ...prev, [activeProvider]: val }));
+    if (testingStatus !== 'idle') {
+      setTestingStatus('idle');
+      setTestResultMessage('');
+    }
+  };
+
+  // Test API Key and Model Connection
+  const handleTestConnection = async () => {
+    setTestingStatus('testing');
+    setTestResultMessage('');
+    setTestLatency(null);
+
+    const activeKey = apiKeyInput?.trim() || keysByProvider[activeProvider]?.trim() || '';
+    const activeUrl = baseUrlInput?.trim() || urlsByProvider[activeProvider]?.trim() || '';
+
+    try {
+      const res = await fetch('/api/test-ai-connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: activeProvider,
+          model: selectedModelId,
+          customApiKey: activeKey,
+          baseUrl: activeUrl,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setTestingStatus('success');
+        setTestResultMessage(data.message || `Kết nối thành công với model "${selectedModelId}"!`);
+        if (typeof data.latencyMs === 'number') {
+          setTestLatency(data.latencyMs);
+        }
+      } else {
+        setTestingStatus('error');
+        setTestResultMessage(data.error || `Kiểm tra thất bại (Mã lỗi ${res.status}).`);
+      }
+    } catch (err: any) {
+      setTestingStatus('error');
+      setTestResultMessage(err?.message || 'Không thể kết nối đến máy chủ kiểm tra API.');
+    }
   };
 
   // Add custom model permanently
@@ -679,13 +736,67 @@ export const OpenCodeModelPicker: React.FC<OpenCodeModelPickerProps> = ({
                   )}
                 </div>
 
-                <input
-                  type="password"
-                  value={apiKeyInput}
-                  onChange={e => handleKeyChange(e.target.value)}
-                  placeholder={`Dán ${activeProviderMeta.name} API Key của bạn vào đây (${activeProviderMeta.keyPrefixHint})...`}
-                  className={`w-full px-3 py-2 text-xs rounded-xl ${theme.inputBg} border ${theme.border} ${theme.text} font-mono focus:outline-hidden focus:border-emerald-500 placeholder:text-neutral-400 dark:placeholder:text-neutral-500`}
-                />
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="password"
+                    value={apiKeyInput}
+                    onChange={e => handleKeyChange(e.target.value)}
+                    placeholder={`Dán ${activeProviderMeta.name} API Key của bạn vào đây (${activeProviderMeta.keyPrefixHint})...`}
+                    className={`flex-1 px-3 py-2 text-xs rounded-xl ${theme.inputBg} border ${theme.border} ${theme.text} font-mono focus:outline-hidden focus:border-emerald-500 placeholder:text-neutral-400 dark:placeholder:text-neutral-500`}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleTestConnection}
+                    disabled={testingStatus === 'testing'}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-bold shrink-0 flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      testingStatus === 'testing'
+                        ? 'bg-neutral-200 dark:bg-neutral-800 text-neutral-400 cursor-not-allowed'
+                        : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-xs hover:shadow-md active:scale-98'
+                    }`}
+                    title="Kiểm tra API Key có hoạt động thực tế với model đang chọn hay không"
+                  >
+                    {testingStatus === 'testing' ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Đang kiểm tra...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="w-3.5 h-3.5 fill-current" />
+                        <span>Test API Key</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Kết quả Test Connection */}
+                {testingStatus === 'success' && (
+                  <div className="p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 text-xs flex items-start gap-2.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <div className="font-bold text-emerald-600 dark:text-emerald-400">Kết nối thành công!</div>
+                      <div className="text-[11px] mt-0.5 leading-relaxed opacity-90">{testResultMessage}</div>
+                      {testLatency && (
+                        <div className="text-[10px] font-mono mt-1 text-emerald-700 dark:text-emerald-300 bg-emerald-500/20 inline-block px-1.5 py-0.5 rounded">
+                          Ping: {testLatency}ms • Model: {selectedModelId}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {testingStatus === 'error' && (
+                  <div className="p-3 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300 text-xs flex items-start gap-2.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                    <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+                    <div className="flex-1 break-words">
+                      <div className="font-bold text-rose-600 dark:text-rose-400">Kiểm tra kết nối thất bại</div>
+                      <div className="text-[11px] mt-0.5 leading-relaxed">{testResultMessage}</div>
+                      <div className="text-[10px] text-neutral-500 dark:text-neutral-400 mt-1">
+                        Kiểm tra lại tính hợp lệ của API Key hoặc model ID: <code className="font-mono text-rose-600 dark:text-rose-400">{selectedModelId}</code>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {(activeProvider === 'openrouter' || activeProvider === 'custom') && (
                   <div className="space-y-1 pt-1">

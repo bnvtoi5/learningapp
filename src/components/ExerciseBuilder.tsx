@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Plus, 
   Save, 
@@ -24,7 +24,14 @@ import {
   EyeOff,
   ListPlus,
   CheckSquare,
-  Shuffle
+  Shuffle,
+  ChevronDown,
+  Cpu,
+  Tag,
+  Settings,
+  AlertTriangle,
+  Loader2,
+  Sliders
 } from 'lucide-react';
 import { 
   Topic, 
@@ -37,11 +44,19 @@ import {
   Classroom,
   MediaAsset,
   SubQuestion,
-  SubQuestionType
+  SubQuestionType,
+  AIProviderType,
+  AppSettings
 } from '../types';
 import { useTheme } from '../context/ThemeContext';
-import { loadClassrooms } from '../utils/storage';
+import { loadClassrooms, loadSettings, saveSettings } from '../utils/storage';
 import { MediaLibraryModal } from './MediaLibraryModal';
+import { MemriseGeneratorModal } from './MemriseGeneratorModal';
+import { ReadingGeneratorModal } from './ReadingGeneratorModal';
+import { SingleVocabGeneratorModal } from './SingleVocabGeneratorModal';
+import { GrammarGeneratorModal } from './GrammarGeneratorModal';
+import { OpenCodeModelPicker } from './OpenCodeModelPicker';
+import { AI_PROVIDERS } from '../utils/aiProviders';
 import { getDistinctClassNames, getClassroomsByName } from '../utils/classroomHelpers';
 
 interface ExerciseBuilderProps {
@@ -63,9 +78,9 @@ const EXERCISE_TYPES: { type: ExerciseType; label: string; desc: string }[] = [
   { type: 'vocab_cloze', label: 'Khuyết ký tự từ vựng', desc: 'Active Recall: Điền khuyết ký tự trong từ vựng' },
   { type: 'flashcard_recall', label: 'Lật thẻ ghi nhớ', desc: 'Active Recall: Lật thẻ xem từ, phiên âm & tự đánh giá' },
   { type: 'listen_spell', label: 'Nghe phát âm & gõ từ', desc: 'Dictation: Nghe phát âm chuẩn và gõ lại đúng chính tả' },
-  { type: 'anagram', label: 'Xếp chữ cái thành từ', desc: 'Active Recall: Chạm xếp chữ cái xáo trộn thành từ vựng' },
-  { type: 'collocation', label: 'Ghép cụm từ cố định', desc: 'Chọn từ kết hợp tự nhiên (make/do/take...)' },
-  { type: 'multiple_choice', label: 'Trắc nghiệm chọn đáp án', desc: 'Chọn 1 hoặc nhiều phương án đúng' },
+  { type: 'spelling', label: 'Xếp ký tự (Spelling)', desc: 'Sắp xếp các chữ cái xáo trộn thành từ vựng chính xác' },
+  { type: 'typing', label: 'Tự gõ từ (Typing)', desc: 'Nhìn nghĩa/gợi ý và tự gõ chính xác từ vựng' },
+  { type: 'multiple_choice', label: 'Trắc nghiệm chọn đáp án', desc: 'Chọn 1 hoặc nhiều phương án đúng (bao gồm cụm từ / collocation)' },
   { type: 'true_false', label: 'Đúng / Sai (True/False)', desc: 'Phán đoán tính đúng sai của phát biểu' },
   { type: 'fill_blank', label: 'Điền từ vào chỗ trống', desc: 'Điền dạng đúng của từ vào câu' },
   { type: 'sentence_builder', label: 'Sắp xếp câu', desc: 'Ghép các từ xáo trộn thành câu hoàn chỉnh' },
@@ -102,6 +117,83 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
     initialContext?.type || (topics.length === 0 ? 'topic' : 'exercise')
   );
   const [statusBanner, setStatusBanner] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+  const [isMemriseModalOpen, setIsMemriseModalOpen] = useState(false);
+  const [isReadingModalOpen, setIsReadingModalOpen] = useState(false);
+  const [isSingleVocabModalOpen, setIsSingleVocabModalOpen] = useState(false);
+  const [isGrammarModalOpen, setIsGrammarModalOpen] = useState(false);
+  const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
+  const [isAiDropdownOpen, setIsAiDropdownOpen] = useState(false);
+  const aiDropdownRef = useRef<HTMLDivElement>(null);
+
+  // App settings for model & AI configuration
+  const [appSettingsState, setAppSettingsState] = useState(() => loadSettings());
+
+  // Quick API Key Testing State
+  const [isTestingApi, setIsTestingApi] = useState(false);
+  const [apiTestResult, setApiTestResult] = useState<{
+    status: 'idle' | 'testing' | 'success' | 'error';
+    message: string;
+    latencyMs?: number;
+  }>({ status: 'idle', message: '' });
+
+  // Close AI dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (aiDropdownRef.current && !aiDropdownRef.current.contains(e.target as Node)) {
+        setIsAiDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Quick Test API Connection
+  const handleQuickTestApi = async (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setIsTestingApi(true);
+    setApiTestResult({ status: 'testing', message: 'Đang kiểm tra kết nối với mô hình AI...' });
+
+    try {
+      const current = loadSettings();
+      setAppSettingsState(current);
+      const provider = current.aiProviderType || 'gemini';
+      const model = current.aiModel || 'gemini-2.5-flash';
+      const customKey = current.providerApiKeys?.[provider] || current.customApiKey || '';
+      const baseUrl = current.providerBaseUrls?.[provider] || current.customBaseUrl || '';
+
+      const res = await fetch('/api/test-ai-connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider,
+          model,
+          customApiKey: customKey,
+          baseUrl,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setApiTestResult({
+          status: 'success',
+          message: data.message || `Kết nối thành công với model "${model}"!`,
+          latencyMs: data.latencyMs,
+        });
+      } else {
+        setApiTestResult({
+          status: 'error',
+          message: data.error || `Kiểm tra thất bại (Mã lỗi ${res.status}).`,
+        });
+      }
+    } catch (err: any) {
+      setApiTestResult({
+        status: 'error',
+        message: err?.message || 'Không thể kết nối đến máy chủ kiểm tra API.',
+      });
+    } finally {
+      setIsTestingApi(false);
+    }
+  };
 
   // Topic Form (2 Tiers)
   const distinctClassNames = useMemo(() => getDistinctClassNames(classrooms), [classrooms]);
@@ -316,6 +408,26 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
         setExExplanation('helpful = help + ful (tính từ).');
         break;
 
+      case 'spelling':
+        setExSkill('vocabulary');
+        setVocabWord('diligent');
+        setVocabMeaning('chăm chỉ, cần cù');
+        setExCorrectText('diligent');
+        setExQuestion('Sắp xếp các ký tự sau thành từ đúng: l i e g d t n i');
+        setExInstruction('Chạm các chữ cái để ghép lại đúng chính tả');
+        setExExplanation('diligent (tính từ) = chăm chỉ, cần cù.');
+        break;
+
+      case 'typing':
+        setExSkill('vocabulary');
+        setVocabWord('explore');
+        setVocabMeaning('khám phá, tìm tòi');
+        setExCorrectText('explore');
+        setExQuestion('Hãy ghi lại từ có nghĩa sau: khám phá, tìm tòi');
+        setExInstruction('Gõ chính xác từ gốc tiếng Anh');
+        setExExplanation('explore (động từ) = khám phá, thám hiểm.');
+        break;
+
       case 'collocation':
         setExSkill('vocabulary');
         setExQuestion('Chọn từ thích hợp điền vào chỗ trống: "She always ___ her homework before dinner."');
@@ -469,6 +581,18 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
       newExercise.errorType = exErrorType.trim();
     } else if (exType === 'sentence_builder') {
       newExercise.scrambledWords = (exCorrectText.trim() || vocabWord.trim()).split(/\s+/);
+    } else if (exType === 'spelling') {
+      const target = vocabWord.trim() || exCorrectText.trim();
+      newExercise.word = target;
+      newExercise.correct_answer = target;
+      newExercise.correctText = target;
+      newExercise.shuffled_letters = target.split('').sort(() => Math.random() - 0.5);
+      newExercise.shuffledLetters = newExercise.shuffled_letters;
+    } else if (exType === 'typing') {
+      const target = vocabWord.trim() || exCorrectText.trim();
+      newExercise.word = target;
+      newExercise.correct_answer = target;
+      newExercise.correctText = target;
     } else if (exType === 'listening') {
       newExercise.audioUrl = audioUrl.trim() || undefined;
       newExercise.audioTitle = audioTitle.trim() || undefined;
@@ -567,12 +691,208 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
   return (
     <div className={`space-y-6 pb-24 ${typo.fontSize} ${typo.lineHeight} animate-in fade-in duration-150`}>
       {/* Top Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold tracking-tight">Soạn nội dung học tập</h2>
           <p className={`text-xs ${theme.textMuted}`}>
             Tự do tạo chủ đề, bài học và các dạng bài tập theo cấu trúc bài giảng.
           </p>
+        </div>
+
+        {/* Consolidated AI Tools Dropdown Menu */}
+        <div className="relative" ref={aiDropdownRef}>
+          <button
+            type="button"
+            onClick={() => {
+              setIsAiDropdownOpen(!isAiDropdownOpen);
+              setAppSettingsState(loadSettings());
+            }}
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 via-indigo-600 to-purple-600 hover:from-sky-400 hover:to-purple-500 text-white font-bold text-xs shadow-md hover:shadow-lg active:scale-95 transition-all flex items-center gap-2 cursor-pointer"
+          >
+            <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+            <span>🤖 Trợ lý AI Soạn Bài</span>
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isAiDropdownOpen ? 'rotate-180' : ''}`} />
+          </button>
+
+          {/* AI Tools Dropdown Menu */}
+          {isAiDropdownOpen && (
+            <div className={`absolute right-0 mt-2 w-84 sm:w-96 rounded-2xl border ${theme.border} ${theme.card} shadow-2xl p-2.5 z-50 animate-in fade-in zoom-in-95 duration-150`}>
+              <div className={`px-3 py-2 border-b ${theme.border} flex items-center justify-between`}>
+                <span className={`text-[11px] font-bold uppercase tracking-wider ${theme.textMuted} flex items-center gap-1.5`}>
+                  <Cpu className="w-3.5 h-3.5 text-indigo-500" />
+                  Công cụ AI tạo bài tập
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 font-semibold border border-emerald-500/20">
+                  {appSettingsState.aiProviderType || 'gemini'}
+                </span>
+              </div>
+
+              <div className="py-1.5 space-y-1">
+                {/* 1. AI Reading Passage & Exercises */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsReadingModalOpen(true);
+                    setIsAiDropdownOpen(false);
+                  }}
+                  className={`w-full p-2.5 rounded-xl hover:${theme.highlight} transition-colors text-left flex items-start gap-3 group cursor-pointer`}
+                >
+                  <div className="w-8 h-8 rounded-lg bg-sky-500/15 border border-sky-500/25 text-sky-500 flex items-center justify-center shrink-0 mt-0.5 group-hover:scale-105 transition-transform">
+                    <BookOpen className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 font-bold text-xs text-sky-500">
+                      <span>AI Reading Exercise Generator</span>
+                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-sky-500/10 font-normal">Đọc hiểu</span>
+                    </div>
+                    <p className={`text-[11px] ${theme.textMuted} leading-snug mt-0.5 line-clamp-2`}>
+                      Dán bài đọc ➔ Phân tích ý chính, luận điểm, quy chiếu & sinh bộ câu hỏi đọc hiểu chuẩn
+                    </p>
+                  </div>
+                </button>
+
+                {/* 2. AI Memrise (Trọn bộ 4 dạng từ vựng) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMemriseModalOpen(true);
+                    setIsAiDropdownOpen(false);
+                  }}
+                  className={`w-full p-2.5 rounded-xl hover:${theme.highlight} transition-colors text-left flex items-start gap-3 group cursor-pointer`}
+                >
+                  <div className="w-8 h-8 rounded-lg bg-amber-500/15 border border-amber-500/25 text-amber-500 flex items-center justify-center shrink-0 mt-0.5 group-hover:scale-105 transition-transform">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 font-bold text-xs text-amber-500">
+                      <span>AI Memrise (Trọn bộ 4 dạng)</span>
+                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/10 font-normal">Bộ 4</span>
+                    </div>
+                    <p className={`text-[11px] ${theme.textMuted} leading-snug mt-0.5 line-clamp-2`}>
+                      Tự động sinh 4 dạng củng cố: Trắc nghiệm, Điền khuyết, Nối từ, Flashcard
+                    </p>
+                  </div>
+                </button>
+
+                {/* 3. AI Tạo từ vựng đơn lẻ (Single task) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsSingleVocabModalOpen(true);
+                    setIsAiDropdownOpen(false);
+                  }}
+                  className={`w-full p-2.5 rounded-xl hover:${theme.highlight} transition-colors text-left flex items-start gap-3 group cursor-pointer`}
+                >
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/25 text-emerald-500 flex items-center justify-center shrink-0 mt-0.5 group-hover:scale-105 transition-transform">
+                    <Tag className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 font-bold text-xs text-emerald-500">
+                      <span>AI Từ Vựng Đơn Lẻ (Single Task)</span>
+                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/10 font-normal">Đơn lẻ</span>
+                    </div>
+                    <p className={`text-[11px] ${theme.textMuted} leading-snug mt-0.5 line-clamp-2`}>
+                      Nhập danh sách từ ➔ Sinh hàng loạt cho đúng 1 dạng chọn lọc (Khuyết từ, Trắc nghiệm, Sắp xếp chữ...)
+                    </p>
+                  </div>
+                </button>
+
+                {/* 4. AI Tạo bài tập ngữ pháp */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsGrammarModalOpen(true);
+                    setIsAiDropdownOpen(false);
+                  }}
+                  className={`w-full p-2.5 rounded-xl hover:${theme.highlight} transition-colors text-left flex items-start gap-3 group cursor-pointer`}
+                >
+                  <div className="w-8 h-8 rounded-lg bg-purple-500/15 border border-purple-500/25 text-purple-500 flex items-center justify-center shrink-0 mt-0.5 group-hover:scale-105 transition-transform">
+                    <Cpu className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 font-bold text-xs text-purple-500">
+                      <span>AI Bài Tập Ngữ Pháp (Grammar)</span>
+                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-500/10 font-normal">Ngữ pháp</span>
+                    </div>
+                    <p className={`text-[11px] ${theme.textMuted} leading-snug mt-0.5 line-clamp-2`}>
+                      Nhập chủ điểm ngữ pháp (Thì, Câu điều kiện, Mệnh đề quan hệ...) ➔ Sinh bài tập chuyên sâu kèm giải thích
+                    </p>
+                  </div>
+                </button>
+              </div>
+
+              {/* Quick API Key Connection Test Panel */}
+              <div className={`mt-2 pt-2.5 border-t ${theme.border} space-y-2`}>
+                <div className="flex items-center justify-between text-xs px-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`text-[11px] ${theme.textMuted}`}>Model:</span>
+                    <span className="font-mono text-[11px] font-semibold text-indigo-400 truncate max-w-[140px]" title={appSettingsState.aiModel || 'gemini-2.5-flash'}>
+                      {appSettingsState.aiModel || 'gemini-2.5-flash'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsModelPickerOpen(true);
+                      setIsAiDropdownOpen(false);
+                    }}
+                    className={`text-[11px] font-semibold text-indigo-400 hover:text-indigo-300 flex items-center gap-1 cursor-pointer`}
+                  >
+                    <Settings className="w-3 h-3" />
+                    Đổi Model / Key
+                  </button>
+                </div>
+
+                <div className="px-1">
+                  <button
+                    type="button"
+                    onClick={handleQuickTestApi}
+                    disabled={isTestingApi}
+                    className={`w-full py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                      isTestingApi
+                        ? 'bg-neutral-500/20 text-neutral-400 cursor-not-allowed'
+                        : 'bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 border border-indigo-500/30 active:scale-98'
+                    }`}
+                  >
+                    {isTestingApi ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Đang kiểm tra API...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Kiểm tra kết nối API Key</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Test Result Message */}
+                {apiTestResult.status !== 'idle' && (
+                  <div className={`p-2 rounded-xl text-[11px] flex items-start gap-2 ${
+                    apiTestResult.status === 'success'
+                      ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                      : apiTestResult.status === 'error'
+                      ? 'bg-rose-500/10 border border-rose-500/20 text-rose-400'
+                      : 'bg-neutral-500/10 border border-neutral-500/20 text-neutral-400'
+                  }`}>
+                    {apiTestResult.status === 'success' && <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />}
+                    {apiTestResult.status === 'error' && <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />}
+                    {apiTestResult.status === 'testing' && <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0 mt-0.5" />}
+                    <div className="flex-1 min-w-0">
+                      <p className="leading-snug break-words">{apiTestResult.message}</p>
+                      {apiTestResult.latencyMs !== undefined && (
+                        <p className="text-[10px] text-emerald-500/80 mt-0.5 font-mono">
+                          ⚡ Phản hồi: {apiTestResult.latencyMs}ms
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -678,8 +998,8 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
                 { type: 'vocab_cloze', label: '⭐ Khuyết từ vựng (Recall)' },
                 { type: 'flashcard_recall', label: '⭐ Lật thẻ (Recall)' },
                 { type: 'listen_spell', label: '⭐ Nghe & gõ (Dictation)' },
-                { type: 'anagram', label: '⭐ Xếp chữ cái' },
-                { type: 'collocation', label: 'Ghép cụm từ' },
+                { type: 'spelling', label: '⚡ Xếp ký tự (Spelling)' },
+                { type: 'typing', label: '⚡ Tự gõ từ (Typing)' },
                 { type: 'multiple_choice', label: 'Trắc nghiệm' },
                 { type: 'true_false', label: 'Đúng / Sai' },
                 { type: 'fill_blank', label: 'Điền từ khuyết' },
@@ -778,7 +1098,7 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
           </div>
 
           {/* Active Recall / Vocab Section */}
-          {(exType === 'vocab_cloze' || exType === 'flashcard_recall' || exType === 'listen_spell' || exType === 'anagram') && (
+          {(exType === 'vocab_cloze' || exType === 'flashcard_recall' || exType === 'listen_spell' || exType === 'anagram' || exType === 'spelling' || exType === 'typing') && (
             <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5 space-y-3">
               <span className="text-xs font-bold text-emerald-500 block">
                 ⭐ Cài đặt từ vựng Active Recall:
@@ -981,7 +1301,7 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
           {/* Comprehension Mode Selector for Reading & Listening */}
           {(exType === 'reading' || exType === 'listening') && (
             <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-500/5 space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
                   <span className="text-xs font-bold text-emerald-400 block">
                     Thiết lập Đề bài & Phương án trả lời ({exType === 'listening' ? 'Bài Nghe' : 'Đọc Hiểu'}):
@@ -990,6 +1310,17 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
                     Hỗ trợ thiết kế nhiều câu hỏi con (hoặc 1 câu trắc nghiệm đơn/đúng sai/điền từ), hoặc nghe/đọc điền từ khuyết
                   </span>
                 </div>
+
+                {exType === 'reading' && (
+                  <button
+                    type="button"
+                    onClick={() => setIsReadingModalOpen(true)}
+                    className="px-3 py-1.5 rounded-lg bg-sky-500/20 border border-sky-500/40 text-sky-300 hover:bg-sky-500/30 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-sky-300" />
+                    <span>Dùng AI phân tích & sinh câu hỏi</span>
+                  </button>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -1766,6 +2097,114 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
             }
           }
           setIsMediaModalOpen(false);
+        }}
+      />
+
+      {/* Memrise Generator Modal */}
+      <MemriseGeneratorModal
+        isOpen={isMemriseModalOpen}
+        onClose={() => setIsMemriseModalOpen(false)}
+        topics={topics}
+        lessons={lessons}
+        selectedLessonId={targetLessonId}
+        onExercisesCreated={(newExercises) => {
+          newExercises.forEach(ex => onSaveExercise(ex));
+          setStatusBanner({
+            type: 'success',
+            text: `Đã tạo và thêm thành công ${newExercises.length} bài tập Memrise vào bài học!`
+          });
+        }}
+      />
+
+      {/* AI Reading Exercise Generator Modal */}
+      <ReadingGeneratorModal
+        isOpen={isReadingModalOpen}
+        onClose={() => setIsReadingModalOpen(false)}
+        topics={topics}
+        lessons={lessons}
+        selectedLessonId={targetLessonId}
+        onExercisesCreated={(newExercises) => {
+          newExercises.forEach(ex => onSaveExercise(ex));
+          setStatusBanner({
+            type: 'success',
+            text: `Đã tạo và lưu thành công bộ bài đọc hiểu (${newExercises.length} bài tập) vào bài học!`
+          });
+        }}
+      />
+
+      {/* AI Single Vocab Generator Modal */}
+      <SingleVocabGeneratorModal
+        isOpen={isSingleVocabModalOpen}
+        onClose={() => setIsSingleVocabModalOpen(false)}
+        topics={topics}
+        lessons={lessons}
+        selectedLessonId={targetLessonId}
+        onExercisesCreated={(newExercises) => {
+          newExercises.forEach(ex => onSaveExercise(ex));
+          setStatusBanner({
+            type: 'success',
+            text: `Đã tạo và thêm thành công ${newExercises.length} bài tập từ vựng đơn lẻ vào bài học!`
+          });
+        }}
+      />
+
+      {/* AI Grammar Generator Modal */}
+      <GrammarGeneratorModal
+        isOpen={isGrammarModalOpen}
+        onClose={() => setIsGrammarModalOpen(false)}
+        topics={topics}
+        lessons={lessons}
+        selectedLessonId={targetLessonId}
+        onExercisesCreated={(newExercises) => {
+          newExercises.forEach(ex => onSaveExercise(ex));
+          setStatusBanner({
+            type: 'success',
+            text: `Đã tạo và thêm thành công ${newExercises.length} bài tập ngữ pháp vào bài học!`
+          });
+        }}
+      />
+
+      {/* OpenCode Model & API Key Configuration Modal */}
+      <OpenCodeModelPicker
+        isOpen={isModelPickerOpen}
+        onClose={() => setIsModelPickerOpen(false)}
+        currentProvider={appSettingsState.aiProviderType || 'gemini'}
+        currentModel={appSettingsState.aiModel || 'gemini-2.5-flash'}
+        savedApiKey={appSettingsState.customApiKey || appSettingsState.customGeminiApiKey || ''}
+        savedBaseUrl={appSettingsState.customBaseUrl || ''}
+        providerApiKeys={appSettingsState.providerApiKeys || {}}
+        providerBaseUrls={appSettingsState.providerBaseUrls || {}}
+        customProviderModels={appSettingsState.customProviderModels || {}}
+        mascotCustomPrompts={appSettingsState.mascotCustomPrompts || {}}
+        currentMascotId="owl"
+        onSelectModel={(
+          provider,
+          modelId,
+          customApiKey,
+          customBaseUrl,
+          updatedProviderApiKeys,
+          updatedProviderBaseUrls,
+          updatedMascotPrompts,
+          updatedCustomModels
+        ) => {
+          const updated: AppSettings = {
+            ...appSettingsState,
+            aiProviderType: provider,
+            aiModel: modelId,
+            customApiKey,
+            customBaseUrl,
+            providerApiKeys: updatedProviderApiKeys,
+            providerBaseUrls: updatedProviderBaseUrls,
+            mascotCustomPrompts: updatedMascotPrompts,
+            customProviderModels: updatedCustomModels,
+          };
+          saveSettings(updated);
+          setAppSettingsState(updated);
+          setIsModelPickerOpen(false);
+          setStatusBanner({
+            type: 'success',
+            text: `Đã lưu cấu hình mô hình AI: ${modelId} (${provider})!`,
+          });
         }}
       />
     </div>
