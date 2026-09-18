@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   X, 
   Check, 
@@ -120,9 +120,11 @@ export const OpenCodeModelPicker: React.FC<OpenCodeModelPickerProps> = ({
   );
   const [showDefaultPromptPreview, setShowDefaultPromptPreview] = useState<boolean>(false);
 
-  // Sync state on open
+  // Only sync state when modal transitions from closed to open
+  const wasOpenRef = useRef(false);
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !wasOpenRef.current) {
+      wasOpenRef.current = true;
       setActiveProvider(currentProvider || 'gemini');
       setSelectedModelId(currentModel || AI_PROVIDERS.gemini.defaultModel);
       setApiKeyInput(providerApiKeys[currentProvider] || savedApiKey || '');
@@ -130,6 +132,7 @@ export const OpenCodeModelPicker: React.FC<OpenCodeModelPickerProps> = ({
       setCustomModelsByProvider(customProviderModels || {});
       setSelectedMascot(currentMascotId);
       setPersonalityDraft(mascotCustomPrompts[currentMascotId] || '');
+      setCustomPrompts({ ...mascotCustomPrompts });
       setIsAddingModel(false);
 
       // Check if current model is outside default list
@@ -143,8 +146,10 @@ export const OpenCodeModelPicker: React.FC<OpenCodeModelPickerProps> = ({
         setIsManualTyping(false);
         setCustomModelInput('');
       }
+    } else if (!isOpen) {
+      wasOpenRef.current = false;
     }
-  }, [isOpen, currentProvider, currentModel, currentMascotId, customProviderModels]);
+  }, [isOpen]);
 
   // Handle provider switch
   const handleSwitchProvider = (providerId: AIProviderType) => {

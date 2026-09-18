@@ -27,6 +27,8 @@ import { useTheme } from '../context/ThemeContext';
 import { ConfirmModal } from './ConfirmModal';
 import { ClassroomCascadingFilter } from './ClassroomCascadingFilter';
 import { getClassroomsByName } from '../utils/classroomHelpers';
+import { DailyCutoffManager } from './DailyCutoffManager';
+import { computePendingReports } from '../utils/dailyPendingErrors';
 
 interface AdminErrorManagerProps {
   errors: ErrorLog[];
@@ -61,6 +63,13 @@ export const AdminErrorManager: React.FC<AdminErrorManagerProps> = ({
   const [statusFilter, setStatusFilter] = useState<'all' | 'unresolved' | 'resolved'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [skillFilter, setSkillFilter] = useState<string>('all');
+  const [activeViewMode, setActiveViewMode] = useState<'cutoff' | 'detail'>('cutoff');
+
+  // Compute live pending students count past 23:59 VN cutoff
+  const livePendingReports = useMemo(() => {
+    return computePendingReports(users, errors, classrooms);
+  }, [users, errors, classrooms]);
+  const livePendingCount = livePendingReports.length;
 
   // Confirmation modal
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -241,26 +250,73 @@ export const AdminErrorManager: React.FC<AdminErrorManagerProps> = ({
 
   return (
     <div className="space-y-4">
-      {/* Top Banner / Concept Explainer */}
-      <div className={`p-4 rounded-2xl ${theme.card} border ${theme.border} space-y-2`}>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="p-1.5 rounded-lg bg-rose-500/10 text-rose-500">
-              <AlertTriangle className="w-4 h-4" />
+      {/* Sub-tab Navigation */}
+      <div className="flex p-1.5 rounded-2xl bg-black/10 dark:bg-white/5 border border-white/10 gap-1.5 shadow-sm">
+        <button
+          type="button"
+          onClick={() => setActiveViewMode('cutoff')}
+          className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+            activeViewMode === 'cutoff'
+              ? 'bg-rose-600 text-white shadow-sm'
+              : `${theme.textMuted} hover:text-white`
+          }`}
+        >
+          <Clock className="w-4 h-4" />
+          <span>Chốt sổ lỗi 23:59 (Sau 1 ngày)</span>
+          {livePendingCount > 0 && (
+            <span className="px-2 py-0.5 text-[10px] rounded-full bg-white/20 font-bold">
+              {livePendingCount} nợ bài
             </span>
-            <h3 className="text-sm font-bold tracking-tight">
-              Giám Sát Sổ Lỗi Học Sinh & Cơ Chế Phạt Làm Lại
-            </h3>
-          </div>
-          <span className="text-[11px] px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-400 font-semibold">
-            {unresolvedCount} lỗi đang phạt
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveViewMode('detail')}
+          className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+            activeViewMode === 'detail'
+              ? 'bg-amber-500 text-white shadow-sm'
+              : `${theme.textMuted} hover:text-white`
+          }`}
+        >
+          <ListChecks className="w-4 h-4" />
+          <span>Chi tiết sổ lỗi & Mức phạt</span>
+          <span className="px-2 py-0.5 text-[10px] rounded-full bg-white/20">
+            {unresolvedCount} lỗi
           </span>
-        </div>
-        <p className={`text-xs ${theme.textMuted}`}>
-          Theo dõi chi tiết số lượt học sinh đã thử lại, tình trạng hoàn thành câu lỗi sai, và trực tiếp điều chỉnh 
-          <strong> mức phạt (số lần làm đúng bắt buộc)</strong> cho từng câu hỏi để rèn luyện tính cẩn thận.
-        </p>
+        </button>
       </div>
+
+      {activeViewMode === 'cutoff' ? (
+        <DailyCutoffManager
+          users={users}
+          errors={errors}
+          classrooms={classrooms}
+          onResolveError={onResolveError}
+          onResetErrorProgress={onResetErrorProgress}
+        />
+      ) : (
+        <>
+          {/* Top Banner / Concept Explainer */}
+          <div className={`p-4 rounded-2xl ${theme.card} border ${theme.border} space-y-2`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 rounded-lg bg-rose-500/10 text-rose-500">
+                  <AlertTriangle className="w-4 h-4" />
+                </span>
+                <h3 className="text-sm font-bold tracking-tight">
+                  Giám Sát Sổ Lỗi Học Sinh & Cơ Chế Phạt Làm Lại
+                </h3>
+              </div>
+              <span className="text-[11px] px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-400 font-semibold">
+                {unresolvedCount} lỗi đang phạt
+              </span>
+            </div>
+            <p className={`text-xs ${theme.textMuted}`}>
+              Theo dõi chi tiết số lượt học sinh đã thử lại, tình trạng hoàn thành câu lỗi sai, và trực tiếp điều chỉnh 
+              <strong> mức phạt (số lần làm đúng bắt buộc)</strong> cho từng câu hỏi để rèn luyện tính cẩn thận.
+            </p>
+          </div>
 
       {/* KPI Stats Bar */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
@@ -750,6 +806,8 @@ export const AdminErrorManager: React.FC<AdminErrorManagerProps> = ({
             );
           })}
         </div>
+      )}
+        </>
       )}
 
       {/* Confirmation Modal */}

@@ -365,10 +365,9 @@ export function subscribeToAllCollections(onUpdate: (data: {
     notify();
   }, err => console.warn('UserSettings real-time listener error:', err));
 
-  const unsubErrors = onSnapshot(collection(db, 'errors'), snap => {
-    state.errors = snap.docs.map(d => d.data() as ErrorLog);
-    notify();
-  }, err => console.warn('Errors real-time listener error:', err));
+  // User requested: Disable real-time sync of errors from cloud to prevent high read/write quotas
+  // Errors are kept client-side locally in student browser.
+  const unsubErrors = () => {};
 
   const unsubMedia = onSnapshot(collection(db, 'media'), snap => {
     state.media = snap.docs.map(d => d.data() as MediaAsset);

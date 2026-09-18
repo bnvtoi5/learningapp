@@ -48,6 +48,11 @@ service cloud.firestore {
       allow write: if true; // Students log their errors and retries
     }
 
+    // Daily Pending Error Reports (Chốt sổ lỗi sau 23:59)
+    match /pending_errors/{reportId} {
+      allow read, write: if true; // Teachers monitor and students sync incomplete reports
+    }
+
     // Media library (Audio and Images)
     match /media/{mediaId} {
       allow read: if true;

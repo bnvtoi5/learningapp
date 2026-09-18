@@ -180,6 +180,33 @@ export interface ErrorLog {
   requiredSuccessCount: number; // Số lần làm đúng bắt buộc (trừng phạt) để gỡ lỗi hoàn toàn
 }
 
+export interface DailyPendingErrorSummary {
+  id: string;
+  exerciseId: string;
+  question: string;
+  skill: SkillCategory;
+  exerciseType: ExerciseType;
+  failedCount: number;
+  lastFailedAt: number;
+  userAnswer?: string;
+  correctAnswer?: string;
+  errorType?: string;
+}
+
+export interface DailyPendingErrorReport {
+  id: string; // `${userId}_${dateStr}`
+  userId: string;
+  studentName: string;
+  username: string;
+  classroomId: string;
+  dateStr: string; // YYYY-MM-DD (Vietnam time)
+  cutoffTime: string; // "23:59 (VN)"
+  cutoffPassed: boolean;
+  unresolvedCount: number;
+  unresolvedErrors: DailyPendingErrorSummary[];
+  updatedAt: number;
+}
+
 export interface UserStats {
   totalCompleted: number;
   totalCorrect: number;
@@ -217,6 +244,7 @@ export interface User {
   approvedAt?: number;
   permissions?: StudentPermissions;
   settings?: Partial<AppSettings>;
+  currentSessionId?: string; // Phiên đăng nhập hiện tại - nếu thiết bị khác đăng nhập sẽ cập nhật ID mới để đá thiết bị cũ
 }
 
 export interface Classroom {

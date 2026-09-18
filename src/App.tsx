@@ -64,6 +64,8 @@ import {
   deleteClassroom as storageDeleteClassroom,
   getCurrentUser,
   setCurrentUser as storageSetCurrentUser,
+  getLocalSessionId,
+  setLocalSessionId,
   syncDatabaseWithCloud,
   checkAndMigrateCleanDatabase,
   syncDocToCloud,
@@ -84,6 +86,7 @@ import { AuthScreen } from './components/AuthScreen';
 import { PendingApprovalScreen } from './components/PendingApprovalScreen';
 import { AdminPortal } from './components/AdminPortal';
 import { AdminErrorManager } from './components/AdminErrorManager';
+import { checkAndSyncDailyPendingErrors } from './utils/dailyPendingErrors';
 
 function MainApp() {
   const { getThemeClasses } = useTheme();
@@ -176,28 +179,32 @@ function MainApp() {
         setExercises(cloudData.exercises);
         localStorage.setItem('study_app_exercises', JSON.stringify(cloudData.exercises));
       }
-      if (cloudData.errors) {
-        setErrors(cloudData.errors);
-        localStorage.setItem('study_app_errors', JSON.stringify(cloudData.errors));
-      }
+      // Keep errors local to prevent cloud overwriting and eliminate Firestore read/writes
       if (cloudData.users && cloudData.users.length > 0) {
         setUsers(cloudData.users);
         localStorage.setItem('study_app_users', JSON.stringify(cloudData.users));
 
-        // Sync individual user settings
-        cloudData.users.forEach(u => {
-          if (u.settings) {
-            localStorage.setItem(`study_app_settings_${u.id}`, JSON.stringify(u.settings));
-          }
-        });
-
-        // Sync logged in user if changed or update their info
+        // Check if current user is logged in
         const cur = getCurrentUser();
         if (cur) {
           const freshUser = cloudData.users.find(u => u.id === cur.id);
           if (freshUser) {
-            setCurrentUserState(freshUser);
-            storageSetCurrentUser(freshUser);
+            // Single Active Session check:
+            // If the user document on cloud has a newer currentSessionId than our local sessionId,
+            // this account has logged in on another device -> Kick out of this device!
+            const localSessionId = getLocalSessionId();
+            if (freshUser.currentSessionId && localSessionId && freshUser.currentSessionId !== localSessionId) {
+              storageSetCurrentUser(null);
+              setCurrentUserState(null);
+              showToast('Tài khoản của bạn vừa đăng nhập ở một thiết bị khác. Thiết bị này đã tự động đăng xuất.', 'error');
+              return;
+            }
+
+            // Keep settings local, do not let cloud overwrite locally stored user settings/API keys
+            const localSettings = cur.settings;
+            const updated = { ...freshUser, settings: localSettings };
+            setCurrentUserState(updated);
+            storageSetCurrentUser(updated);
           }
         }
       }
@@ -212,9 +219,22 @@ function MainApp() {
   useEffect(() => {
     if (currentUser) {
       const refreshed = users.find(u => u.id === currentUser.id);
-      if (refreshed && JSON.stringify(refreshed) !== JSON.stringify(currentUser)) {
-        setCurrentUserState(refreshed);
-        storageSetCurrentUser(refreshed);
+      if (refreshed) {
+        // Single Active Session check in local users state
+        const localSessionId = getLocalSessionId();
+        if (refreshed.currentSessionId && localSessionId && refreshed.currentSessionId !== localSessionId) {
+          storageSetCurrentUser(null);
+          setCurrentUserState(null);
+          showToast('Tài khoản của bạn vừa đăng nhập ở một thiết bị khác. Thiết bị này đã tự động đăng xuất.', 'error');
+          return;
+        }
+
+        const localSettings = currentUser.settings;
+        const updated = { ...refreshed, settings: localSettings };
+        if (JSON.stringify(refreshed) !== JSON.stringify(currentUser)) {
+          setCurrentUserState(updated);
+          storageSetCurrentUser(updated);
+        }
       }
     }
   }, [users]);
@@ -235,10 +255,28 @@ function MainApp() {
     }
   }, [currentTab, currentUser]);
 
+  // Check and sync daily pending error reports past 23:59 VN cutoff
+  useEffect(() => {
+    if (currentUser && currentUser.role === 'student') {
+      checkAndSyncDailyPendingErrors(currentUser, errors);
+    }
+  }, [currentUser?.id, errors]);
+
   // Auth Handlers
   const handleLoginSuccess = (user: User) => {
-    storageSetCurrentUser(user);
-    setCurrentUserState(user);
+    // Generate unique session ID for this device session
+    const sessionId = 'sess_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+    setLocalSessionId(sessionId);
+    const userWithSession = { ...user, currentSessionId: sessionId };
+
+    // Update cloud users so other devices will detect this new session and get kicked out
+    const updatedUsers = users.map(u => (u.id === user.id ? userWithSession : u));
+    saveUsers(updatedUsers);
+    setUsers(updatedUsers);
+    syncDocToCloud('users', user.id, userWithSession);
+
+    storageSetCurrentUser(userWithSession, sessionId);
+    setCurrentUserState(userWithSession);
     setCurrentTab('dashboard');
   };
 
@@ -432,7 +470,11 @@ function MainApp() {
     recordExerciseResult(exercise.skill, true, currentUser);
     recordErrorRetrySuccess(exercise.id, currentUser);
     setStats(loadStats(currentUser?.id));
-    setErrors(loadErrors());
+    const freshErrors = loadErrors();
+    setErrors(freshErrors);
+    if (currentUser && currentUser.role === 'student') {
+      checkAndSyncDailyPendingErrors(currentUser, freshErrors);
+    }
   };
 
   const handleUpdateErrorPenalty = (errorId: string, penaltyCount: number) => {
@@ -589,12 +631,20 @@ function MainApp() {
   // Error Handlers
   const handleResolveError = (errorId: string) => {
     resolveError(errorId);
-    setErrors(loadErrors());
+    const fresh = loadErrors();
+    setErrors(fresh);
+    if (currentUser && currentUser.role === 'student') {
+      checkAndSyncDailyPendingErrors(currentUser, fresh);
+    }
   };
 
   const handleDeleteError = (errorId: string) => {
     deleteError(errorId);
-    setErrors(loadErrors());
+    const fresh = loadErrors();
+    setErrors(fresh);
+    if (currentUser && currentUser.role === 'student') {
+      checkAndSyncDailyPendingErrors(currentUser, fresh);
+    }
   };
 
   const handleBulkDeleteErrors = (errorIds: string[]) => {
@@ -747,6 +797,11 @@ function MainApp() {
             onExit={() => setActivePracticeExercises(null)}
             onComplete={() => {
               setActivePracticeExercises(null);
+              const freshErrors = loadErrors();
+              setErrors(freshErrors);
+              if (currentUser && currentUser.role === 'student') {
+                checkAndSyncDailyPendingErrors(currentUser, freshErrors);
+              }
               reloadAllData();
             }}
             onErrorOccurred={handleErrorOccurred}

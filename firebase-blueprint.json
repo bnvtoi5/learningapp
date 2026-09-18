@@ -114,6 +114,24 @@
         "createdAt": { "type": "number" }
       },
       "required": ["id", "type", "name", "url", "createdAt"]
+    },
+    "pendingErrorReport": {
+      "title": "PendingErrorReport",
+      "description": "Daily snapshot of students with incomplete errors past 23:59 Vietnam cutoff",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "username": { "type": "string" },
+        "classroomId": { "type": "string" },
+        "dateStr": { "type": "string" },
+        "cutoffTime": { "type": "string" },
+        "unresolvedCount": { "type": "number" },
+        "unresolvedErrors": { "type": "array" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "userId", "studentName", "dateStr", "unresolvedCount", "updatedAt"]
     }
   },
   "firestore": {
@@ -140,6 +158,10 @@
     "/errors/{errorId}": {
       "schema": { "$ref": "#/entities/errorLog" },
       "description": "Error logs collection"
+    },
+    "/pending_errors/{reportId}": {
+      "schema": { "$ref": "#/entities/pendingErrorReport" },
+      "description": "Daily pending error reports collection (23:59 VN cutoff)"
     },
     "/media/{mediaId}": {
       "schema": { "$ref": "#/entities/mediaAsset" },

@@ -1,12 +1,12 @@
 {
-  "projectId": "learning-3ac9a",
-  "appId": "1:201572653638:web:ae80d84456ae51b3ed4847",
-  "apiKey": "AIzaSyD745qctv1_VXue76M2ExwHWAwSr00t3aA",
-  "authDomain": "learning-3ac9a.firebaseapp.com",
+  "projectId": "learningeng-3d5db",
+  "appId": "1:569392696445:web:3a084b36efd50cf4d73514",
+  "apiKey": "AIzaSyArcEb1t_6JckuGwQEGqA0ikMfDixse8wM",
+  "authDomain": "learningeng-3d5db.firebaseapp.com",
   "firestoreDatabaseId": "(default)",
-  "storageBucket": "learning-3ac9a.firebasestorage.app",
-  "messagingSenderId": "201572653638",
-  "measurementId": "G-Y7R8687NK1",
+  "storageBucket": "learningeng-3d5db.firebasestorage.app",
+  "messagingSenderId": "569392696445",
+  "measurementId": "G-RR4C3KM3QV",
   "oAuthClientId": "",
   "recaptchaSiteKey": ""
 }

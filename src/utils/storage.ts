@@ -49,6 +49,7 @@ const STORAGE_KEYS = {
   MEDIA: 'study_app_media_assets',
   MEDIA_FOLDERS: 'study_app_media_folders',
   CLEAN_TAG: 'study_app_clean_tag',
+  SESSION_ID: 'study_app_local_session_id',
 };
 
 export const defaultSettings: AppSettings = {
@@ -240,40 +241,24 @@ export function saveSettings(settings: AppSettings, userId?: string) {
     const userSettingsKey = `${STORAGE_KEYS.SETTINGS}_${activeUserId}`;
     localStorage.setItem(userSettingsKey, JSON.stringify(settings));
 
-    // Update currentUser object with new settings & sync to cloud
+    // Update currentUser object with new settings locally
     const currentUser = getCurrentUser();
-    let updatedUser: User | null = null;
     if (currentUser && currentUser.id === activeUserId) {
       currentUser.settings = settings;
       localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser));
-      updatedUser = currentUser;
     }
     const allUsers = loadUsers();
     const updatedUsers = allUsers.map(u => {
       if (u.id === activeUserId) {
-        const uWithSettings = { ...u, settings };
-        if (!updatedUser) updatedUser = uWithSettings;
-        return uWithSettings;
+        return { ...u, settings };
       }
       return u;
     });
     saveUsers(updatedUsers);
-
-    // Explicitly sync to user_settings in Firestore for guaranteed multi-device persistence
-    syncDocToCloud('user_settings', activeUserId, {
-      userId: activeUserId,
-      settings,
-      updatedAt: Date.now(),
-    });
-    if (updatedUser) {
-      syncDocToCloud('users', activeUserId, updatedUser);
-    }
+    // User requested: settings, API keys, and mascot personalities are stored locally on machine
+    // to avoid excessive Firestore read/writes and avoid cross-device input revert issues.
   } else {
     localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
-    syncDocToCloud('system_settings', 'global', {
-      settings,
-      updatedAt: Date.now(),
-    });
   }
 }
 
@@ -350,10 +335,8 @@ export function recordError(
   }
 
   saveErrors(errors);
-  const errorToSync = existingIdx >= 0 ? errors[existingIdx] : errors[0];
-  if (errorToSync) {
-    syncDocToCloud('errors', errorToSync.id, errorToSync);
-  }
+  // User requested: Stop sending error records to Firestore DB on every student mistake to eliminate quota exhaustion.
+  // Errors remain fully functional locally in student's browser notebook.
 }
 
 /**
@@ -427,7 +410,7 @@ export function recordErrorRetrySuccess(
   }
 
   saveErrors(errors);
-  syncDocToCloud('errors', err.id, err);
+  // User requested: Do not sync student error progress to Firestore to save write quota
   return {
     isErrorRetry: true,
     resolved: err.resolved,
@@ -747,14 +730,32 @@ export function getCurrentUser(): User | null {
   return safeParse<User | null>(STORAGE_KEYS.CURRENT_USER, null);
 }
 
-export function setCurrentUser(user: User | null) {
+export function getLocalSessionId(): string | null {
+  return localStorage.getItem(STORAGE_KEYS.SESSION_ID);
+}
+
+export function setLocalSessionId(sessionId: string | null) {
+  if (sessionId) {
+    localStorage.setItem(STORAGE_KEYS.SESSION_ID, sessionId);
+  } else {
+    localStorage.removeItem(STORAGE_KEYS.SESSION_ID);
+  }
+}
+
+export function setCurrentUser(user: User | null, newSessionId?: string) {
   if (user) {
+    // If a new session ID is provided or user doesn't have one in local storage, store it
+    if (newSessionId) {
+      setLocalSessionId(newSessionId);
+      user.currentSessionId = newSessionId;
+    }
     localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
     if (user.settings) {
       localStorage.setItem(`${STORAGE_KEYS.SETTINGS}_${user.id}`, JSON.stringify(user.settings));
     }
   } else {
     localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+    setLocalSessionId(null);
   }
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('app_user_changed', { detail: user }));
@@ -1362,29 +1363,22 @@ export async function syncDatabaseWithCloud(onDataChanged?: () => void): Promise
       if (cloudData.users && cloudData.users.length > 0) {
         localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(cloudData.users));
         
-        // Sync individual user settings in LocalStorage for each user
-        cloudData.users.forEach(u => {
-          if (u.settings) {
-            localStorage.setItem(`${STORAGE_KEYS.SETTINGS}_${u.id}`, JSON.stringify(u.settings));
-          }
-        });
-
-        // If current user is logged in, refresh currentUser with latest cloud user info and fire event
+        // Note: Do not overwrite local machine settings/keys/prompts with cloud to keep settings strictly local
+        // If current user is logged in, refresh currentUser with latest cloud user info while preserving local settings
         const cur = getCurrentUser();
         if (cur) {
           const freshUser = cloudData.users.find(u => u.id === cur.id);
           if (freshUser) {
-            localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(freshUser));
-            if (freshUser.settings) {
-              localStorage.setItem(`${STORAGE_KEYS.SETTINGS}_${freshUser.id}`, JSON.stringify(freshUser.settings));
-            }
+            const preservedSettings = cur.settings || loadSettings(cur.id);
+            const userToStore = { ...freshUser, settings: preservedSettings };
+            localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(userToStore));
             if (typeof window !== 'undefined') {
-              window.dispatchEvent(new CustomEvent('app_user_changed', { detail: freshUser }));
+              window.dispatchEvent(new CustomEvent('app_user_changed', { detail: userToStore }));
             }
           }
         }
       }
-      localStorage.setItem(STORAGE_KEYS.ERRORS, JSON.stringify(cloudData.errors || []));
+      // Keep student error logs strictly in local storage to prevent cloud quota overuse
       localStorage.setItem(STORAGE_KEYS.MEDIA, JSON.stringify(cloudData.media || []));
       if (onDataChanged) {
         onDataChanged();
