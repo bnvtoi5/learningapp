@@ -298,3 +298,86 @@ export interface SpeechRecognitionResultState {
   start: () => void;
   stop: () => void;
 }
+
+export interface SpeechRecognitionHandlers {
+  onStart?: () => void;
+  onResult?: (transcript: string, isFinal: boolean) => void;
+  onError?: (error: string) => void;
+  onEnd?: () => void;
+}
+
+/**
+ * Khởi chạy nhận diện giọng nói Web Speech API (en-US)
+ */
+export function startSpeechRecognition(
+  handlers: SpeechRecognitionHandlers,
+  lang: string = 'en-US'
+): { stop: () => void } | null {
+  if (typeof window === 'undefined') return null;
+
+  const SpeechRecognition =
+    (window as any).SpeechRecognition ||
+    (window as any).webkitSpeechRecognition;
+
+  if (!SpeechRecognition) {
+    handlers.onError?.('Trình duyệt không hỗ trợ Web Speech API nhận diện giọng nói. Hãy dùng Chrome, Edge hoặc Safari.');
+    return null;
+  }
+
+  try {
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = lang;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      handlers.onStart?.();
+    };
+
+    recognition.onresult = (event: any) => {
+      let finalTranscript = '';
+      let interimTranscript = '';
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript;
+        } else {
+          interimTranscript += event.results[i][0].transcript;
+        }
+      }
+      const combined = finalTranscript || interimTranscript;
+      handlers.onResult?.(combined.trim(), !!finalTranscript);
+    };
+
+    recognition.onerror = (event: any) => {
+      console.warn('SpeechRecognition error:', event.error);
+      let msg = 'Lỗi nhận diện giọng nói: ' + event.error;
+      if (event.error === 'not-allowed') {
+        msg = 'Trình duyệt chưa được cấp quyền micro. Vui lòng bấm Cho Phép Micro để luyện phát âm.';
+      } else if (event.error === 'no-speech') {
+        msg = 'Không nhận diện được giọng nói. Vui lòng nói to và rõ hơn.';
+      }
+      handlers.onError?.(msg);
+    };
+
+    recognition.onend = () => {
+      handlers.onEnd?.();
+    };
+
+    recognition.start();
+
+    return {
+      stop: () => {
+        try {
+          recognition.stop();
+        } catch {
+          // ignore
+        }
+      }
+    };
+  } catch (err: any) {
+    handlers.onError?.(err?.message || 'Không thể khởi động micro.');
+    return null;
+  }
+}
+

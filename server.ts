@@ -99,21 +99,27 @@ async function startServer() {
 
       const batchSize = typeof req.body.batchSize === 'number' && req.body.batchSize > 0 ? req.body.batchSize : 3;
 
-      // PROMPT CŨ ĐƠN GIẢN, CHUẨN XÁC, KHÔNG GÂY RỐI AI
+      // PROMPT CHUẨN XÁC, ĐẦY ĐỦ 7 GIAI ĐOẠN (1 FLASHCARD + 6 DẠNG QUIZ)
       const systemPrompt = `Bạn là một AI Backend Module chuyên dụng, có nhiệm vụ chuyển đổi danh sách từ vựng được người dùng cung cấp thành một cấu trúc dữ liệu bài tập (JSON) theo phong cách Memrise hoàn chỉnh.
+
+QUY TẮC PHÂN TÁCH DÒNG (BẮT BUỘC):
+1. MỖI DÒNG trong danh sách tương ứng với ĐÚNG 1 TỪ VỰNG TIẾNG ANH MỤC TIÊU.
+2. TUYỆT ĐỐI KHÔNG xem dấu phẩy (,), dấu chấm phẩy (;), hay dấu gạch nối (-) là dấu ngăn cách giữa các từ vựng khác nhau.
+3. Nếu một dòng có dạng "friendly: thân thiện, cởi mở" hoặc "friendly, thân thiện, cởi mở", thì từ tiếng Anh là "friendly" và toàn bộ nghĩa tiếng Việt là "thân thiện, cởi mở".
 
 CHỈ ĐỊNH NGHIÊM NGẶT VỀ DỮ LIỆU:
 1. KHÔNG ĐƯỢC TỰ TẠO SAMPLE DATA. Nếu người dùng nhập danh sách trống hoặc không hợp lệ, hãy trả về JSON: {"error": "Danh sách từ vựng trống. Vui lòng cung cấp dữ liệu từ vựng cần xử lý."}.
 2. Chỉ xử lý CHÍNH XÁC những từ vựng có trong danh sách được người dùng cung cấp ở tin nhắn tiếp theo.
 
 NHIỆM VỤ CỦA BẠN:
-Với mỗi từ vựng trong danh sách, hãy tạo ra các bài tập theo trình tự logic sư phạm sau:
+Với mỗi từ vựng trong danh sách, hãy tạo ra các bài tập theo trình tự logic sư phạm sau (1 Flashcard + 6 Quiz cho mỗi từ):
 - Bước 0: "flashcard" (Thẻ học từ vựng trước khi vào quiz). Giúp người học nắm vững từ vựng, phiên âm chuẩn quốc tế IPA, giải nghĩa tiếng Việt rõ ràng, câu ví dụ tự nhiên kèm bản dịch tiếng Việt trước khi bắt đầu làm bài tập trắc nghiệm/luyện tập.
 - Bước 1: "multiple_choice" (Trắc nghiệm xuôi: Từ tiếng Anh ➔ Chọn nghĩa tiếng Việt). Hỏi nghĩa của từ tiếng Anh. Tạo ra 3 đáp án nhiễu (distractors) hợp lý từ các từ vựng khác hoặc kho từ vựng cùng trình độ.
-- Bước 2: "multiple_choice" đảo ngược (Trắc nghiệm đảo: Nghĩa tiếng Việt ➔ Chọn từ tiếng Anh đúng). Câu hỏi dạng: "Từ tiếng Anh nào sau đây có nghĩa là '[meaning]'?" hoặc "'[meaning]' là từ nào sau đây?". 4 options là các từ tiếng Anh (gồm từ đúng và 3 từ tiếng Anh nhiễu hợp lý). Đánh dấu "is_reverse": true.
-- Bước 3: "fill_in_blank" (Điền từ vào câu ví dụ). Tạo 1 câu ví dụ tiếng Anh có nghĩa rõ ràng, ẩn từ đó đi bằng ký tự "___". Cung cấp câu dịch nghĩa tiếng Việt làm gợi ý ("hint").
-- Bước 4: "spelling" (Sắp xếp ký tự). Tạo một mảng "shuffled_letters" chứa các chữ cái của từ đó đã được tráo đổi ngẫu nhiên vị trí.
-- Bước 5: "typing" (Tự gõ từ). Cung cấp định nghĩa/gợi ý tiếng Việt và bắt người dùng gõ lại chính xác từ gốc tiếng Anh.
+- Bước 2: "multiple_choice" đảo ngược (Trắc nghiệm đảo: Nghĩa tiếng Việt ➔ Chọn từ tiếng Anh đúng). Câu hỏi dạng: "Từ tiếng Anh nào sau đây có nghĩa là '[meaning]'?". 4 options là các từ tiếng Anh (gồm từ đúng và 3 từ tiếng Anh nhiễu hợp lý). Đánh dấu "is_reverse": true.
+- Bước 3: "fill_in_blank" (Điền từ vào câu ví dụ ngữ cảnh). Tạo 1 câu ví dụ tiếng Anh có nghĩa rõ ràng, ẩn từ đó đi bằng ký tự "___". Cung cấp câu dịch nghĩa tiếng Việt làm gợi ý ("hint").
+- Bước 4: "vocab_cloze" (Khuyết ký tự ngẫu nhiên trong từ). Câu hỏi: "Điền từ tiếng Anh có nghĩa: \\"[meaning]\\"". Chuỗi "clozeLetters" gồm các ký tự và dấu gạch dưới "_" cách nhau bởi khoảng trắng (ví dụ: "d _ l _ g _ n t"), ẩn ngẫu nhiên 35%-60% chữ cái ở các vị trí linh hoạt (đầu, giữa, cuối).
+- Bước 5: "spelling" (Sắp xếp ký tự đảo). Câu hỏi: "Sắp xếp các chữ cái sau thành từ tiếng Anh có nghĩa: \\"[meaning]\\"". Mảng "shuffled_letters" chứa các chữ cái bị xáo trộn. TUYỆT ĐỐI KHÔNG để lộ từ gốc hay các chữ cái trong câu hỏi của bài tập spelling để tránh lộ đáp án.
+- Bước 6: "typing" (Tự gõ từ). Câu hỏi: "Gõ từ tiếng Anh có nghĩa: \\"[meaning]\\"". Cung cấp định nghĩa/gợi ý tiếng Việt và bắt người dùng gõ lại chính xác từ gốc tiếng Anh.
 
 ĐỊNH DẠNG ĐẦU RA (OUTPUT FORMAT):
 - Trả về CHỈ duy nhất khối JSON có cấu trúc như bên dưới.
@@ -156,23 +162,34 @@ CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
       "id": "string",
       "word": "từ gốc",
       "type": "fill_in_blank",
-      "question": "Điền từ thích hợp vào chỗ trống: [Câu ví dụ chứa ___]",
-      "hint": "[Câu dịch nghĩa tiếng Việt của câu ví dụ]",
+      "question": "The local people are remarkably ___ to all visitors.",
+      "hint": "Người dân địa phương rất thân thiện với tất cả du khách.",
+      "correct_answer": "từ gốc"
+    },
+    {
+      "id": "string",
+      "word": "từ gốc",
+      "type": "vocab_cloze",
+      "question": "Điền từ tiếng Anh có nghĩa: \\"[meaning]\\"",
+      "hint": "[Giải nghĩa tiếng Việt của từ]",
+      "phonetic": "/phiên âm IPA/",
+      "clozeLetters": "f _ _ e n d l y",
       "correct_answer": "từ gốc"
     },
     {
       "id": "string",
       "word": "từ gốc",
       "type": "spelling",
-      "question": "Sắp xếp các ký tự sau thành từ đúng: [các chữ cái cách nhau bởi dấu cách]",
-      "shuffled_letters": ["c", "a", "t"],
+      "question": "Sắp xếp các chữ cái sau thành từ tiếng Anh có nghĩa: \\"[meaning]\\"",
+      "shuffled_letters": ["r", "f", "i", "e", "n", "d", "l", "y"],
       "correct_answer": "từ gốc"
     },
     {
       "id": "string",
       "word": "từ gốc",
       "type": "typing",
-      "question": "Hãy ghi lại từ có nghĩa sau: [Giải nghĩa tiếng Việt của từ]",
+      "question": "Gõ từ tiếng Anh có nghĩa: \\"[meaning]\\"",
+      "hint": "[Giải nghĩa tiếng Việt của từ]",
       "correct_answer": "từ gốc"
     }
   ]
@@ -204,6 +221,24 @@ CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
           console.warn("[Memrise AI Gen] Failed to initialize GoogleGenAI:", e);
         }
       }
+
+      // Helper tạo mẫu khuyết ký tự clozeLetters
+      const makeClozeLetters = (w: string) => {
+        const clean = w.trim();
+        const chars = clean.split('');
+        const letterIdxs: number[] = [];
+        chars.forEach((c, idx) => {
+          if (/[a-zA-Z]/.test(c)) letterIdxs.push(idx);
+        });
+        if (letterIdxs.length <= 2) {
+          const blankIdx = letterIdxs[Math.floor(Math.random() * letterIdxs.length)];
+          return chars.map((c, i) => (i === blankIdx ? '_' : c)).join(' ');
+        }
+        const numBlanks = Math.max(1, Math.min(letterIdxs.length - 1, Math.round(letterIdxs.length * 0.45)));
+        const shuffled = [...letterIdxs].sort(() => Math.random() - 0.5);
+        const blanks = new Set(shuffled.slice(0, numBlanks));
+        return chars.map((c, i) => (blanks.has(i) ? '_' : c)).join(' ');
+      };
 
       // Hàm tạo bài tập cục bộ cho 1 đợt (fallback khi không có mạng hoặc lỗi API)
       const generateLocalBatch = (batchItems: ParsedItem[], batchNum: number) => {
@@ -292,9 +327,30 @@ CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
           });
         });
 
-        // 2.4. Quiz 4 — Spelling
+        // 2.4. Quiz 4 — Vocab Cloze (Khuyết ký tự)
         batchItems.forEach((item, idx) => {
           const cleanWord = item.word;
+          const meaning = item.meaning || `Nghĩa của từ '${cleanWord}'`;
+          const baseId = `batch${batchNum}_${idx}_${cleanWord.replace(/[^a-zA-Z0-9]/g, '')}`;
+          const clozeLetters = makeClozeLetters(cleanWord);
+
+          bExs.push({
+            id: `${baseId}_clz`,
+            word: cleanWord,
+            type: 'vocab_cloze',
+            question: `Điền từ tiếng Anh có nghĩa: "${meaning}"`,
+            hint: meaning,
+            phonetic: `/${cleanWord.toLowerCase()}/`,
+            clozeLetters,
+            clozeTemplate: clozeLetters,
+            correct_answer: cleanWord
+          });
+        });
+
+        // 2.5. Quiz 5 — Spelling
+        batchItems.forEach((item, idx) => {
+          const cleanWord = item.word;
+          const meaning = item.meaning || `Nghĩa của từ '${cleanWord}'`;
           const baseId = `batch${batchNum}_${idx}_${cleanWord.replace(/[^a-zA-Z0-9]/g, '')}`;
 
           const letters = cleanWord.toLowerCase().split('').filter(c => c !== ' ');
@@ -307,13 +363,13 @@ CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
             id: `${baseId}_spel`,
             word: cleanWord,
             type: 'spelling',
-            question: `Sắp xếp các ký tự sau thành từ đúng: ${shuffled.join(' ')}`,
+            question: `Sắp xếp các chữ cái sau thành từ tiếng Anh có nghĩa: "${meaning}"`,
             shuffled_letters: shuffled,
             correct_answer: cleanWord
           });
         });
 
-        // 2.5. Quiz 5 — Typing
+        // 2.6. Quiz 6 — Typing
         batchItems.forEach((item, idx) => {
           const cleanWord = item.word;
           const meaning = item.meaning || `Nghĩa của từ '${cleanWord}'`;
@@ -323,7 +379,8 @@ CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
             id: `${baseId}_typ`,
             word: cleanWord,
             type: 'typing',
-            question: `Hãy ghi lại từ có nghĩa sau: ${meaning}`,
+            question: `Gõ từ tiếng Anh có nghĩa: "${meaning}"`,
+            hint: meaning,
             correct_answer: cleanWord
           });
         });
@@ -336,12 +393,10 @@ CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
         const batchPrompt = batchItems.map(item => item.originalLine).join('\n');
         const userPrompt = `Danh sách từ vựng cần xử lý:\n${batchPrompt}`;
         const requestedModel = model?.trim() || "gemini-3.1-flash-lite";
+        const clientFallbacks = Array.isArray(req.body.fallbackModels) ? req.body.fallbackModels.filter(Boolean) : [];
         const fallbackModels = [
           requestedModel,
-          "gemini-3.1-flash-lite",
-          "gemini-flash-latest",
-          "gemini-2.5-flash",
-          "gemini-3.8-flash"
+          ...clientFallbacks,
         ].filter((m, idx, arr) => m && arr.indexOf(m) === idx);
 
         for (const candModel of fallbackModels) {
@@ -362,7 +417,7 @@ CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
             if (rawText) {
               const parsed = JSON.parse(rawText);
               if (parsed && Array.isArray(parsed.exercises) && parsed.exercises.length > 0) {
-                // TỰ ĐỘNG BẰNG CODE: Sắp xếp theo thứ tự Flashcards -> Quiz xen kẽ
+                // TỰ ĐỘNG BẰNG CODE: Sắp xếp theo thứ tự Flashcards -> 6 Quiz xen kẽ
                 const rawExs = parsed.exercises;
                 const batchWords = batchItems.map(it => it.word.trim().toLowerCase());
                 const orderedBatch: any[] = [];
@@ -391,13 +446,19 @@ CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
                   orderedBatch.push(...fibs);
                 });
 
-                // 5. Quiz 4: Spelling
+                // 5. Quiz 4: Vocab Cloze
+                batchWords.forEach(w => {
+                  const clozes = rawExs.filter((ex: any) => ex.type === 'vocab_cloze' && (ex.word || '').trim().toLowerCase() === w);
+                  orderedBatch.push(...clozes);
+                });
+
+                // 6. Quiz 5: Spelling
                 batchWords.forEach(w => {
                   const sps = rawExs.filter((ex: any) => ex.type === 'spelling' && (ex.word || '').trim().toLowerCase() === w);
                   orderedBatch.push(...sps);
                 });
 
-                // 6. Quiz 5: Typing
+                // 7. Quiz 6: Typing
                 batchWords.forEach(w => {
                   const typs = rawExs.filter((ex: any) => ex.type === 'typing' && (ex.word || '').trim().toLowerCase() === w);
                   orderedBatch.push(...typs);
@@ -806,12 +867,10 @@ ${targetDifficulty && targetDifficulty !== 'auto' ? `- Mức độ ưu tiên đ�
 - Tự kiểm tra tính chuẩn xác (validation) và trả về JSON thuần túy theo đúng cấu trúc yêu cầu.`;
 
         const requestedModel = model?.trim() || "gemini-3.1-flash-lite";
+        const clientFallbacks = Array.isArray(req.body.fallbackModels) ? req.body.fallbackModels.filter(Boolean) : [];
         const fallbackModels = [
           requestedModel,
-          "gemini-3.1-flash-lite",
-          "gemini-flash-latest",
-          "gemini-2.5-flash",
-          "gemini-3.8-flash"
+          ...clientFallbacks,
         ].filter((m, idx, arr) => m && arr.indexOf(m) === idx);
 
         for (const candModel of fallbackModels) {
@@ -987,7 +1046,16 @@ ${targetDifficulty ? `- Độ khó: "${targetDifficulty}"` : ''}
         currentPrompt = `[TRÍCH DẪN ĐANG ĐƯỢC TRẢ LỜI TỪ (${quotedAuthor}): "${quotedMessage.text}"]\n\nPhản hồi / câu hỏi trực tiếp của người dùng:\n${currentPrompt}`;
       }
 
-      const defaultSystemPrompt = systemInstruction || "Bạn là một trợ lý học tập thông minh, sắc sảo, tự nhiên và thân thiện.";
+      let resolvedSystemPrompt = systemInstruction || "Bạn là một trợ lý học tập thông minh, sắc sảo, tự nhiên và thân thiện.";
+      if (!resolvedSystemPrompt.includes("HƯỚNG DẪN TRÌNH BÀY")) {
+        resolvedSystemPrompt += `\n\n[HƯỚNG DẪN TRÌNH BÀY TRẢ LỜI ĐẸP & DỄ NHÌN]:
+- Trò chuyện tự nhiên, linh hoạt và thân thiện theo phong cách của bạn. Trả lời đúng trọng tâm câu hỏi, KHÔNG ép buộc mọi câu trả lời phải chia 1-2-3 hay bắt buộc tạo bài tập.
+- Khi cần liệt kê, so sánh hoặc giải thích từ vựng/ngữ pháp:
+  + Dùng danh sách gạch đầu dòng (bullet points) hoặc số thứ tự rõ ràng, thoáng mắt.
+  + Dùng bảng Markdown GFM (| Cột 1 | Cột 2 |) khi cần so sánh, đối chiếu hoặc lập bảng phân loại để người dùng dễ nhìn nhất.
+  + Đặt công thức, cú pháp hoặc code vào khối mã (\`\`\`...\`\`\`) để hiển thị đẹp mắt và dễ sao chép.
+- Giữ câu trả lời thoáng đãng, dễ đọc.`;
+      }
 
       // 1. Xử lý Google Gemini Provider
       if (provider === "gemini") {
@@ -1049,39 +1117,28 @@ ${targetDifficulty ? `- Độ khó: "${targetDifficulty}"` : ''}
 
         let replyText = "";
         let successfulModel = "";
-        const requestedModel = model?.trim() || "gemini-3.8-flash";
+        const requestedModel = model?.trim() || "gemini-3.1-flash-lite";
         const clientFallbacks = Array.isArray(req.body.fallbackModels) ? req.body.fallbackModels.filter(Boolean) : [];
 
-        // Thứ tự ưu tiên đa tầng phong phú:
-        // 1. Model chính người dùng yêu cầu (VD: gemini-3.8-flash)
-        // 2. Danh sách mô hình đề xuất fallback từ client
-        // 3. gemini-3.1-flash-lite (Mô hình siêu nhẹ, độ trễ cực thấp, chống nghẽn 503)
-        // 4. gemini-flash-latest (Bản Flash chuẩn ổn định toàn cầu)
-        // 5. gemini-3.1-pro-preview (Bản tư duy chuyên sâu)
-        // 6. gemini-3.8-flash
+        // Chỉ duyệt đúng model người dùng đã chọn và các model dự phòng do người dùng cấu hình/tạo ra trong danh sách
         const fallbackCandidates = [
           requestedModel,
           ...clientFallbacks,
-          "gemini-3.1-flash-lite",
-          "gemini-flash-latest",
-          "gemini-3.1-pro-preview",
-          "gemini-3.8-flash",
         ].filter((m, idx, arr) => m && arr.indexOf(m) === idx);
 
         let lastErrorMsg = "";
 
         for (const candidateModel of fallbackCandidates) {
           try {
-            // Giới hạn timeout 6.5 giây cho mỗi ứng viên để tránh tình trạng Google bị đơ gây lag chờ đợi
             const timeoutPromise = new Promise<never>((_, reject) => {
-              setTimeout(() => reject(new Error(`Timeout on ${candidateModel}`)), 6500);
+              setTimeout(() => reject(new Error(`Timeout on ${candidateModel}`)), 12000);
             });
 
             const callPromise = ai.models.generateContent({
               model: candidateModel,
               contents,
               config: {
-                systemInstruction: defaultSystemPrompt,
+                systemInstruction: resolvedSystemPrompt,
                 temperature: 0.7,
                 maxOutputTokens: 1500,
               },
@@ -1181,7 +1238,7 @@ ${targetDifficulty ? `- Độ khó: "${targetDifficulty}"` : ''}
           },
           body: JSON.stringify({
             model: claudeModel,
-            system: defaultSystemPrompt,
+            system: resolvedSystemPrompt,
             messages: claudeMessages,
             max_tokens: 1500,
             temperature: 0.7,
@@ -1239,7 +1296,7 @@ ${targetDifficulty ? `- Độ khó: "${targetDifficulty}"` : ''}
       }
 
       const openAiMessages: Array<{ role: "system" | "user" | "assistant"; content: any }> = [
-        { role: "system", content: defaultSystemPrompt }
+        { role: "system", content: resolvedSystemPrompt }
       ];
 
       if (Array.isArray(history) && history.length > 0) {
@@ -1522,7 +1579,7 @@ ${targetDifficulty ? `- Độ khó: "${targetDifficulty}"` : ''}
         });
       }
 
-      const systemInstruction = `Bạn là một AI Backend Module chuyên dụng, có nhiệm vụ chuyển đổi danh sách từ vựng được người dùng cung cấp thành một cấu trúc dữ liệu bài tập (JSON) theo phong cách Memrise.
+      const systemInstruction = `Bạn là một AI Backend Module chuyên dụng, có nhiệm vụ chuyển đổi danh sách từ vựng được người dùng cung cấp thành một cấu trúc dữ liệu bài tập (JSON) theo phong cách Memrise hoàn chỉnh.
 
 QUY TẮC PHÂN TÁCH DÒNG (BẮT BUỘC):
 1. MỖI DÒNG trong danh sách tương ứng với ĐÚNG 1 TỪ VỰNG TIẾNG ANH MỤC TIÊU.
@@ -1534,11 +1591,14 @@ CHỈ ĐỊNH NGHIÊM NGẶT VỀ DỮ LIỆU:
 2. Chỉ xử lý CHÍNH XÁC những từ vựng có trong danh sách được người dùng cung cấp ở tin nhắn tiếp theo.
 
 NHIỆM VỤ CỦA BẠN:
-Với mỗi dòng từ vựng trong danh sách, hãy tạo ra 4 dạng bài tập sau:
-- Dạng 1: "multiple_choice" (Trắc nghiệm 4 đáp án chọn nghĩa đúng). Hãy tạo ra 3 đáp án nhiễu (distractors) hợp lý từ các từ khác trong danh sách hoặc từ kho từ vựng chung cùng trình độ.
-- Dạng 2: "fill_in_blank" (Điền từ vào câu ví dụ). Tạo 1 câu ví dụ tiếng Anh có nghĩa rõ ràng, ẩn từ đó đi bằng ký tự "___". Cung cấp câu dịch nghĩa để làm gợi ý.
-- Dạng 3: "spelling" (Sắp xếp ký tự). Tạo một mảng chứa các chữ cái của từ đó đã được tráo đổi ngẫu nhiên vị trí (shuffled).
-- Dạng 4: "typing" (Tự gõ từ). Chỉ cung cấp định nghĩa/gợi ý và bắt người dùng nhập chính xác từ gốc.
+Với mỗi dòng từ vựng trong danh sách, hãy tạo ra các dạng bài tập theo trình tự logic sư phạm (1 Flashcard + 6 Quiz cho mỗi từ):
+- Dạng 0: "flashcard" (Thẻ học từ vựng Active Recall trước khi vào quiz, gồm từ gốc, phiên âm phonetic, nghĩa tiếng Việt meaning, và ví dụ example có bản dịch example_translation).
+- Dạng 1: "multiple_choice" (Trắc nghiệm xuôi: Từ -> Nghĩa đúng, 4 options gồm 1 đúng và 3 distractors hợp lý).
+- Dạng 2: "multiple_choice" đảo (Trắc nghiệm đảo: Nghĩa -> Chọn từ tiếng Anh đúng, "is_reverse": true, 4 options tiếng Anh).
+- Dạng 3: "fill_in_blank" (Điền từ vào câu ví dụ ngữ cảnh có chứa ___). Câu hỏi là 1 câu tiếng Anh tự nhiên chứa "___", hint là bản dịch tiếng Việt của cả câu.
+- Dạng 4: "vocab_cloze" (Khuyết ký tự ngẫu nhiên trong từ). Câu hỏi: "Điền từ tiếng Anh có nghĩa: \\"[meaning]\\"". Chuỗi "clozeLetters" gồm các ký tự và dấu gạch dưới "_" cách nhau bởi khoảng trắng, ẩn 35%-60% chữ cái ở các vị trí ngẫu nhiên linh hoạt (đầu, giữa, cuối).
+- Dạng 5: "spelling" (Sắp xếp ký tự đảo). Câu hỏi: "Sắp xếp các chữ cái sau thành từ tiếng Anh có nghĩa: \\"[meaning]\\"". Mảng "shuffled_letters" chứa các chữ cái bị xáo trộn. TUYỆT ĐỐI KHÔNG để lộ từ gốc hay các chữ cái trong câu hỏi của bài tập spelling để tránh lộ đáp án.
+- Dạng 6: "typing" (Tự gõ từ). Câu hỏi: "Gõ từ tiếng Anh có nghĩa: \\"[meaning]\\"". Cung cấp định nghĩa và bắt người dùng gõ chính xác từ tiếng Anh gốc.
 
 ĐỊNH DẠNG ĐẦU RA (OUTPUT FORMAT):
 - Trả về CHỈ duy nhất khối JSON có cấu trúc như bên dưới.
@@ -1552,6 +1612,17 @@ CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
     {
       "id": "string",
       "word": "từ gốc",
+      "type": "flashcard",
+      "question": "Ghi nhớ từ vựng: [word]",
+      "meaning": "giải nghĩa tiếng Việt",
+      "phonetic": "/phiên âm IPA/",
+      "example": "Câu ví dụ tiếng Anh ngắn gọn chứa [word]",
+      "example_translation": "Bản dịch tiếng Việt của câu ví dụ",
+      "correct_answer": "từ gốc"
+    },
+    {
+      "id": "string",
+      "word": "từ gốc",
       "type": "multiple_choice",
       "question": "Nghĩa của từ '[word]' là gì?",
       "options": ["đáp án đúng", "đáp án nhiễu 1", "đáp án nhiễu 2", "đáp án nhiễu 3"],
@@ -1560,24 +1631,44 @@ CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
     {
       "id": "string",
       "word": "từ gốc",
+      "type": "multiple_choice",
+      "is_reverse": true,
+      "question": "Từ tiếng Anh nào sau đây có nghĩa là '[meaning]'?",
+      "options": ["[word]", "từ tiếng Anh nhiễu 1", "từ tiếng Anh nhiễu 2", "từ tiếng Anh nhiễu 3"],
+      "correct_answer": "[word]"
+    },
+    {
+      "id": "string",
+      "word": "từ gốc",
       "type": "fill_in_blank",
-      "question": "Điền từ thích hợp vào chỗ trống: [Câu ví dụ chứa ___]",
-      "hint": "[Câu dịch nghĩa tiếng Việt của câu ví dụ]",
+      "question": "The local people are remarkably ___ to all visitors.",
+      "hint": "Người dân địa phương rất thân thiện với tất cả du khách.",
+      "correct_answer": "từ gốc"
+    },
+    {
+      "id": "string",
+      "word": "từ gốc",
+      "type": "vocab_cloze",
+      "question": "Điền từ tiếng Anh có nghĩa: \\"[meaning]\\"",
+      "hint": "[Giải nghĩa tiếng Việt của từ]",
+      "phonetic": "/phiên âm IPA/",
+      "clozeLetters": "f _ _ e n d l y",
       "correct_answer": "từ gốc"
     },
     {
       "id": "string",
       "word": "từ gốc",
       "type": "spelling",
-      "question": "Sắp xếp các ký tự sau thành từ đúng: [các chữ cái cách nhau bởi dấu cách]",
-      "shuffled_letters": ["c", "a", "t"],
+      "question": "Sắp xếp các chữ cái sau thành từ tiếng Anh có nghĩa: \\"[meaning]\\"",
+      "shuffled_letters": ["r", "f", "i", "e", "n", "d", "l", "y"],
       "correct_answer": "từ gốc"
     },
     {
       "id": "string",
       "word": "từ gốc",
       "type": "typing",
-      "question": "Hãy ghi lại từ có nghĩa sau: [Giải nghĩa tiếng Việt của từ]",
+      "question": "Gõ từ tiếng Anh có nghĩa: \\"[meaning]\\"",
+      "hint": "[Giải nghĩa tiếng Việt của từ]",
       "correct_answer": "từ gốc"
     }
   ]
@@ -1619,14 +1710,53 @@ CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
       });
 
       const replyText = response.text?.trim() || "{}";
+      let parsed: any = {};
       try {
-        const parsed = JSON.parse(replyText);
-        return res.json(parsed);
+        parsed = JSON.parse(replyText);
       } catch (e) {
         const cleaned = replyText.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim();
-        const parsed = JSON.parse(cleaned);
-        return res.json(parsed);
+        parsed = JSON.parse(cleaned);
       }
+
+      // Chuẩn hóa và sửa clozeLetters nếu số token không khớp số ký tự từ vựng
+      if (parsed && Array.isArray(parsed.exercises)) {
+        parsed.exercises = parsed.exercises.map((item: any) => {
+          const rawWord = (item.word || item.correct_answer || "").trim();
+          if (item.type === "vocab_cloze" && rawWord) {
+            const chars = rawWord.split("");
+            const currentCloze = (item.clozeLetters || item.clozeTemplate || "").trim();
+            const tokens = currentCloze ? currentCloze.split(/\s+/) : [];
+
+            if (tokens.length !== chars.length) {
+              const letterIndices: number[] = [];
+              for (let i = 0; i < chars.length; i++) {
+                if (/[a-zA-Z]/.test(chars[i])) {
+                  letterIndices.push(i);
+                }
+              }
+
+              const maskIndices = new Set<number>();
+              const numLetters = letterIndices.length;
+              if (numLetters <= 3) {
+                const countToMask = numLetters === 2 ? 1 : (Math.random() < 0.6 ? 1 : 2);
+                const shuffled = [...letterIndices].sort(() => Math.random() - 0.5);
+                shuffled.slice(0, countToMask).forEach(idx => maskIndices.add(idx));
+              } else {
+                const targetCount = Math.max(1, Math.min(Math.round(numLetters * (0.4 + Math.random() * 0.25)), numLetters - 1));
+                const shuffled = [...letterIndices].sort(() => Math.random() - 0.5);
+                shuffled.slice(0, targetCount).forEach(idx => maskIndices.add(idx));
+              }
+
+              const repaired = chars.map((ch, idx) => maskIndices.has(idx) ? "_" : ch).join(" ");
+              item.clozeLetters = repaired;
+              item.clozeTemplate = repaired;
+            }
+          }
+          return item;
+        });
+      }
+
+      return res.json(parsed);
     } catch (err: any) {
       console.error("Memrise generation error:", err);
       return res.status(500).json({ error: err.message || "Lỗi xử lý tạo bài tập Memrise." });
@@ -1905,6 +2035,49 @@ CẤU TRÚC JSON ĐẦU RA:
     }
   ]
 }`;
+      } else if (targetType === "pronunciation") {
+        systemInstruction = `Bạn là Chuyên gia Sư phạm Ngôn ngữ và Ngữ âm Tiếng Anh hàng đầu.
+NHIỆM VỤ: Tạo bài tập "Luyện phát âm (Pronunciation Drill)" từ danh sách từ vựng hoặc câu do người dùng cung cấp.
+
+QUY TẮC PHÂN TÁCH DÒNG (BẮT BUỘC):
+- MỖI DÒNG tương ứng với ĐÚNG 1 TỪ VỰNG HOẶC 1 CÂU MỤC TIÊU CẦN PHÁT ÂM.
+- Nếu dòng là từ đơn (1 từ): Đặt "isSingleWord": true. Học sinh lắng nghe phát âm và phát âm lại, app nghe đúng từ là hoàn thành (100%).
+- Nếu dòng là một câu nhiều chữ: Đặt "isSingleWord": false. Học sinh đọc lại cả câu và phải đáp ứng tỷ lệ % khớp (mặc định 70%).
+
+QUY ĐỊNH CẤU TRÚC CHI TIẾT CHO MỖI DÒNG:
+1. "word" (và "targetText", "correctText", "vocabWord"): Từ hoặc câu tiếng Anh cần phát âm.
+2. "phonetic": Phiên âm IPA chuẩn xác (bắt buộc đối với từ đơn lẻ như /ɪnˈvaɪ.rən.mənt/, đối với câu có thể ghi chú âm trọng điểm hoặc để trống).
+3. "vocabMeaning" (và "hint"): Nghĩa tiếng Việt chuẩn, súc tích.
+4. "isSingleWord": true nếu là từ đơn, false nếu là câu nhiều chữ.
+5. "pronunciationAccuracy": 70 (tỷ lệ % tối thiểu để đạt với câu).
+6. "question": Đề bài sư phạm:
+   - Nếu từ đơn: "Lắng nghe và phát âm từ: [word]"
+   - Nếu câu: "Lắng nghe và phát âm câu: [sentence]"
+7. "explanation": Hướng dẫn phát âm thực tế (trọng âm, âm cuối, nuốt âm/nối âm, khẩu hình).
+8. "type": "pronunciation".
+
+CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
+{
+  "status": "success",
+  "exerciseType": "pronunciation",
+  "items": [
+    {
+      "id": "pron_1",
+      "word": "environment",
+      "vocabWord": "environment",
+      "vocabMeaning": "môi trường sinh thái",
+      "type": "pronunciation",
+      "phonetic": "/ɪnˈvaɪ.rən.mənt/",
+      "isSingleWord": true,
+      "pronunciationAccuracy": 70,
+      "question": "Lắng nghe và phát âm từ: environment",
+      "correctAnswer": "environment",
+      "correct_answer": "environment",
+      "correctText": "environment",
+      "explanation": "Trọng âm rơi vào âm tiết thứ 2 (vi-ron). Chú ý bật nhẹ âm đuôi /nt/."
+    }
+  ]
+}`;
       } else {
         // Matching & default
         systemInstruction = `Bạn là Chuyên gia Sư phạm Ngôn ngữ Tiếng Anh.
@@ -1955,17 +2128,163 @@ CẤU TRÚC JSON ĐẦU RA:
       });
 
       const replyText = response.text?.trim() || "{}";
+      let parsed: any = {};
       try {
-        const parsed = JSON.parse(replyText);
-        return res.json(parsed);
+        parsed = JSON.parse(replyText);
       } catch (e) {
         const cleaned = replyText.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim();
-        const parsed = JSON.parse(cleaned);
-        return res.json(parsed);
+        parsed = JSON.parse(cleaned);
       }
+
+      // Chuẩn hóa và khắc phục triệt để lỗi thiếu dấu gạch dưới "_" do LLM đếm sai số lượng ký tự
+      if (parsed && Array.isArray(parsed.items)) {
+        parsed.items = parsed.items.map((item: any) => {
+          const rawWord = (item.vocabWord || item.word || item.correctAnswer || "").trim();
+          const isClozeType = item.type === "vocab_cloze" || targetType === "vocab_cloze";
+          
+          if (isClozeType && rawWord) {
+            const chars = rawWord.split("");
+            const currentCloze = (item.clozeLetters || item.clozeTemplate || "").trim();
+            const tokens = currentCloze ? currentCloze.split(/\s+/) : [];
+
+            // Nếu số lượng token khuyết không khớp chính xác 100% với độ dài từ vựng (ví dụ conservation có 12 chữ mà AI chỉ tạo 11)
+            if (tokens.length !== chars.length) {
+              const letterIndices: number[] = [];
+              for (let i = 0; i < chars.length; i++) {
+                if (/[a-zA-Z]/.test(chars[i])) {
+                  letterIndices.push(i);
+                }
+              }
+
+              const maskIndices = new Set<number>();
+              const numLetters = letterIndices.length;
+              if (numLetters <= 3) {
+                const countToMask = numLetters === 2 ? 1 : (Math.random() < 0.6 ? 1 : 2);
+                const shuffled = [...letterIndices].sort(() => Math.random() - 0.5);
+                shuffled.slice(0, countToMask).forEach(idx => maskIndices.add(idx));
+              } else {
+                const targetCount = Math.max(1, Math.min(Math.round(numLetters * (0.4 + Math.random() * 0.25)), numLetters - 1));
+                const shuffled = [...letterIndices].sort(() => Math.random() - 0.5);
+                shuffled.slice(0, targetCount).forEach(idx => maskIndices.add(idx));
+              }
+
+              const repaired = chars.map((ch, idx) => maskIndices.has(idx) ? "_" : ch).join(" ");
+              item.clozeLetters = repaired;
+              item.clozeTemplate = repaired;
+            }
+          }
+          return item;
+        });
+      }
+
+      return res.json(parsed);
     } catch (err: any) {
       console.error("Single vocab generation error:", err);
       return res.status(500).json({ error: err.message || "Lỗi xử lý tạo bài tập từ vựng." });
+    }
+  });
+
+  // AI Phân Tích & Bổ Sung Từ Vựng / Dòng Phát Âm (Pronunciation AI Helper)
+  app.post("/api/pronunciation-ai-analyze", async (req, res) => {
+    try {
+      const { text, mode = "single_word", customApiKey, model } = req.body;
+
+      if (!text || typeof text !== "string" || !text.trim()) {
+        return res.status(400).json({ status: "error", error: "Văn bản phân tích trống." });
+      }
+
+      const apiKey = (customApiKey && typeof customApiKey === "string" && customApiKey.trim().length > 0)
+        ? customApiKey.trim()
+        : (process.env.GEMINI_API_KEY || "");
+
+      if (!apiKey) {
+        return res.status(400).json({
+          status: "error",
+          error: "Chưa cấu hình API Key. Vui lòng kiểm tra lại thiết lập AI của bạn."
+        });
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: { "User-Agent": "aistudio-build" }
+        }
+      });
+
+      const effectiveModel = (model && typeof model === "string" && model.trim().length > 0)
+        ? model.trim()
+        : "gemini-3.1-flash-lite";
+
+      if (mode === "single_word") {
+        const prompt = `Bạn là Chuyên gia Ngữ âm Tiếng Anh.
+Nhiệm vụ: Phân tích phát âm chi tiết cho từ vựng đơn lẻ: "${text.trim()}".
+Trả về DUY NHẤT một JSON hợp lệ với cấu trúc sau:
+{
+  "word": "${text.trim()}",
+  "phonetic": "/phiên âm IPA chuẩn quốc tế/",
+  "meaning": "Nghĩa tiếng Việt ngắn gọn, xúc tích",
+  "pronunciationTips": "Mẹo phát âm (vị trí trọng âm, khẩu hình môi/lưỡi, âm đuôi hoặc lỗi người Việt hay mắc)",
+  "exampleSentence": "Một câu ví dụ tiếng Anh tự nhiên chứa từ này"
+}`;
+
+        const response = await ai.models.generateContent({
+          model: effectiveModel,
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json",
+            temperature: 0.2,
+          }
+        });
+
+        const replyText = response.text || "{}";
+        const cleaned = replyText.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim();
+        const parsed = JSON.parse(cleaned);
+        return res.json({ status: "success", data: parsed });
+      } else {
+        // mode === 'lines_enrich': Bổ sung IPA & nghĩa cho từng dòng
+        const prompt = `Bạn là Chuyên gia Ngữ âm và Sư phạm Tiếng Anh.
+Nhiệm vụ: Phân tích danh sách các dòng văn bản phát âm sau (mỗi dòng là 1 từ hoặc 1 câu):
+"""
+${text.trim()}
+"""
+QUY TẮC:
+- MỖI DÒNG tương ứng với ĐÚNG 1 phần tử trong mảng "items".
+- Nếu dòng là từ đơn (1 từ): isSingleWord = true, cung cấp "phonetic" (IPA chuẩn).
+- Nếu dòng là câu nhiều chữ: isSingleWord = false, phonetic có thể để trống hoặc ghi âm trọng điểm.
+- Dịch "meaning" sang tiếng Việt tự nhiên.
+- "pronunciationTips": Mẹo ngắn gọn khi đọc từ/câu này.
+
+Trả về DUY NHẤT JSON hợp lệ:
+{
+  "status": "success",
+  "items": [
+    {
+      "targetText": "văn bản gốc",
+      "phonetic": "/.../",
+      "meaning": "nghĩa tiếng Việt",
+      "isSingleWord": true,
+      "pronunciationTips": "hướng dẫn phát âm"
+    }
+  ]
+}`;
+
+        const response = await ai.models.generateContent({
+          model: effectiveModel,
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json",
+            temperature: 0.2,
+          }
+        });
+
+        const replyText = response.text || "{}";
+        const cleaned = replyText.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim();
+        const parsed = JSON.parse(cleaned);
+        return res.json({ status: "success", items: parsed.items || [] });
+      }
+    } catch (err: any) {
+      console.error("Pronunciation AI analyze error:", err);
+      return res.status(500).json({ error: err.message || "Lỗi xử lý AI phân tích phát âm." });
     }
   });
 
@@ -2094,6 +2413,203 @@ HƯỚNG DẪN CÁC DẠNG BÀI:
     } catch (err: any) {
       console.error("Grammar generation error:", err);
       return res.status(500).json({ error: err.message || "Lỗi xử lý tạo bài tập ngữ pháp." });
+    }
+  });
+
+  // AI Trợ lý Soạn bài giảng Thông minh phong cách Gemini in Docs (Help Me Write / Structure Content)
+  app.post("/api/lesson-ai-assistant", async (req, res) => {
+    try {
+      const {
+        prompt,
+        mode = "full_lecture", // 'full_lecture' | 'single_block' | 'refine'
+        lessonTitle,
+        topicContext,
+        currentContent,
+        customApiKey,
+        model
+      } = req.body;
+
+      if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
+        return res.json({
+          status: "error",
+          error: "Vui lòng nhập yêu cầu nội dung bạn muốn Gemini soạn thảo."
+        });
+      }
+
+      const apiKey = (customApiKey && typeof customApiKey === "string" && customApiKey.trim().length > 0)
+        ? customApiKey.trim()
+        : (process.env.GEMINI_API_KEY || "");
+
+      if (!apiKey) {
+        return res.status(400).json({
+          status: "error",
+          error: "Chưa cấu hình API Key Google Gemini. Vui lòng cấu hình API Key trong hệ thống."
+        });
+      }
+
+      const systemInstruction = `Bạn là Trợ lý AI Soạn bài giảng & Thiết kế học liệu tiếng Anh sư phạm đỉnh cao (tương tự như Gemini in Google Docs "Help me write").
+BẠN CÓ NHIỆM VỤ:
+Tiếp nhận yêu cầu từ giáo viên và tạo ra nội dung bài học có cấu trúc sư phạm trực quan, sinh động, chuẩn mực.
+
+BẮT BUỘC SỬ DỤNG CHÍNH XÁC CÁC MẪU KHUNG & BẢNG CỦA HỆ THỐNG (CHUẨN HTML & CSS CLASSES):
+
+1. KHUNG CÔNG THỨC CHÍNH (Formula Box - Viền xanh ngọc):
+<div class="formula-box" data-block-type="box" style="width: 100%; margin: 12px 0;">
+  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+    <span style="background-color: #10b981; color: white; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: bold; text-transform: uppercase;">📐 CÔNG THỨC CHÍNH</span>
+  </div>
+  <p style="font-size: 18px; font-weight: 700; color: #10b981; margin: 4px 0 8px 0; text-align: center;">
+    [CÔNG THỨC RÕ RÀNG]
+  </p>
+  <p style="font-size: 13px; opacity: 0.85; text-align: center; margin: 0;">
+    [Giải thích các thành phần ký hiệu: S, V, O, modal, ed...]
+  </p>
+</div>
+
+2. BẢNG PHÂN LOẠI & DẠNG CÂU (Table - Có header xanh ngọc, dòng kẻ rõ ràng):
+<h3 style="font-size: 16px; font-weight: bold; margin-top: 16px; margin-bottom: 8px;">[Tiêu đề bảng]</h3>
+<table data-block-type="table" style="width: 100%; border-collapse: collapse; margin-bottom: 16px;">
+  <thead>
+    <tr style="background-color: rgba(16, 185, 129, 0.15);">
+      <th style="padding: 8px 12px; border: 1px solid rgba(150, 150, 150, 0.3); text-align: left;">Thể câu</th>
+      <th style="padding: 8px 12px; border: 1px solid rgba(150, 150, 150, 0.3); text-align: left;">Cấu trúc</th>
+      <th style="padding: 8px 12px; border: 1px solid rgba(150, 150, 150, 0.3); text-align: left;">Ví dụ minh họa</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="padding: 8px 12px; border: 1px solid rgba(150, 150, 150, 0.3); font-weight: bold; color: #10b981;">Khẳng định (+)</td>
+      <td style="padding: 8px 12px; border: 1px solid rgba(150, 150, 150, 0.3);">[Cấu trúc khẳng định]</td>
+      <td style="padding: 8px 12px; border: 1px solid rgba(150, 150, 150, 0.3);">[Ví dụ tiếng Anh in đậm từ khóa]</td>
+    </tr>
+    <tr>
+      <td style="padding: 8px 12px; border: 1px solid rgba(150, 150, 150, 0.3); font-weight: bold; color: #f43f5e;">Phủ định (-)</td>
+      <td style="padding: 8px 12px; border: 1px solid rgba(150, 150, 150, 0.3);">[Cấu trúc phủ định]</td>
+      <td style="padding: 8px 12px; border: 1px solid rgba(150, 150, 150, 0.3);">[Ví dụ tiếng Anh in đậm từ khóa]</td>
+    </tr>
+    <tr>
+      <td style="padding: 8px 12px; border: 1px solid rgba(150, 150, 150, 0.3); font-weight: bold; color: #0284c7;">Nghi vấn (?)</td>
+      <td style="padding: 8px 12px; border: 1px solid rgba(150, 150, 150, 0.3);">[Cấu trúc nghi vấn]</td>
+      <td style="padding: 8px 12px; border: 1px solid rgba(150, 150, 150, 0.3);">[Ví dụ tiếng Anh in đậm từ khóa]</td>
+    </tr>
+  </tbody>
+</table>
+
+3. KHUNG MẸO NHỚ & DẤU HIỆU NHẬN BIẾT (Tip Box - Viền tím):
+<div class="tip-box" data-block-type="box" style="width: 100%; margin: 12px 0;">
+  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+    <span style="background-color: #8b5cf6; color: white; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: bold; text-transform: uppercase;">💡 DẤU HIỆU NHẬN BIẾT & MẸO NHỚ</span>
+  </div>
+  <p style="font-size: 14px; margin: 0 0 8px 0;">[Mở đầu ngắn gọn]:</p>
+  <ul style="padding-left: 20px; margin: 0; font-size: 14px; line-height: 1.6;">
+    <li><b>[Từ khóa 1]</b>: [Giải thích]</li>
+    <li><b>[Từ khóa 2]</b>: [Giải thích]</li>
+  </ul>
+</div>
+
+4. KHUNG LƯU Ý & NGOẠI LỆ (Caution Box - Viền vàng cam):
+<div class="caution-box" data-block-type="box" style="width: 100%; margin: 12px 0;">
+  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+    <span style="background-color: #f59e0b; color: white; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: bold; text-transform: uppercase;">⚠️ LƯU Ý & NGOẠI LỆ</span>
+  </div>
+  <p style="font-size: 14px; margin: 0;">
+    [Ghi chú bẫy ngữ pháp, lỗi học sinh hay sai hoặc trường hợp bất quy tắc]
+  </p>
+</div>
+
+5. KHUNG VÍ DỤ MINH HỌA (Example Box - Viền xanh biển):
+<div class="example-box" data-block-type="box" style="width: 100%; margin: 12px 0;">
+  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+    <span style="background-color: #0284c7; color: white; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: bold; text-transform: uppercase;">💬 VÍ DỤ MINH HỌA</span>
+  </div>
+  <p style="font-size: 15px; font-weight: 600; margin: 6px 0 2px 0; color: #0284c7;">
+    [Câu tiếng Anh tự nhiên, chuẩn bản ngữ]
+  </p>
+  <p style="font-size: 13px; margin: 0; opacity: 0.85; font-style: italic;">
+    ➔ [Bản dịch tiếng Việt chính xác & phân tích nhanh]
+  </p>
+</div>
+
+6. DANH SÁCH CHECKLIST TÍCH XANH (Checkmark List):
+<ul style="list-style-type: none; padding-left: 4px; margin: 10px 0; font-size: 14px; line-height: 1.7;">
+  <li style="display: flex; align-items: flex-start; gap: 8px; margin-bottom: 6px;">
+    <span style="color: #10b981; font-weight: bold;">✓</span>
+    <span>[Quy tắc / Điểm cần nhớ 1]</span>
+  </li>
+  <li style="display: flex; align-items: flex-start; gap: 8px; margin-bottom: 6px;">
+    <span style="color: #10b981; font-weight: bold;">✓</span>
+    <span>[Quy tắc / Điểm cần nhớ 2]</span>
+  </li>
+</ul>
+
+HƯỚNG DẪN THEO CHẾ ĐỘ (MODE):
+- Nếu mode = "full_lecture":
+  Tạo từ 2 đến 4 slide (trang) hoàn chỉnh phân chia khoa học:
+  + Slide 1: Khái niệm, Công thức cốt lõi (Formula box) & Bảng 3 thể (+, -, ?).
+  + Slide 2: Dấu hiệu nhận biết (Tip box) & Các mẹo phân biệt.
+  + Slide 3: Các trường hợp ngoại lệ (Caution box) & Bộ ví dụ ngữ cảnh (Example boxes).
+  Trả về mảng "slides": [{"id": "slide_1", "title": "...", "contentHtml": "..."}].
+- Nếu mode = "single_block" hoặc "refine":
+  Tạo khối HTML hoàn chỉnh lồng ghép thông minh các khung theo đúng yêu cầu người dùng, trả về trong trường "contentHtml".
+
+ĐỊNH DẠNG JSON ĐẦU RA BẮT BUỘC:
+{
+  "status": "success",
+  "mode": "${mode}",
+  "summary": "Tóm tắt ngắn gọn những gì AI đã tạo (1 câu tiếng Việt)",
+  "contentHtml": "Chuỗi HTML (khi mode là single_block hoặc refine)",
+  "slides": [
+    {
+      "id": "slide_1",
+      "title": "Trang 1: Tiêu đề trang...",
+      "contentHtml": "HTML hoàn chỉnh của slide 1"
+    }
+  ]
+}`;
+
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            "User-Agent": "aistudio-build",
+          }
+        }
+      });
+
+      const userContextMessage = `
+YÊU CẦU NGƯỜI DÙNG: "${prompt.trim()}"
+Chế độ mong muốn: ${mode}
+${lessonTitle ? `Bài học hiện tại: "${lessonTitle}"` : ""}
+${topicContext ? `Bối cảnh/Tóm tắt kiến thức bài học: "${topicContext}"` : ""}
+${currentContent ? `Nội dung đang có trên trang (để tinh chỉnh/viết tiếp):
+"""
+${currentContent}
+"""` : ""}
+      `.trim();
+
+      const targetModel = model?.trim() || "gemini-3.1-flash-lite";
+      const response = await ai.models.generateContent({
+        model: targetModel,
+        contents: [{ role: "user", parts: [{ text: userContextMessage }] }],
+        config: {
+          systemInstruction,
+          responseMimeType: "application/json",
+          temperature: 0.3,
+        }
+      });
+
+      const replyText = response.text?.trim() || "{}";
+      try {
+        const parsed = JSON.parse(replyText);
+        return res.json(parsed);
+      } catch (e) {
+        const cleaned = replyText.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim();
+        const parsed = JSON.parse(cleaned);
+        return res.json(parsed);
+      }
+    } catch (err: any) {
+      console.error("Lesson AI Assistant error:", err);
+      return res.status(500).json({ error: err.message || "Lỗi xử lý Trợ lý AI Soạn bài." });
     }
   });
 

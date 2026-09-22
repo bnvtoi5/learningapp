@@ -160,7 +160,7 @@ export const LessonLectureModal: React.FC<LessonLectureModalProps> = ({
               <div className="flex items-center gap-1.5 overflow-x-auto py-0.5">
                 {slides.map((slide, idx) => (
                   <button
-                    key={slide.id || idx}
+                    key={`lecture_jump_tab_${slide.id || 'slide'}_${idx}`}
                     type="button"
                     onClick={() => setCurrentSlideIndex(idx)}
                     className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all shrink-0 ${

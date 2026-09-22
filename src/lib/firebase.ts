@@ -182,6 +182,26 @@ export async function deleteDocFromCloud(collectionName: string, id: string) {
   }
 }
 
+// Sync a batch of documents of a single collection to Cloud
+export async function syncBatchDocsToCloud(collectionName: string, items: { id: string; [key: string]: any }[]) {
+  if (!items || items.length === 0) return;
+  try {
+    const CHUNK_SIZE = 400;
+    for (let i = 0; i < items.length; i += CHUNK_SIZE) {
+      const chunk = items.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      chunk.forEach(item => {
+        const docRef = doc(db, collectionName, item.id);
+        const cleanData = JSON.parse(JSON.stringify(item));
+        batch.set(docRef, cleanData, { merge: true });
+      });
+      await batch.commit();
+    }
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `batch_${collectionName}`);
+  }
+}
+
 // Push all local data up to Cloud in batches
 export async function syncAllToCloud(data: {
   classrooms?: Classroom[];

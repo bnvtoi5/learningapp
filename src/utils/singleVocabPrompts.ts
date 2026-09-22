@@ -28,6 +28,8 @@ export function getSingleVocabPromptForType(
       return getTypingPrompt(difficulty);
     case 'matching':
       return getMatchingPrompt(difficulty);
+    case 'pronunciation':
+      return getPronunciationPrompt(difficulty);
     default:
       return getVocabClozePrompt(difficulty);
   }
@@ -53,11 +55,15 @@ Với MỖI từ vựng trên 1 dòng, bạn PHẢI tạo ra 1 bài tập có Đ
 2. "vocabMeaning" (và "hint"): Toàn bộ nghĩa tiếng Việt ngắn gọn, xúc tích của từ (ví dụ: "thân thiện, cởi mở").
 3. "phonetic": Phiên âm quốc tế IPA chuẩn xác của từ (ví dụ: "/'frend.li/", "/ɪn'vaɪrənmənt/").
 4. "clozeLetters": MẪU KHUYẾT CHỮ CÁI CHUẨN XÁC, trong đó các ký tự hiển thị và các dấu gạch dưới "_" BẮT BUỘC CÁCH NHAU BẰNG MỘT KHOẢNG TRẮNG.
-   - Luôn giữ lại chữ cái đầu tiên và chữ cái cuối cùng của từ.
-   - Ẩn từ 35% đến 50% số chữ cái ở giữa bằng dấu gạch dưới "_".
-   - Ví dụ: từ "friendly" (8 chữ cái) -> clozeLetters: "f _ _ e n d l y" hoặc "f _ _ _ d l y"
-   - Ví dụ: từ "cat" (3 chữ cái) -> clozeLetters: "c _ t"
-   - Ví dụ: từ "environment" (11 chữ cái) -> clozeLetters: "e n v _ _ _ n m _ n t"
+   - VỊ TRÍ KHUYẾT PHẢI CỰC KỲ ĐA DẠNG VÀ NGẪU NHIÊN: Có thể khuyết ở ĐẦU TỪ, khuyết ở CUỐI TỪ, khuyết ở GIỮA hoặc khuyết XEN KẼ RẢI RÁC. TUYỆT ĐỐI KHÔNG chỉ cố định giấu chữ ở giữa.
+   - Ẩn từ 35% đến 60% số chữ cái của từ bằng dấu gạch dưới "_", luôn để lại ít nhất 1-2 chữ cái làm gợi ý.
+   - Số lượng ký tự và dấu "_" trong chuỗi clozeLetters PHẢI BẰNG CHÍNH XÁC 100% số chữ cái của từ vựng mục tiêu.
+   - Ví dụ đa dạng:
+     + Khuyết đầu/xen kẽ: "friendly" (8 chữ) -> clozeLetters: "_ r _ e n _ l y" hoặc "_ _ i e n d l y"
+     + Khuyết cuối/xen kẽ: "friendly" (8 chữ) -> clozeLetters: "f r i e n _ _ y" hoặc "f _ i _ n d _ y"
+     + Khuyết giữa/linh hoạt: "friendly" (8 chữ) -> clozeLetters: "f _ _ e n d l y"
+     + Ví dụ: từ "cat" (3 chữ cái) -> clozeLetters: "_ a t" hoặc "c _ t" hoặc "c a _"
+     + Ví dụ: từ "environment" (11 chữ cái) -> clozeLetters: "_ n v _ _ _ n m _ n t" hoặc "e _ v i _ o _ _ e n t"
    - ĐỊNH DẠNG BẮT BUỘC: Mỗi chữ cái và mỗi dấu gạch dưới "_" PHẢI cách nhau bởi 1 khoảng trắng (dấu cách).
 5. "question": Đề bài theo cú pháp sư phạm chuẩn xác:
    "Điền từ tiếng Anh có nghĩa: \\"[vocabMeaning]\\""
@@ -384,3 +390,53 @@ CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
   ]
 }`;
 }
+
+/**
+ * 9. PROMPT CHUYÊN BIỆT: LUYỆN PHÁT ÂM (Pronunciation Drill - Từ đơn & Câu theo dòng)
+ */
+export function getPronunciationPrompt(difficulty: DifficultyLevel = 'guided'): string {
+  return `Bạn là Chuyên gia Ngữ âm và Sư phạm Tiếng Anh hàng đầu.
+NHIỆM VỤ:
+Tạo bài tập "Luyện phát âm (Pronunciation Drill)" từ danh sách từ vựng hoặc câu được cung cấp.
+
+QUY TẮC PHÂN TÁCH DÒNG (BẮT BUỘC):
+- MỖI DÒNG tương ứng với ĐÚNG 1 TỪ HOẶC 1 CÂU MỤC TIÊU PHÁT ÂM.
+- Nếu dòng là từ đơn (1 từ): Đặt "isSingleWord": true. Học sinh lắng nghe phát âm và phát âm lại, app nghe đúng từ là hoàn thành (100%).
+- Nếu dòng là một câu nhiều chữ: Đặt "isSingleWord": false. Học sinh đọc lại cả câu và phải đáp ứng tỷ lệ % khớp (mặc định 70%).
+
+QUY ĐỊNH CẤU TRÚC CHI TIẾT:
+1. "word" (và "vocabWord", "correctAnswer", "correctText"): Từ hoặc câu tiếng Anh cần phát âm.
+2. "phonetic": Phiên âm IPA chuẩn quốc tế (bắt buộc với từ đơn lẻ như /ɪnˈvaɪ.rən.mənt/).
+3. "vocabMeaning" (và "hint"): Nghĩa tiếng Việt chuẩn, súc tích.
+4. "isSingleWord": true nếu là từ đơn, false nếu là câu từ 2 từ trở lên.
+5. "pronunciationAccuracy": 70 (tỷ lệ % tối thiểu để đạt khi đọc câu).
+6. "question": Đề bài sư phạm:
+   - Từ đơn: "Lắng nghe và phát âm từ: [word]"
+   - Câu: "Lắng nghe và phát âm câu: [sentence]"
+7. "explanation": Mẹo phát âm thực tế (vị trí trọng âm, âm đuôi /s/, /ed/, nối âm, khẩu hình).
+8. "type": "pronunciation".
+
+CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
+{
+  "status": "success",
+  "exerciseType": "pronunciation",
+  "items": [
+    {
+      "id": "pron_1",
+      "word": "environment",
+      "vocabWord": "environment",
+      "vocabMeaning": "môi trường sinh thái",
+      "type": "pronunciation",
+      "phonetic": "/ɪnˈvaɪ.rən.mənt/",
+      "isSingleWord": true,
+      "pronunciationAccuracy": 70,
+      "question": "Lắng nghe và phát âm từ: environment",
+      "correctAnswer": "environment",
+      "correct_answer": "environment",
+      "correctText": "environment",
+      "explanation": "Trọng âm rơi vào âm tiết thứ 2 (vi-ron). Chú ý bật nhẹ âm đuôi /nt/."
+    }
+  ]
+}`;
+}
+

@@ -14,6 +14,7 @@ interface PendingApprovalScreenProps {
   classrooms: Classroom[];
   onRefreshUserStatus: () => void;
   onLogout: () => void;
+  onSwitchToAdminToApprove?: (studentId: string) => void;
 }
 
 export const PendingApprovalScreen: React.FC<PendingApprovalScreenProps> = ({

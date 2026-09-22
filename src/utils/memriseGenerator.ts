@@ -1,20 +1,27 @@
 import { Exercise, MemriseExerciseItem, MemriseGenerationResult } from '../types';
 import { loadSettings } from './storage';
+import { createClozeLettersPattern } from './singleVocabGenerator';
 
 export const MEMRISE_SYSTEM_PROMPT = `Bạn là một AI Backend Module chuyên dụng, có nhiệm vụ chuyển đổi danh sách từ vựng được người dùng cung cấp thành một cấu trúc dữ liệu bài tập (JSON) theo phong cách Memrise hoàn chỉnh.
+
+QUY TẮC PHÂN TÁCH DÒNG (BẮT BUỘC):
+1. MỖI DÒNG trong danh sách tương ứng với ĐÚNG 1 TỪ VỰNG TIẾNG ANH MỤC TIÊU.
+2. TUYỆT ĐỐI KHÔNG xem dấu phẩy (,), dấu chấm phẩy (;), hay dấu gạch nối (-) là dấu ngăn cách giữa các từ vựng khác nhau.
+3. Nếu một dòng có dạng "friendly: thân thiện, cởi mở" hoặc "friendly, thân thiện, cởi mở", thì từ tiếng Anh là "friendly" và toàn bộ nghĩa tiếng Việt là "thân thiện, cởi mở".
 
 CHỈ ĐỊNH NGHIÊM NGẶT VỀ DỮ LIỆU:
 1. KHÔNG ĐƯỢC TỰ TẠO SAMPLE DATA. Nếu người dùng nhập danh sách trống hoặc không hợp lệ, hãy trả về JSON: {"error": "Danh sách từ vựng trống. Vui lòng cung cấp dữ liệu từ vựng cần xử lý."}.
 2. Chỉ xử lý CHÍNH XÁC những từ vựng có trong danh sách được người dùng cung cấp ở tin nhắn tiếp theo.
 
 NHIỆM VỤ CỦA BẠN:
-Với mỗi từ vựng trong danh sách, hãy tạo ra các bài tập theo trình tự logic sư phạm sau:
+Với mỗi dòng từ vựng trong danh sách, hãy tạo ra các bài tập theo trình tự logic sư phạm (1 Flashcard + 6 Quiz cho mỗi từ):
 - Bước 0: "flashcard" (Thẻ học từ vựng trước khi vào quiz). Giúp người học nắm vững từ vựng, phiên âm chuẩn quốc tế IPA, giải nghĩa tiếng Việt rõ ràng, câu ví dụ tự nhiên kèm bản dịch tiếng Việt trước khi bắt đầu làm bài tập trắc nghiệm/luyện tập.
 - Bước 1: "multiple_choice" (Trắc nghiệm xuôi: Từ tiếng Anh ➔ Chọn nghĩa tiếng Việt). Hỏi nghĩa của từ tiếng Anh. Tạo ra 3 đáp án nhiễu (distractors) hợp lý từ các từ vựng khác hoặc kho từ vựng cùng trình độ.
-- Bước 2: "multiple_choice" đảo ngược (Trắc nghiệm đảo: Nghĩa tiếng Việt ➔ Chọn từ tiếng Anh đúng). Câu hỏi dạng: "Từ tiếng Anh nào sau đây có nghĩa là '[meaning]'?" hoặc "'[meaning]' là từ nào sau đây?". 4 options là các từ tiếng Anh (gồm từ đúng và 3 từ tiếng Anh nhiễu hợp lý). Đánh dấu "is_reverse": true.
-- Bước 3: "fill_in_blank" (Điền từ vào câu ví dụ). Tạo 1 câu ví dụ tiếng Anh có nghĩa rõ ràng, ẩn từ đó đi bằng ký tự "___". Cung cấp câu dịch nghĩa tiếng Việt làm gợi ý ("hint").
-- Bước 4: "spelling" (Sắp xếp ký tự). Tạo một mảng "shuffled_letters" chứa các chữ cái của từ đó đã được tráo đổi ngẫu nhiên vị trí.
-- Bước 5: "typing" (Tự gõ từ). Cung cấp định nghĩa/gợi ý tiếng Việt và bắt người dùng gõ lại chính xác từ gốc tiếng Anh.
+- Bước 2: "multiple_choice" đảo ngược (Trắc nghiệm đảo: Nghĩa tiếng Việt ➔ Chọn từ tiếng Anh đúng). Câu hỏi dạng: "Từ tiếng Anh nào sau đây có nghĩa là '[meaning]'?". 4 options là các từ tiếng Anh (gồm từ đúng và 3 từ tiếng Anh nhiễu hợp lý). Đánh dấu "is_reverse": true.
+- Bước 3: "fill_in_blank" (Điền từ vào câu ví dụ ngữ cảnh). Tạo 1 câu ví dụ tiếng Anh có nghĩa rõ ràng, ẩn từ đó đi bằng ký tự "___". Cung cấp câu dịch nghĩa tiếng Việt làm gợi ý ("hint").
+- Bước 4: "vocab_cloze" (Khuyết ký tự từ vựng ngẫu nhiên). Câu hỏi: "Điền từ tiếng Anh có nghĩa: \\"[meaning]\\"". Tạo mẫu chuỗi ký tự khuyết "clozeLetters" với các chữ cái và dấu gạch dưới "_" cách nhau bởi khoảng trắng (ví dụ: "_ r _ e n d _ y" hoặc "f _ _ e n d l y"), ẩn từ 35%-60% chữ cái ngẫu nhiên trên toàn bộ từ (đầu, giữa, cuối).
+- Bước 5: "spelling" (Sắp xếp ký tự). Câu hỏi: "Sắp xếp các chữ cái sau thành từ tiếng Anh có nghĩa: \\"[meaning]\\"". Tạo một mảng "shuffled_letters" chứa các chữ cái của từ đó đã được tráo đổi ngẫu nhiên vị trí. TUYỆT ĐỐI KHÔNG để lộ từ gốc trong câu hỏi của bài tập spelling.
+- Bước 6: "typing" (Tự gõ từ). Câu hỏi: "Gõ từ tiếng Anh có nghĩa: \\"[meaning]\\"". Cung cấp định nghĩa/gợi ý tiếng Việt và bắt người dùng gõ lại chính xác từ gốc tiếng Anh.
 
 ĐỊNH DẠNG ĐẦU RA (OUTPUT FORMAT):
 - Trả về CHỈ duy nhất khối JSON có cấu trúc như bên dưới.
@@ -29,7 +36,7 @@ CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
       "id": "string",
       "word": "từ gốc",
       "type": "flashcard",
-      "question": "Học từ mới: [word]",
+      "question": "Ghi nhớ từ vựng: [word]",
       "meaning": "giải nghĩa tiếng Việt",
       "phonetic": "/phiên âm IPA/",
       "example": "Câu ví dụ tiếng Anh ngắn gọn chứa [word]",
@@ -57,30 +64,41 @@ CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
       "id": "string",
       "word": "từ gốc",
       "type": "fill_in_blank",
-      "question": "Điền từ thích hợp vào chỗ trống: [Câu ví dụ chứa ___]",
-      "hint": "[Câu dịch nghĩa tiếng Việt của câu ví dụ]",
+      "question": "The local people are remarkably ___ to all visitors.",
+      "hint": "Người dân địa phương rất thân thiện với tất cả du khách.",
+      "correct_answer": "từ gốc"
+    },
+    {
+      "id": "string",
+      "word": "từ gốc",
+      "type": "vocab_cloze",
+      "question": "Điền từ tiếng Anh có nghĩa: \\"[meaning]\\"",
+      "hint": "[Giải nghĩa tiếng Việt của từ]",
+      "phonetic": "/phiên âm IPA/",
+      "clozeLetters": "f _ _ e n d l y",
       "correct_answer": "từ gốc"
     },
     {
       "id": "string",
       "word": "từ gốc",
       "type": "spelling",
-      "question": "Sắp xếp các ký tự sau thành từ đúng: [các chữ cái cách nhau bởi dấu cách]",
-      "shuffled_letters": ["c", "a", "t"],
+      "question": "Sắp xếp các chữ cái sau thành từ tiếng Anh có nghĩa: \\"[meaning]\\"",
+      "shuffled_letters": ["r", "f", "i", "e", "n", "d", "l", "y"],
       "correct_answer": "từ gốc"
     },
     {
       "id": "string",
       "word": "từ gốc",
       "type": "typing",
-      "question": "Hãy ghi lại từ có nghĩa sau: [Giải nghĩa tiếng Việt của từ]",
+      "question": "Gõ từ tiếng Anh có nghĩa: \\"[meaning]\\"",
+      "hint": "[Giải nghĩa tiếng Việt của từ]",
       "correct_answer": "từ gốc"
     }
   ]
 }`;
 
 export const CHUNK_SIZE = 3;
-export const QUIZ_TYPES_PER_WORD = 5;
+export const QUIZ_TYPES_PER_WORD = 6;
 
 /**
  * Trộn ngẫu nhiên mảng
@@ -130,6 +148,7 @@ export function orderExercisesInBatches(
   const isMcStandard = (ex: MemriseExerciseItem) => ex.type === 'multiple_choice' && !ex.is_reverse;
   const isMcReverse = (ex: MemriseExerciseItem) => ex.type === 'multiple_choice' && !!ex.is_reverse;
   const isFillBlank = (ex: MemriseExerciseItem) => ex.type === 'fill_in_blank';
+  const isVocabCloze = (ex: MemriseExerciseItem) => ex.type === 'vocab_cloze';
   const isSpelling = (ex: MemriseExerciseItem) => ex.type === 'spelling';
   const isTyping = (ex: MemriseExerciseItem) => ex.type === 'typing';
 
@@ -166,13 +185,19 @@ export function orderExercisesInBatches(
       result.push(...fibs);
     });
 
-    // 5. Quiz 4 — Spelling (Sắp xếp ký tự: Word 1, Word 2, Word 3)
+    // 5. Quiz 4 — Vocab Cloze (Điền ký tự khuyết: Word 1, Word 2, Word 3)
+    batchWords.forEach(word => {
+      const clozes = batchExercises.filter(ex => isVocabCloze(ex) && (ex.word || '').trim() === word);
+      result.push(...clozes);
+    });
+
+    // 6. Quiz 5 — Spelling (Sắp xếp ký tự: Word 1, Word 2, Word 3)
     batchWords.forEach(word => {
       const sps = batchExercises.filter(ex => isSpelling(ex) && (ex.word || '').trim() === word);
       result.push(...sps);
     });
 
-    // 6. Quiz 5 — Typing (Tự gõ từ vựng: Word 1, Word 2, Word 3)
+    // 7. Quiz 6 — Typing (Tự gõ từ vựng: Word 1, Word 2, Word 3)
     batchWords.forEach(word => {
       const typs = batchExercises.filter(ex => isTyping(ex) && (ex.word || '').trim() === word);
       result.push(...typs);
@@ -227,6 +252,7 @@ export function orderStandardExercisesInBatches(
   const isMcStandard = (ex: Exercise) => ex.type === 'multiple_choice' && !ex.isReverseChoice;
   const isMcReverse = (ex: Exercise) => ex.type === 'multiple_choice' && !!ex.isReverseChoice;
   const isFillBlank = (ex: Exercise) => ex.type === 'fill_blank' || ex.type === 'fill_in_blank';
+  const isVocabCloze = (ex: Exercise) => ex.type === 'vocab_cloze';
   const isSpelling = (ex: Exercise) => ex.type === 'spelling' || ex.type === 'anagram';
   const isTyping = (ex: Exercise) => ex.type === 'typing';
 
@@ -254,19 +280,25 @@ export function orderStandardExercisesInBatches(
       result.push(...mcRevs);
     });
 
-    // 4. Quiz 3: Fill in Blank
+    // 4. Quiz 3: Fill in Blank (Điền từ vào câu ví dụ)
     batchWords.forEach(word => {
       const fibs = batchExercises.filter(ex => isFillBlank(ex) && getWord(ex) === word);
       result.push(...fibs);
     });
 
-    // 5. Quiz 4: Spelling
+    // 5. Quiz 4: Vocab Cloze (Điền ký tự khuyết)
+    batchWords.forEach(word => {
+      const clozes = batchExercises.filter(ex => isVocabCloze(ex) && getWord(ex) === word);
+      result.push(...clozes);
+    });
+
+    // 6. Quiz 5: Spelling
     batchWords.forEach(word => {
       const sps = batchExercises.filter(ex => isSpelling(ex) && getWord(ex) === word);
       result.push(...sps);
     });
 
-    // 6. Quiz 5: Typing
+    // 7. Quiz 6: Typing
     batchWords.forEach(word => {
       const typs = batchExercises.filter(ex => isTyping(ex) && getWord(ex) === word);
       result.push(...typs);
@@ -457,11 +489,32 @@ export function generateOfflineMemriseExercises(
       });
     });
 
-    // 2.4. Quiz 4 — Spelling (Sắp xếp ký tự xáo trộn cho Word 1, Word 2, Word 3)
+    // 2.4. Quiz 4 — Vocab Cloze (Khuyết ký tự ngẫu nhiên cho Word 1, Word 2, Word 3)
     batchVocab.forEach((item, indexWithinBatch) => {
       const globalIndex = b + indexWithinBatch;
       const baseId = `batch${batchNum}_${globalIndex}_${item.word.replace(/[^a-zA-Z0-9]/g, '')}`;
       const word = item.word;
+      const meaning = item.meaning;
+      const { clozeLetters } = createClozeLettersPattern(word);
+
+      exercises.push({
+        id: `${baseId}_cloze`,
+        word,
+        type: 'vocab_cloze',
+        question: `Điền từ tiếng Anh có nghĩa: "${meaning}"`,
+        hint: meaning,
+        clozeLetters,
+        clozeTemplate: clozeLetters,
+        correct_answer: word
+      });
+    });
+
+    // 2.5. Quiz 5 — Spelling (Sắp xếp ký tự xáo trộn cho Word 1, Word 2, Word 3)
+    batchVocab.forEach((item, indexWithinBatch) => {
+      const globalIndex = b + indexWithinBatch;
+      const baseId = `batch${batchNum}_${globalIndex}_${item.word.replace(/[^a-zA-Z0-9]/g, '')}`;
+      const word = item.word;
+      const meaning = item.meaning;
 
       const letters = word.toLowerCase().split('').filter(c => c !== ' ');
       let shuffled = shuffleArray(letters);
@@ -473,13 +526,13 @@ export function generateOfflineMemriseExercises(
         id: `${baseId}_sp`,
         word,
         type: 'spelling',
-        question: `Sắp xếp các ký tự sau thành từ đúng: ${shuffled.join(' ')}`,
+        question: meaning ? `Sắp xếp các chữ cái sau thành từ tiếng Anh có nghĩa: "${meaning}"` : `Sắp xếp các chữ cái sau để tạo thành từ đúng`,
         shuffled_letters: shuffled,
         correct_answer: word
       });
     });
 
-    // 2.5. Quiz 5 — Typing (Gõ lại từ theo nghĩa cho Word 1, Word 2, Word 3)
+    // 2.6. Quiz 6 — Typing (Gõ lại từ theo nghĩa cho Word 1, Word 2, Word 3)
     batchVocab.forEach((item, indexWithinBatch) => {
       const globalIndex = b + indexWithinBatch;
       const baseId = `batch${batchNum}_${globalIndex}_${item.word.replace(/[^a-zA-Z0-9]/g, '')}`;
@@ -490,7 +543,8 @@ export function generateOfflineMemriseExercises(
         id: `${baseId}_tp`,
         word,
         type: 'typing',
-        question: `Hãy ghi lại từ có nghĩa sau: ${meaning}`,
+        question: meaning ? `Gõ từ tiếng Anh có nghĩa: "${meaning}"` : `Gõ chính xác từ vựng tiếng Anh`,
+        hint: meaning,
         correct_answer: word
       });
     });
@@ -619,6 +673,7 @@ export function convertMemriseItemToExercise(
       item.type === 'flashcard' ? 'Học từ mới: Xem nghĩa, phiên âm và phát âm chuẩn trước khi vào quiz' :
       item.type === 'multiple_choice' ? (item.is_reverse ? 'Chọn từ tiếng Anh có nghĩa tương ứng' : 'Chọn nghĩa tiếng Việt chính xác nhất của từ') :
       item.type === 'fill_in_blank' ? 'Điền từ vựng thích hợp vào chỗ trống' :
+      item.type === 'vocab_cloze' ? 'Điền các ký tự còn thiếu để hoàn thiện từ tiếng Anh' :
       item.type === 'spelling' ? 'Chạm/kéo các chữ cái để ghép thành từ vựng đúng chính tả' :
       'Gõ chính xác từ vựng tiếng Anh theo gợi ý nghĩa'
   };
@@ -644,13 +699,34 @@ export function convertMemriseItemToExercise(
     base.hint = item.hint;
     base.grammarHint = item.hint;
     base.explanation = item.hint ? `Gợi ý: ${item.hint}` : undefined;
+  } else if (item.type === 'vocab_cloze') {
+    base.type = 'vocab_cloze';
+    base.vocabWord = item.word;
+    base.vocabMeaning = item.meaning || item.hint;
+    base.phonetic = item.phonetic || '';
+    const resolvedCloze = item.clozeLetters || item.clozeTemplate || createClozeLettersPattern(item.word).clozeLetters;
+    base.clozeLetters = resolvedCloze;
+    base.correctText = item.correct_answer;
+    base.hint = item.hint || item.meaning;
+    base.question = item.question || (base.vocabMeaning ? `Điền từ tiếng Anh có nghĩa: "${base.vocabMeaning}"` : 'Điền các ký tự còn thiếu vào từ');
+    base.explanation = `${item.word}: ${item.meaning || item.hint || ''}`;
   } else if (item.type === 'spelling') {
     base.correctText = item.correct_answer;
     base.shuffled_letters = item.shuffled_letters || item.word.split('').sort(() => Math.random() - 0.5);
     base.shuffledLetters = base.shuffled_letters;
+    // Đảm bảo tiêu đề câu hỏi không làm lộ từ vựng
+    if (item.meaning || item.hint) {
+      base.question = `Sắp xếp các chữ cái sau thành từ tiếng Anh có nghĩa: "${item.meaning || item.hint}"`;
+    } else if (base.question && (base.question.includes(':') || base.question.includes('đúng:'))) {
+      base.question = 'Sắp xếp các chữ cái sau để tạo thành từ đúng';
+    }
     base.explanation = `Từ đúng chính tả là: "${item.correct_answer}".`;
   } else if (item.type === 'typing') {
     base.correctText = item.correct_answer;
+    base.hint = item.hint || item.meaning;
+    if (item.meaning || item.hint) {
+      base.question = `Gõ từ tiếng Anh có nghĩa: "${item.meaning || item.hint}"`;
+    }
     base.explanation = `Từ vựng cần gõ là: "${item.correct_answer}".`;
   }
 

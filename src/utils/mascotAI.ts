@@ -399,6 +399,16 @@ export const DEFAULT_MASCOT_PROMPTS: Record<MascotType, string> = {
   panther: `Bạn là Hắc Báo (@hacbao_shadow), sát thủ độc hành kiệm lời và sắc bén.`
 };
 
+export const STRUCTURED_PEDAGOGICAL_GUIDELINE = `
+[HƯỚNG DẪN TRÌNH BÀY TRẢ LỜI ĐẸP & DỄ NHÌN]:
+- Hãy trò chuyện tự nhiên, linh hoạt và thân thiện đúng với tính cách linh vật của bạn. Trả lời đúng trọng tâm câu hỏi của người dùng, KHÔNG ép buộc mọi câu trả lời phải theo khuôn mẫu cứng nhắc (không cần lúc nào cũng chia 1-2-3 hay bắt buộc tạo bài tập nếu không cần thiết).
+- Khi câu trả lời có kiến thức liên quan đến liệt kê, so sánh hoặc từ vựng/ngữ pháp:
+  + Dùng danh sách gạch đầu dòng (bullet points) hoặc số thứ tự để chia ý rõ ràng, thoáng mắt.
+  + Dùng bảng Markdown GFM (| Cột 1 | Cột 2 |) khi cần so sánh, đối chiếu hoặc phân loại để hiển thị bảng kẻ ô trực quan, dễ theo dõi nhất.
+  + Đặt công thức, cú pháp câu hoặc code vào khối mã (\`\`\`...\`\`\`) để có khung hiển thị chuyên biệt và nút sao chép nhanh.
+- Giữ câu trả lời thoáng đãng, dễ đọc, tránh viết một khối văn bản quá dài đặc quánh.
+`;
+
 /**
  * Lấy System Prompt cụ thể cho Mascot: Ưu tiên Custom Prompt của User, nếu không có thì lấy Mặc Định
  */
@@ -410,6 +420,26 @@ export function getActiveMascotPrompt(
     return userCustomPrompt.trim();
   }
   return DEFAULT_MASCOT_PROMPTS[mascotId] || DEFAULT_MASCOT_PROMPTS.fox;
+}
+
+/**
+ * Kết hợp Persona Linh vật + Hướng dẫn Sư phạm & Khung trả lời chuẩn mực (Fixed Response Template)
+ */
+export function buildMascotFullSystemInstruction(params: {
+  mascotId: MascotType;
+  userCustomPrompt?: string;
+  studentName?: string;
+}): string {
+  const { mascotId, userCustomPrompt, studentName } = params;
+  let personaPrompt = getActiveMascotPrompt(mascotId, userCustomPrompt);
+
+  let fullPrompt = `${personaPrompt}\n\n${STRUCTURED_PEDAGOGICAL_GUIDELINE}`;
+
+  if (studentName && studentName.trim()) {
+    fullPrompt += `\n\nNgười đang trò chuyện với bạn là học sinh tên là: "${studentName.trim()}". Hãy xưng hô tự nhiên, thân thiết và truyền cảm hứng.`;
+  }
+
+  return fullPrompt;
 }
 
 /**
@@ -467,10 +497,6 @@ async function callDirectGemini(params: {
   const candidates = [
     model,
     ...fallbackModels,
-    'gemini-3.1-flash-lite',
-    'gemini-flash-latest',
-    'gemini-3.8-flash',
-    'gemini-3.1-pro-preview',
   ].filter((m, idx, arr) => m && arr.indexOf(m) === idx);
 
   let lastError = '';
@@ -745,7 +771,7 @@ export async function sendMascotChatMessage(params: {
     mascotId, 
     customApiKey, 
     provider = 'gemini', 
-    model = 'gemini-3.8-flash', 
+    model = 'gemini-3.1-flash-lite', 
     fallbackModels = [],
     baseUrl,
     userPromptOverride,
@@ -755,12 +781,12 @@ export async function sendMascotChatMessage(params: {
     attachment
   } = params;
 
-  // Lấy prompt tính cách: Của tài khoản hiện tại hoặc mặc định chuẩn
-  let basePrompt = getActiveMascotPrompt(mascotId, userPromptOverride);
-
-  if (studentName) {
-    basePrompt += `\n\nNgười đang trò chuyện với bạn là học sinh tên là: "${studentName}". Hãy xưng hô tự nhiên, thân thiết.`;
-  }
+  // Lấy prompt tính cách và khung sườn cấu trúc sư phạm chuẩn mực
+  const fullSystemInstruction = buildMascotFullSystemInstruction({
+    mascotId,
+    userCustomPrompt: userPromptOverride,
+    studentName,
+  });
 
   // Chuẩn bị tin nhắn hiện tại có kèm ngữ cảnh quote
   let currentPrompt = message.trim();
@@ -782,7 +808,7 @@ export async function sendMascotChatMessage(params: {
         message,
         history,
         mascotId,
-        systemInstruction: basePrompt,
+        systemInstruction: fullSystemInstruction,
         customApiKey: customApiKey?.trim() || undefined,
         quotedMessage,
         provider,
@@ -837,7 +863,7 @@ export async function sendMascotChatMessage(params: {
         apiKey: activeKey,
         model,
         fallbackModels,
-        systemInstruction: basePrompt,
+        systemInstruction: fullSystemInstruction,
         message: currentPrompt,
         history,
         attachment,
@@ -855,7 +881,7 @@ export async function sendMascotChatMessage(params: {
       return await callDirectClaude({
         apiKey: activeKey,
         model,
-        systemInstruction: basePrompt,
+        systemInstruction: fullSystemInstruction,
         message: currentPrompt,
         history,
         attachment,
@@ -873,7 +899,7 @@ export async function sendMascotChatMessage(params: {
       baseUrl,
       provider,
       model,
-      systemInstruction: basePrompt,
+      systemInstruction: fullSystemInstruction,
       message: currentPrompt,
       history,
       attachment,

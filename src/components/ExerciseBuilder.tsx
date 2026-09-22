@@ -55,9 +55,12 @@ import { MemriseGeneratorModal } from './MemriseGeneratorModal';
 import { ReadingGeneratorModal } from './ReadingGeneratorModal';
 import { SingleVocabGeneratorModal } from './SingleVocabGeneratorModal';
 import { GrammarGeneratorModal } from './GrammarGeneratorModal';
+import { PronunciationGeneratorModal } from './PronunciationGeneratorModal';
 import { OpenCodeModelPicker } from './OpenCodeModelPicker';
 import { AI_PROVIDERS } from '../utils/aiProviders';
 import { getDistinctClassNames, getClassroomsByName } from '../utils/classroomHelpers';
+import { createClozeLettersPattern } from '../utils/singleVocabGenerator';
+import { speakText } from '../utils/audio';
 
 interface ExerciseBuilderProps {
   topics?: Topic[];
@@ -75,6 +78,7 @@ interface ExerciseBuilderProps {
 }
 
 const EXERCISE_TYPES: { type: ExerciseType; label: string; desc: string }[] = [
+  { type: 'pronunciation', label: '🎙️ Luyện phát âm (Pronunciation)', desc: 'Luyện phát âm từ đơn & câu theo dòng, nghe mẫu và phát âm lại' },
   { type: 'vocab_cloze', label: 'Khuyết ký tự từ vựng', desc: 'Active Recall: Điền khuyết ký tự trong từ vựng' },
   { type: 'flashcard_recall', label: 'Lật thẻ ghi nhớ', desc: 'Active Recall: Lật thẻ xem từ, phiên âm & tự đánh giá' },
   { type: 'listen_spell', label: 'Nghe phát âm & gõ từ', desc: 'Dictation: Nghe phát âm chuẩn và gõ lại đúng chính tả' },
@@ -121,6 +125,8 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
   const [isReadingModalOpen, setIsReadingModalOpen] = useState(false);
   const [isSingleVocabModalOpen, setIsSingleVocabModalOpen] = useState(false);
   const [isGrammarModalOpen, setIsGrammarModalOpen] = useState(false);
+  const [isPronunciationModalOpen, setIsPronunciationModalOpen] = useState(false);
+  const [pronunciationAccuracy, setPronunciationAccuracy] = useState<number>(70);
   const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
   const [isAiDropdownOpen, setIsAiDropdownOpen] = useState(false);
   const aiDropdownRef = useRef<HTMLDivElement>(null);
@@ -157,7 +163,7 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
       const current = loadSettings();
       setAppSettingsState(current);
       const provider = current.aiProviderType || 'gemini';
-      const model = current.aiModel || 'gemini-2.5-flash';
+      const model = current.aiModel || 'gemini-3.1-flash-lite';
       const customKey = current.providerApiKeys?.[provider] || current.customApiKey || '';
       const baseUrl = current.providerBaseUrls?.[provider] || current.customBaseUrl || '';
 
@@ -274,7 +280,7 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
   const [topicIsHidden, setTopicIsHidden] = useState(false);
   const [lessonIsHidden, setLessonIsHidden] = useState(false);
   const [lessonShuffleExercises, setLessonShuffleExercises] = useState(false);
-  const [comprehensionMode, setComprehensionMode] = useState<'multiple_sub' | 'passage_cloze'>('multiple_sub');
+  const [comprehensionMode, setComprehensionMode] = useState<'multiple_sub' | 'passage_cloze' | 'single'>('multiple_sub');
   const [passageClozeText, setPassageClozeText] = useState('');
   const [subQuestions, setSubQuestions] = useState<SubQuestion[]>([]);
 
@@ -370,6 +376,18 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
     setExContext(''); // Clear context by default
 
     switch (type) {
+      case 'pronunciation':
+        setExSkill('speaking');
+        setExCorrectText('Protecting the environment is essential for our future.');
+        setVocabWord('');
+        setVocabMeaning('Bảo vệ môi trường là điều thiết yếu cho tương lai của chúng ta.');
+        setPhonetic('');
+        setPronunciationAccuracy(75);
+        setExQuestion('Lắng nghe và phát âm câu: Protecting the environment is essential for our future.');
+        setExInstruction('Bấm nút Loa để nghe phát âm mẫu, sau đó bấm Micro để đọc lại.');
+        setExExplanation('Chú ý nối âm "protecting-the" và nhấn trọng âm vào "environment", "essential", "future".');
+        break;
+
       case 'vocab_cloze':
         setExSkill('vocabulary');
         setVocabWord('friendly');
@@ -579,6 +597,15 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
     } else if (exType === 'error_correction') {
       newExercise.wrongSentence = exWrongSentence.trim();
       newExercise.errorType = exErrorType.trim();
+    } else if (exType === 'pronunciation') {
+      const target = (exCorrectText.trim() || vocabWord.trim() || exQuestion.trim());
+      const words = target.split(/\s+/).filter(Boolean);
+      const isSingle = words.length <= 1;
+      newExercise.correctText = target;
+      newExercise.vocabWord = isSingle ? target : undefined;
+      newExercise.pronunciationAccuracy = isSingle ? 100 : pronunciationAccuracy;
+      newExercise.isSingleWord = isSingle;
+      newExercise.targetWordsCount = words.length;
     } else if (exType === 'sentence_builder') {
       newExercise.scrambledWords = (exCorrectText.trim() || vocabWord.trim()).split(/\s+/);
     } else if (exType === 'spelling') {
@@ -751,7 +778,7 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
                   </div>
                 </button>
 
-                {/* 2. AI Memrise (Trọn bộ 4 dạng từ vựng) */}
+                {/* 2. AI Memrise (Trọn bộ 7 bước: 1 Flashcard + 6 Quiz) */}
                 <button
                   type="button"
                   onClick={() => {
@@ -765,11 +792,11 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 font-bold text-xs text-amber-500">
-                      <span>AI Memrise (Trọn bộ 4 dạng)</span>
-                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/10 font-normal">Bộ 4</span>
+                      <span>AI Memrise (1 Flashcard + 6 Quiz)</span>
+                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/10 font-normal">7 Bước</span>
                     </div>
                     <p className={`text-[11px] ${theme.textMuted} leading-snug mt-0.5 line-clamp-2`}>
-                      Tự động sinh 4 dạng củng cố: Trắc nghiệm, Điền khuyết, Nối từ, Flashcard
+                      Tự động tạo 7 bước ghi nhớ: Flashcard ➔ Trắc nghiệm xuôi/đảo ➔ Điền từ ➔ Khuyết ký tự ➔ Xếp chữ ➔ Gõ từ
                     </p>
                   </div>
                 </button>
@@ -819,6 +846,29 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
                     </p>
                   </div>
                 </button>
+
+                {/* 5. AI Tạo bài tập phát âm theo dòng (Pronunciation Drill) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPronunciationModalOpen(true);
+                    setIsAiDropdownOpen(false);
+                  }}
+                  className={`w-full p-2.5 rounded-xl hover:${theme.highlight} transition-colors text-left flex items-start gap-3 group cursor-pointer`}
+                >
+                  <div className="w-8 h-8 rounded-lg bg-teal-500/15 border border-teal-500/25 text-teal-500 flex items-center justify-center shrink-0 mt-0.5 group-hover:scale-105 transition-transform">
+                    <Mic className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 font-bold text-xs text-teal-500">
+                      <span>AI Bài Tập Phát Âm Theo Dòng</span>
+                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-teal-500/10 font-normal">Phát âm</span>
+                    </div>
+                    <p className={`text-[11px] ${theme.textMuted} leading-snug mt-0.5 line-clamp-2`}>
+                      Nhập liệu tách biệt theo dòng ➔ Từ đơn đọc đúng là xong, câu nhiều chữ theo tỷ lệ % tùy chỉnh
+                    </p>
+                  </div>
+                </button>
               </div>
 
               {/* Quick API Key Connection Test Panel */}
@@ -826,8 +876,8 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
                 <div className="flex items-center justify-between text-xs px-1">
                   <div className="flex items-center gap-1.5">
                     <span className={`text-[11px] ${theme.textMuted}`}>Model:</span>
-                    <span className="font-mono text-[11px] font-semibold text-indigo-400 truncate max-w-[140px]" title={appSettingsState.aiModel || 'gemini-2.5-flash'}>
-                      {appSettingsState.aiModel || 'gemini-2.5-flash'}
+                    <span className="font-mono text-[11px] font-semibold text-indigo-400 truncate max-w-[140px]" title={appSettingsState.aiModel || 'gemini-3.1-flash-lite'}>
+                      {appSettingsState.aiModel || 'gemini-3.1-flash-lite'}
                     </span>
                   </div>
                   <button
@@ -995,6 +1045,7 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
             </div>
             <div className="flex flex-wrap gap-1.5">
               {[
+                { type: 'pronunciation', label: '🎙️ Luyện phát âm' },
                 { type: 'vocab_cloze', label: '⭐ Khuyết từ vựng (Recall)' },
                 { type: 'flashcard_recall', label: '⭐ Lật thẻ (Recall)' },
                 { type: 'listen_spell', label: '⭐ Nghe & gõ (Dictation)' },
@@ -1097,6 +1148,123 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
             </label>
           </div>
 
+          {/* Pronunciation Section */}
+          {exType === 'pronunciation' && (() => {
+            const currentTarget = (exCorrectText.trim() || vocabWord.trim());
+            const words = currentTarget.split(/\s+/).filter(Boolean);
+            const isSingle = words.length <= 1;
+            return (
+              <div className="p-4 rounded-xl border border-teal-500/30 bg-teal-500/5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-teal-600 dark:text-teal-400 flex items-center gap-1.5">
+                    <Mic className="w-4 h-4" />
+                    <span>Cài đặt bài tập phát âm (Pronunciation Drill):</span>
+                  </span>
+                  {currentTarget && (
+                    <button
+                      type="button"
+                      onClick={() => speakText(currentTarget)}
+                      className="text-xs text-teal-600 dark:text-teal-400 font-bold hover:underline flex items-center gap-1 cursor-pointer"
+                    >
+                      <Volume2 className="w-3.5 h-3.5" />
+                      <span>Nghe thử phát âm mẫu</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className={`text-xs font-semibold ${theme.textMuted} block`}>
+                    Từ hoặc câu cần phát âm *:
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={exCorrectText || vocabWord}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setExCorrectText(val);
+                      if (val.split(/\s+/).filter(Boolean).length <= 1) {
+                        setVocabWord(val);
+                      }
+                      if (!exQuestion) {
+                        setExQuestion(`Lắng nghe và phát âm: ${val}`);
+                      }
+                    }}
+                    placeholder="VD: apple hoặc Good morning, how are you today?"
+                    className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-sm font-semibold`}
+                  />
+                  <div className="flex items-center gap-2 pt-0.5">
+                    {isSingle ? (
+                      <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
+                        🎯 Nhận diện: Từ vựng đơn lẻ ➔ Học sinh phát âm đúng từ là xong (100%)
+                      </span>
+                    ) : (
+                      <span className="text-[11px] font-bold text-teal-600 dark:text-teal-400 bg-teal-500/10 px-2.5 py-0.5 rounded-full border border-teal-500/20">
+                        📝 Nhận diện: Câu nhiều chữ ({words.length} từ) ➔ Cần đạt tỷ lệ % yêu cầu
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className={`text-xs font-semibold ${theme.textMuted} block mb-1`}>
+                      Phiên âm IPA (tùy chọn):
+                    </label>
+                    <input
+                      type="text"
+                      value={phonetic}
+                      onChange={e => setPhonetic(e.target.value)}
+                      placeholder="VD: /ˈæp.əl/ hoặc /ɡʊd ˈmɔː.nɪŋ/"
+                      className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-xs font-mono`}
+                    />
+                  </div>
+
+                  <div>
+                    <label className={`text-xs font-semibold ${theme.textMuted} block mb-1`}>
+                      Nghĩa tiếng Việt / Dịch câu (tùy chọn):
+                    </label>
+                    <input
+                      type="text"
+                      value={vocabMeaning}
+                      onChange={e => setVocabMeaning(e.target.value)}
+                      placeholder="VD: quả táo / Chào buổi sáng..."
+                      className={`w-full p-2.5 rounded-xl ${theme.inputBg} text-xs`}
+                    />
+                  </div>
+                </div>
+
+                {!isSingle && (
+                  <div className="p-3 rounded-xl bg-background/60 border border-teal-500/20 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                        <Sliders className="w-3.5 h-3.5 text-teal-500" />
+                        <span>Tỷ lệ % độ chính xác bắt buộc để đạt câu này:</span>
+                      </label>
+                      <span className="text-xs font-bold text-teal-600 dark:text-teal-400 bg-teal-500/10 px-2 py-0.5 rounded-md border border-teal-500/30">
+                        {pronunciationAccuracy}%
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="range"
+                        min="50"
+                        max="95"
+                        step="5"
+                        value={pronunciationAccuracy}
+                        onChange={e => setPronunciationAccuracy(Number(e.target.value))}
+                        className="w-full h-2 bg-neutral-200 dark:bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-teal-500"
+                      />
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Nếu học sinh phát âm đạt từ {pronunciationAccuracy}% từ ngữ chuẩn xác trở lên, bài tập sẽ được tính là hoàn thành.
+                    </p>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           {/* Active Recall / Vocab Section */}
           {(exType === 'vocab_cloze' || exType === 'flashcard_recall' || exType === 'listen_spell' || exType === 'anagram' || exType === 'spelling' || exType === 'typing') && (
             <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5 space-y-3">
@@ -1151,9 +1319,24 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
 
                 {exType === 'vocab_cloze' && (
                   <div>
-                    <label className={`text-xs font-semibold ${theme.textMuted} block mb-1`}>
-                      Mẫu khuyết chữ cái (tùy chọn):
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className={`text-xs font-semibold ${theme.textMuted}`}>
+                        Mẫu khuyết chữ cái (tùy chọn):
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const word = (vocabWord || exCorrectText || '').trim();
+                          if (word) {
+                            const { clozeLetters: pattern } = createClozeLettersPattern(word);
+                            setClozeLetters(pattern);
+                          }
+                        }}
+                        className="text-[11px] text-sky-500 hover:underline cursor-pointer font-medium"
+                      >
+                        ⚡ Tự tạo lại mẫu chuẩn
+                      </button>
+                    </div>
                     <input
                       id="input-builder-cloze-letters"
                       type="text"
@@ -2164,19 +2347,35 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
         }}
       />
 
+      {/* AI Pronunciation Generator Modal */}
+      <PronunciationGeneratorModal
+        isOpen={isPronunciationModalOpen}
+        onClose={() => setIsPronunciationModalOpen(false)}
+        topics={topics}
+        lessons={lessons}
+        selectedLessonId={targetLessonId}
+        onExercisesCreated={(newExercises) => {
+          newExercises.forEach(ex => onSaveExercise(ex));
+          setStatusBanner({
+            type: 'success',
+            text: `Đã tạo và thêm thành công ${newExercises.length} bài tập luyện phát âm vào bài học!`
+          });
+        }}
+      />
+
       {/* OpenCode Model & API Key Configuration Modal */}
       <OpenCodeModelPicker
         isOpen={isModelPickerOpen}
         onClose={() => setIsModelPickerOpen(false)}
         currentProvider={appSettingsState.aiProviderType || 'gemini'}
-        currentModel={appSettingsState.aiModel || 'gemini-2.5-flash'}
+        currentModel={appSettingsState.aiModel || 'gemini-3.1-flash-lite'}
         savedApiKey={appSettingsState.customApiKey || appSettingsState.customGeminiApiKey || ''}
         savedBaseUrl={appSettingsState.customBaseUrl || ''}
         providerApiKeys={appSettingsState.providerApiKeys || {}}
         providerBaseUrls={appSettingsState.providerBaseUrls || {}}
         customProviderModels={appSettingsState.customProviderModels || {}}
         mascotCustomPrompts={appSettingsState.mascotCustomPrompts || {}}
-        currentMascotId="owl"
+        currentMascotId={appSettingsState.mascotType || 'osananajimi'}
         onSelectModel={(
           provider,
           modelId,
@@ -2185,7 +2384,8 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
           updatedProviderApiKeys,
           updatedProviderBaseUrls,
           updatedMascotPrompts,
-          updatedCustomModels
+          updatedCustomModels,
+          selectedMascotId
         ) => {
           const updated: AppSettings = {
             ...appSettingsState,
@@ -2197,6 +2397,7 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
             providerBaseUrls: updatedProviderBaseUrls,
             mascotCustomPrompts: updatedMascotPrompts,
             customProviderModels: updatedCustomModels,
+            ...(selectedMascotId ? { mascotType: selectedMascotId } : {}),
           };
           saveSettings(updated);
           setAppSettingsState(updated);

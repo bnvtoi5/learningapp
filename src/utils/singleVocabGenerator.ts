@@ -23,6 +23,8 @@ export interface SingleVocabGeneratedItem {
   phonetic?: string;
   matchingPairs?: { id: string; left: string; right: string }[];
   explanation?: string;
+  pronunciationAccuracy?: number;
+  isSingleWord?: boolean;
 }
 
 export interface SingleVocabGenerationResult {
@@ -114,34 +116,45 @@ export function parseVocabList(rawText: string): { word: string; meaning: string
 }
 
 /**
- * Tạo mẫu khuyết chữ cái chuẩn xác cho dạng vocab_cloze.
- * Các ký tự và dấu gạch dưới "_" được cách nhau bởi khoảng trắng (ví dụ: "f _ _ e n d l y").
+ * Tạo mẫu khuyết chữ cái chuẩn xác cho dạng vocab_cloze với độ ngẫu nhiên cao (random vị trí đầu, giữa, cuối).
+ * Các ký tự và dấu gạch dưới "_" được cách nhau bởi khoảng trắng (ví dụ: "_ r _ e n d _ y" hoặc "f _ i e n d _ _").
  */
-export function createClozeLettersPattern(word: string): { clozeLetters: string; missingLetters: string[] } {
+export function createClozeLettersPattern(word: string, customMaskRatio?: number): { clozeLetters: string; missingLetters: string[] } {
   const chars = word.split('');
   const missing: string[] = [];
-  const maskIndices = new Set<number>();
+  const letterIndices: number[] = [];
 
+  // Tìm tất cả vị trí là chữ cái
   for (let i = 0; i < chars.length; i++) {
-    const ch = chars[i];
-    if (/[a-zA-Z]/.test(ch)) {
-      if (chars.length <= 4) {
-        if (i === 1) maskIndices.add(i);
-      } else {
-        // Luôn giữ ký tự đầu (i=0) và ký tự cuối (i=length-1)
-        if (i > 0 && i < chars.length - 1) {
-          // Ẩn xen kẽ 40% - 50%
-          if (i % 2 === 1 || Math.random() < 0.45) {
-            maskIndices.add(i);
-          }
-        }
-      }
+    if (/[a-zA-Z]/.test(chars[i])) {
+      letterIndices.push(i);
     }
   }
 
-  // Đảm bảo có ít nhất 1 chữ cái bị ẩn
-  if (maskIndices.size === 0 && chars.length > 1) {
-    maskIndices.add(Math.floor(chars.length / 2));
+  const numLetters = letterIndices.length;
+  if (numLetters === 0) {
+    return { clozeLetters: word, missingLetters: [] };
+  }
+
+  const maskIndices = new Set<number>();
+
+  if (numLetters === 1) {
+    maskIndices.add(letterIndices[0]);
+  } else if (numLetters <= 3) {
+    // Với từ ngắn 2-3 chữ cái: chọn ngẫu nhiên 1 hoặc 2 vị trí bất kỳ (có thể ở đầu, giữa hoặc cuối)
+    const countToMask = numLetters === 2 ? 1 : (Math.random() < 0.6 ? 1 : 2);
+    const shuffled = [...letterIndices].sort(() => Math.random() - 0.5);
+    shuffled.slice(0, countToMask).forEach(idx => maskIndices.add(idx));
+  } else {
+    // Với từ >= 4 chữ cái:
+    // Tỷ lệ ẩn từ 40% đến 60% ngẫu nhiên hoàn toàn trên mọi vị trí (đầu, giữa, cuối)
+    const ratio = customMaskRatio || (0.4 + Math.random() * 0.25); // 40% - 65%
+    let targetCount = Math.round(numLetters * ratio);
+    targetCount = Math.max(1, Math.min(targetCount, numLetters - 1)); // Luôn để lại ít nhất 1 chữ cái gợi ý và ẩn ít nhất 1 chữ
+
+    // Trộn ngẫu nhiên tất cả các vị trí chữ cái (không thiên vị đầu hay cuối)
+    const shuffled = [...letterIndices].sort(() => Math.random() - 0.5);
+    shuffled.slice(0, targetCount).forEach(idx => maskIndices.add(idx));
   }
 
   const clozeChars = chars.map((ch, idx) => {
@@ -153,7 +166,7 @@ export function createClozeLettersPattern(word: string): { clozeLetters: string;
   });
 
   return {
-    clozeLetters: clozeChars.join(' '), // Định dạng chuẩn có khoảng trắng: "f _ _ e n d l y"
+    clozeLetters: clozeChars.join(' '), // Định dạng chuẩn có khoảng trắng: "f _ _ e n d l y" hoặc "_ r _ e n d _ y"
     missingLetters: missing
   };
 }
@@ -333,6 +346,25 @@ export function generateOfflineSingleVocabExercises(params: {
         correctAnswer: `${word} = ${meaning}`,
         explanation: `Cặp từ vựng: ${word} ➔ ${meaning}`
       });
+    } else if (exerciseType === 'pronunciation') {
+      const words = word.split(/\s+/).filter(Boolean);
+      const isSingle = words.length <= 1;
+      items.push({
+        id: baseId,
+        word,
+        vocabWord: word,
+        vocabMeaning: meaning,
+        type: 'pronunciation',
+        phonetic: isSingle ? `/${word.toLowerCase()}/` : undefined,
+        isSingleWord: isSingle,
+        pronunciationAccuracy: 70,
+        question: isSingle ? `Lắng nghe và phát âm từ: ${word}` : `Lắng nghe và phát âm câu: ${word}`,
+        hint: meaning,
+        correctAnswer: word,
+        correct_answer: word,
+        correctText: word,
+        explanation: isSingle ? `Từ vựng: ${word} (${meaning}). Hãy nghe mẫu và phát âm lại chính xác.` : `Câu: "${word}". Chú ý ngữ điệu của cả câu.`,
+      });
     } else {
       items.push({
         id: baseId,
@@ -428,7 +460,20 @@ export async function generateSingleVocabFromAI(params: {
         const normalizedItems: SingleVocabGeneratedItem[] = data.items.map((item: any) => {
           const rawWord = item.vocabWord || item.word || item.correctAnswer || '';
           const rawMeaning = item.vocabMeaning || item.hint || '';
-          const cloze = item.clozeLetters || item.clozeTemplate;
+          let cloze = item.clozeLetters || item.clozeTemplate;
+
+          if (item.type === 'vocab_cloze' || exerciseType === 'vocab_cloze') {
+            const clean = rawWord.trim();
+            const pattern = createClozeLettersPattern(clean);
+            if (!cloze || typeof cloze !== 'string') {
+              cloze = pattern.clozeLetters;
+            } else {
+              const tokens = cloze.trim().split(/\s+/);
+              if (tokens.length !== clean.length) {
+                cloze = pattern.clozeLetters;
+              }
+            }
+          }
 
           let finalQuestion = item.question;
           if (item.type === 'vocab_cloze' && !finalQuestion.includes('Điền từ tiếng Anh có nghĩa')) {
@@ -505,7 +550,6 @@ export function convertSingleVocabItemToExercise(
     id: `ex_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
     lessonId,
     type: item.type,
-    skill: 'vocabulary',
     difficulty,
     question: item.question || (item.type === 'vocab_cloze' ? `Điền từ tiếng Anh có nghĩa: "${targetMeaning}"` : `Luyện tập từ vựng: ${targetWord}`),
     hint: targetMeaning || item.hint,
@@ -522,7 +566,10 @@ export function convertSingleVocabItemToExercise(
     shuffled_letters: item.shuffledLetters,
     matchingPairs: item.matchingPairs,
     phonetic: item.phonetic || undefined,
-    context: item.exampleSentence || undefined
+    context: item.exampleSentence || undefined,
+    pronunciationAccuracy: item.pronunciationAccuracy || 70,
+    isSingleWord: item.isSingleWord !== undefined ? item.isSingleWord : (targetWord.split(/\s+/).filter(Boolean).length <= 1),
+    skill: item.type === 'pronunciation' ? 'speaking' : 'vocabulary',
   };
 
   return ex;

@@ -26,6 +26,7 @@ import {
 import {
   syncDocToCloud,
   deleteDocFromCloud,
+  syncBatchDocsToCloud,
   syncAllToCloud,
   fetchAllFromCloud,
   clearCloudDatabase,
@@ -33,7 +34,7 @@ import {
 } from '../lib/firebase';
 import defaultConfig from '../../firebase-applet-config.json';
 
-export { defaultStudentPermissions, syncDocToCloud, deleteDocFromCloud };
+export { defaultStudentPermissions, syncDocToCloud, deleteDocFromCloud, syncBatchDocsToCloud };
 
 const STORAGE_KEYS = {
   TOPICS: 'study_app_topics',
@@ -211,28 +212,40 @@ export function saveStats(stats: UserStats, userId?: string) {
 
 export function loadSettings(userId?: string): AppSettings {
   const activeUserId = userId || getCurrentUser()?.id;
+  let loaded: AppSettings;
   if (activeUserId) {
     const userSettingsKey = `${STORAGE_KEYS.SETTINGS}_${activeUserId}`;
     const userSpecific = safeParse<AppSettings | null>(userSettingsKey, null);
     if (userSpecific) {
-      return { ...defaultSettings, ...userSpecific };
+      loaded = { ...defaultSettings, ...userSpecific };
+    } else {
+      const currentUser = getCurrentUser();
+      if (currentUser && currentUser.id === activeUserId && currentUser.settings) {
+        localStorage.setItem(userSettingsKey, JSON.stringify(currentUser.settings));
+        loaded = { ...defaultSettings, ...currentUser.settings };
+      } else {
+        // Also check all loaded users (e.g. synced from cloud)
+        const allUsers = safeParse<User[]>(STORAGE_KEYS.USERS, []);
+        const found = allUsers.find(u => u.id === activeUserId);
+        if (found && found.settings) {
+          localStorage.setItem(userSettingsKey, JSON.stringify(found.settings));
+          loaded = { ...defaultSettings, ...found.settings };
+        } else {
+          // Return pristine default settings for this account without leaking other accounts' keys/models
+          loaded = { ...defaultSettings };
+        }
+      }
     }
-    const currentUser = getCurrentUser();
-    if (currentUser && currentUser.id === activeUserId && currentUser.settings) {
-      localStorage.setItem(userSettingsKey, JSON.stringify(currentUser.settings));
-      return { ...defaultSettings, ...currentUser.settings };
-    }
-    // Also check all loaded users (e.g. synced from cloud)
-    const allUsers = safeParse<User[]>(STORAGE_KEYS.USERS, []);
-    const found = allUsers.find(u => u.id === activeUserId);
-    if (found && found.settings) {
-      localStorage.setItem(userSettingsKey, JSON.stringify(found.settings));
-      return { ...defaultSettings, ...found.settings };
-    }
-    // Return pristine default settings for this account without leaking other accounts' keys/models
-    return { ...defaultSettings };
+  } else {
+    loaded = safeParse<AppSettings>(STORAGE_KEYS.SETTINGS, defaultSettings);
   }
-  return safeParse<AppSettings>(STORAGE_KEYS.SETTINGS, defaultSettings);
+
+  // Giữ nguyên đúng model và cấu hình mà người dùng đã lưu, chỉ lấy mặc định nếu chưa từng có giá trị
+  if (!loaded.aiModel) {
+    loaded.aiModel = defaultSettings.aiModel || 'gemini-3.1-flash-lite';
+  }
+
+  return loaded;
 }
 
 export function saveSettings(settings: AppSettings, userId?: string) {
@@ -556,14 +569,20 @@ export function reorderTopics(orderedTopics: Topic[]): Topic[] {
   const orderMap = new Map<string, number>();
   orderedTopics.forEach((t, idx) => orderMap.set(t.id, idx));
 
+  const changedTopics: Topic[] = [];
   const next = currentTopics.map(t => {
     if (orderMap.has(t.id)) {
-      return { ...t, order: orderMap.get(t.id)! };
+      const updated = { ...t, order: orderMap.get(t.id)! };
+      changedTopics.push(updated);
+      return updated;
     }
     return t;
   });
 
   saveTopics(next);
+  if (changedTopics.length > 0) {
+    syncBatchDocsToCloud('topics', changedTopics);
+  }
   return next;
 }
 
@@ -572,14 +591,20 @@ export function reorderLessons(orderedLessons: Lesson[]): Lesson[] {
   const orderMap = new Map<string, number>();
   orderedLessons.forEach((l, idx) => orderMap.set(l.id, idx));
 
+  const changedLessons: Lesson[] = [];
   const next = currentLessons.map(l => {
     if (orderMap.has(l.id)) {
-      return { ...l, order: orderMap.get(l.id)! };
+      const updated = { ...l, order: orderMap.get(l.id)! };
+      changedLessons.push(updated);
+      return updated;
     }
     return l;
   });
 
   saveLessons(next);
+  if (changedLessons.length > 0) {
+    syncBatchDocsToCloud('lessons', changedLessons);
+  }
   return next;
 }
 
@@ -588,14 +613,20 @@ export function reorderExercises(orderedExercises: Exercise[]): Exercise[] {
   const orderMap = new Map<string, number>();
   orderedExercises.forEach((e, idx) => orderMap.set(e.id, idx));
 
+  const changedExercises: Exercise[] = [];
   const next = currentExercises.map(e => {
     if (orderMap.has(e.id)) {
-      return { ...e, order: orderMap.get(e.id)! };
+      const updated = { ...e, order: orderMap.get(e.id)! };
+      changedExercises.push(updated);
+      return updated;
     }
     return e;
   });
 
   saveExercises(next);
+  if (changedExercises.length > 0) {
+    syncBatchDocsToCloud('exercises', changedExercises);
+  }
   return next;
 }
 
@@ -996,13 +1027,20 @@ export function bulkDeleteTopics(topicIds: string[]): {
 
 export function bulkMoveTopics(topicIds: string[], targetClassroomId: string): Topic[] {
   const topicIdSet = new Set(topicIds);
+  const updatedTopicsList: Topic[] = [];
   const topics = loadTopics().map(t => {
     if (topicIdSet.has(t.id)) {
-      return { ...t, classroomId: targetClassroomId };
+      const updated = { ...t, classroomId: targetClassroomId };
+      updatedTopicsList.push(updated);
+      syncDocToCloud('topics', updated.id, updated);
+      return updated;
     }
     return t;
   });
   saveTopics(topics);
+  if (updatedTopicsList.length > 0) {
+    syncBatchDocsToCloud('topics', updatedTopicsList);
+  }
   return topics;
 }
 
@@ -1070,6 +1108,20 @@ export function bulkDuplicateTopics(
   saveLessons(updatedLessons);
   saveExercises(updatedExercises);
 
+  // Sync duplicates to Cloud
+  if (newTopics.length > 0) {
+    newTopics.forEach(t => syncDocToCloud('topics', t.id, t));
+    syncBatchDocsToCloud('topics', newTopics);
+  }
+  if (newLessons.length > 0) {
+    newLessons.forEach(l => syncDocToCloud('lessons', l.id, l));
+    syncBatchDocsToCloud('lessons', newLessons);
+  }
+  if (newExercises.length > 0) {
+    newExercises.forEach(e => syncDocToCloud('exercises', e.id, e));
+    syncBatchDocsToCloud('exercises', newExercises);
+  }
+
   return {
     topics: updatedTopics,
     lessons: updatedLessons,
@@ -1110,13 +1162,20 @@ export function bulkDeleteLessons(lessonIds: string[]): {
 
 export function bulkMoveLessons(lessonIds: string[], targetTopicId: string): Lesson[] {
   const lessonIdSet = new Set(lessonIds);
+  const updatedLessonsList: Lesson[] = [];
   const lessons = loadLessons().map(l => {
     if (lessonIdSet.has(l.id)) {
-      return { ...l, topicId: targetTopicId };
+      const updated = { ...l, topicId: targetTopicId };
+      updatedLessonsList.push(updated);
+      syncDocToCloud('lessons', updated.id, updated);
+      return updated;
     }
     return l;
   });
   saveLessons(lessons);
+  if (updatedLessonsList.length > 0) {
+    syncBatchDocsToCloud('lessons', updatedLessonsList);
+  }
   return lessons;
 }
 
@@ -1165,6 +1224,16 @@ export function bulkDuplicateLessons(
   saveLessons(updatedLessons);
   saveExercises(updatedExercises);
 
+  // Sync duplicates to Cloud
+  if (newLessons.length > 0) {
+    newLessons.forEach(l => syncDocToCloud('lessons', l.id, l));
+    syncBatchDocsToCloud('lessons', newLessons);
+  }
+  if (newExercises.length > 0) {
+    newExercises.forEach(e => syncDocToCloud('exercises', e.id, e));
+    syncBatchDocsToCloud('exercises', newExercises);
+  }
+
   return {
     lessons: updatedLessons,
     exercises: updatedExercises,
@@ -1195,13 +1264,20 @@ export function bulkDeleteExercises(exerciseIds: string[]): {
 
 export function bulkMoveExercises(exerciseIds: string[], targetLessonId: string): Exercise[] {
   const exerciseIdSet = new Set(exerciseIds);
+  const updatedExercisesList: Exercise[] = [];
   const exercises = loadExercises().map(e => {
     if (exerciseIdSet.has(e.id)) {
-      return { ...e, lessonId: targetLessonId };
+      const updated = { ...e, lessonId: targetLessonId };
+      updatedExercisesList.push(updated);
+      syncDocToCloud('exercises', updated.id, updated);
+      return updated;
     }
     return e;
   });
   saveExercises(exercises);
+  if (updatedExercisesList.length > 0) {
+    syncBatchDocsToCloud('exercises', updatedExercisesList);
+  }
   return exercises;
 }
 
@@ -1229,6 +1305,10 @@ export function bulkDuplicateExercises(
 
   const updatedExercises = [...allExercises, ...newExercises];
   saveExercises(updatedExercises);
+  if (newExercises.length > 0) {
+    newExercises.forEach(e => syncDocToCloud('exercises', e.id, e));
+    syncBatchDocsToCloud('exercises', newExercises);
+  }
   return updatedExercises;
 }
 

@@ -28,6 +28,7 @@ import { AI_PROVIDERS, PROVIDER_LIST, getModelInfo } from '../utils/aiProviders'
 import { DEFAULT_MASCOT_PROMPTS, MASCOT_HANDLES } from '../utils/mascotAI';
 import { MASCOT_LIST } from '../utils/mascotSprites';
 import { useTheme } from '../context/ThemeContext';
+import { soundManager } from '../utils/audio';
 
 interface OpenCodeModelPickerProps {
   isOpen: boolean;
@@ -49,7 +50,8 @@ interface OpenCodeModelPickerProps {
     updatedProviderApiKeys?: Partial<Record<AIProviderType, string>>,
     updatedProviderBaseUrls?: Partial<Record<AIProviderType, string>>,
     updatedMascotPrompts?: Partial<Record<MascotType, string>>,
-    updatedCustomModels?: Partial<Record<AIProviderType, CustomAIModel[]>>
+    updatedCustomModels?: Partial<Record<AIProviderType, CustomAIModel[]>>,
+    selectedMascotId?: MascotType
   ) => void;
 }
 
@@ -64,11 +66,12 @@ export const OpenCodeModelPicker: React.FC<OpenCodeModelPickerProps> = ({
   providerBaseUrls = {},
   customProviderModels = {},
   mascotCustomPrompts = {},
-  currentMascotId = 'fox',
+  currentMascotId,
   onSelectModel,
 }) => {
-  const { getThemeClasses } = useTheme();
+  const { settings, updateSettings, getThemeClasses } = useTheme();
   const theme = getThemeClasses();
+  const effectiveCurrentMascot = currentMascotId || settings.mascotType || 'osananajimi';
 
   // Active top tab: 'models' | 'personalities'
   const [activeTab, setActiveTab] = useState<'models' | 'personalities'>('models');
@@ -119,12 +122,12 @@ export const OpenCodeModelPicker: React.FC<OpenCodeModelPickerProps> = ({
   const [testLatency, setTestLatency] = useState<number | null>(null);
 
   // Personality editing state
-  const [selectedMascot, setSelectedMascot] = useState<MascotType>(currentMascotId);
+  const [selectedMascot, setSelectedMascot] = useState<MascotType>(effectiveCurrentMascot);
   const [customPrompts, setCustomPrompts] = useState<Partial<Record<MascotType, string>>>(() => ({
     ...mascotCustomPrompts
   }));
   const [personalityDraft, setPersonalityDraft] = useState<string>(
-    mascotCustomPrompts[currentMascotId] || ''
+    mascotCustomPrompts[effectiveCurrentMascot] || (settings.mascotCustomPrompts && settings.mascotCustomPrompts[effectiveCurrentMascot]) || ''
   );
   const [showDefaultPromptPreview, setShowDefaultPromptPreview] = useState<boolean>(false);
 
@@ -133,14 +136,15 @@ export const OpenCodeModelPicker: React.FC<OpenCodeModelPickerProps> = ({
   useEffect(() => {
     if (isOpen && !wasOpenRef.current) {
       wasOpenRef.current = true;
+      const curMascot = currentMascotId || settings.mascotType || 'osananajimi';
       setActiveProvider(currentProvider || 'gemini');
       setSelectedModelId(currentModel || AI_PROVIDERS.gemini.defaultModel);
       setApiKeyInput(providerApiKeys[currentProvider] || savedApiKey || '');
       setBaseUrlInput(providerBaseUrls[currentProvider] || savedBaseUrl || '');
       setCustomModelsByProvider(customProviderModels || {});
-      setSelectedMascot(currentMascotId);
-      setPersonalityDraft(mascotCustomPrompts[currentMascotId] || '');
-      setCustomPrompts({ ...mascotCustomPrompts });
+      setSelectedMascot(curMascot);
+      setPersonalityDraft(mascotCustomPrompts[curMascot] || (settings.mascotCustomPrompts && settings.mascotCustomPrompts[curMascot]) || '');
+      setCustomPrompts({ ...settings.mascotCustomPrompts, ...mascotCustomPrompts });
       setIsAddingModel(false);
 
       // Check if current model is outside default list
@@ -285,7 +289,7 @@ export const OpenCodeModelPicker: React.FC<OpenCodeModelPickerProps> = ({
     }
   };
 
-  // Switch Mascot for personality editing
+  // Switch Mascot for personality editing and active companion
   const handleSelectMascotForPersonality = (mascotId: MascotType) => {
     // Save current draft before switching
     setCustomPrompts(prev => ({
@@ -294,8 +298,16 @@ export const OpenCodeModelPicker: React.FC<OpenCodeModelPickerProps> = ({
     }));
 
     setSelectedMascot(mascotId);
-    setPersonalityDraft(customPrompts[mascotId] || '');
+    setPersonalityDraft(customPrompts[mascotId] || (settings.mascotCustomPrompts && settings.mascotCustomPrompts[mascotId]) || '');
     setShowDefaultPromptPreview(false);
+
+    // Provide instant audio feedback & switch the active mascot across the whole app
+    try {
+      soundManager.playMascotPoke();
+    } catch {
+      // ignore
+    }
+    updateSettings({ mascotType: mascotId });
   };
 
   const handleResetCurrentMascotPersonality = () => {
@@ -353,6 +365,19 @@ export const OpenCodeModelPicker: React.FC<OpenCodeModelPickerProps> = ({
       delete updatedPrompts[selectedMascot];
     }
 
+    // Persist to theme settings
+    updateSettings({
+      aiProviderType: activeProvider,
+      aiModel: finalModel,
+      mascotType: selectedMascot,
+      mascotCustomPrompts: updatedPrompts,
+      customProviderModels: customModelsByProvider,
+      providerApiKeys: updatedKeys,
+      providerBaseUrls: updatedUrls,
+      ...(finalKey !== undefined ? { customApiKey: finalKey, customGeminiApiKey: activeProvider === 'gemini' ? finalKey : undefined } : {}),
+      ...(finalUrl !== undefined ? { customBaseUrl: finalUrl } : {}),
+    });
+
     onSelectModel(
       activeProvider,
       finalModel,
@@ -361,7 +386,8 @@ export const OpenCodeModelPicker: React.FC<OpenCodeModelPickerProps> = ({
       updatedKeys,
       updatedUrls,
       updatedPrompts,
-      customModelsByProvider
+      customModelsByProvider,
+      selectedMascot
     );
     onClose();
   };
@@ -807,7 +833,7 @@ export const OpenCodeModelPicker: React.FC<OpenCodeModelPickerProps> = ({
                       type="text"
                       value={baseUrlInput}
                       onChange={e => handleUrlChange(e.target.value)}
-                      placeholder={activeProvider === 'openrouter' ? 'https://openrouter.ai/api/v1' : 'https://your-api-endpoint.com/v1'}
+                      placeholder={activeProvider === 'openrouter' ? 'https://openrouter.ai/api/v1' : 'VD: https://api.xpiki.com/v1 hoặc endpoint tương thích OpenAI'}
                       className={`w-full px-3 py-2 text-xs rounded-xl ${theme.inputBg} border ${theme.border} ${theme.text} font-mono focus:outline-hidden focus:border-emerald-500 placeholder:text-neutral-400 dark:placeholder:text-neutral-500`}
                     />
                   </div>
@@ -830,9 +856,14 @@ export const OpenCodeModelPicker: React.FC<OpenCodeModelPickerProps> = ({
 
               {/* Mascot Selector Tabs */}
               <div>
-                <label className={`text-xs font-bold uppercase tracking-wider block mb-2 ${theme.textMuted}`}>
-                  Chọn Linh Vật Để Điều Chỉnh
-                </label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className={`text-xs font-bold uppercase tracking-wider block ${theme.textMuted}`}>
+                    Chọn Linh Vật Để Điều Chỉnh & Đồng Hành
+                  </label>
+                  <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                    Đang chọn: <strong>{currentMascotObj.name}</strong>
+                  </span>
+                </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {MASCOT_LIST.map(m => {
                     const isSelected = selectedMascot === m.id;
@@ -841,20 +872,26 @@ export const OpenCodeModelPicker: React.FC<OpenCodeModelPickerProps> = ({
                     return (
                       <button
                         key={m.id}
+                        id={`btn-picker-mascot-${m.id}`}
                         type="button"
                         onClick={() => handleSelectMascotForPersonality(m.id)}
-                        className={`p-2 rounded-xl border text-left flex items-center gap-2 transition-all cursor-pointer ${
+                        className={`p-2.5 rounded-xl border text-left flex items-center gap-2 transition-all cursor-pointer relative group ${
                           isSelected
-                            ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold shadow-xs'
-                            : `${theme.border} ${theme.highlight} ${theme.text} hover:opacity-80`
+                            ? 'border-emerald-500 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold shadow-xs ring-1 ring-emerald-500/40'
+                            : `${theme.border} ${theme.highlight} ${theme.text} hover:opacity-80 hover:border-emerald-500/30`
                         }`}
                       >
-                        <span className="text-base">{m.emoji}</span>
-                        <div className="min-w-0 flex-1">
+                        <span className="text-xl shrink-0 group-hover:scale-110 transition-transform">{m.emoji}</span>
+                        <div className="min-w-0 flex-1 pr-3">
                           <p className="text-xs truncate font-semibold">{m.name}</p>
                           <p className={`text-[10px] ${theme.textMuted} font-mono truncate`}>{handle}</p>
                         </div>
-                        {hasCustom && (
+                        {isSelected && (
+                          <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[10px] font-bold shadow-xs">
+                            ✓
+                          </span>
+                        )}
+                        {hasCustom && !isSelected && (
                           <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" title="Có tính cách tùy biến" />
                         )}
                       </button>

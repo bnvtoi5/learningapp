@@ -21,19 +21,27 @@ import {
   MatchingPair,
   MediaAsset,
   SubQuestion,
-  SubQuestionType 
+  SubQuestionType,
+  Lesson,
+  Topic,
+  Classroom
 } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import { MediaLibraryModal } from './MediaLibraryModal';
+import { createClozeLettersPattern } from '../utils/singleVocabGenerator';
 
 interface ExerciseEditModalProps {
   exercise: Exercise | null;
   isOpen: boolean;
   onClose: () => void;
   onSave: (updatedExercise: Exercise) => void;
+  lessons?: Lesson[];
+  topics?: Topic[];
+  classrooms?: Classroom[];
 }
 
 const EXERCISE_TYPES: { type: ExerciseType; label: string }[] = [
+  { type: 'pronunciation', label: '🎙️ Luyện phát âm (Pronunciation Drill)' },
   { type: 'vocab_cloze', label: 'Khuyết ký tự từ vựng (Spelling Cloze)' },
   { type: 'flashcard_recall', label: 'Lật thẻ ghi nhớ (Flashcard Recall)' },
   { type: 'listen_spell', label: 'Nghe phát âm & gõ từ (Dictation)' },
@@ -58,10 +66,14 @@ export const ExerciseEditModal: React.FC<ExerciseEditModalProps> = ({
   isOpen,
   onClose,
   onSave,
+  lessons,
+  topics,
+  classrooms,
 }) => {
   const { getThemeClasses } = useTheme();
   const theme = getThemeClasses();
 
+  const [exLessonId, setExLessonId] = useState<string>('');
   const [exType, setExType] = useState<ExerciseType>('multiple_choice');
   const [exSkill, setExSkill] = useState<SkillCategory>('vocabulary');
   const [exDifficulty, setExDifficulty] = useState<DifficultyLevel>('guided');
@@ -74,6 +86,7 @@ export const ExerciseEditModal: React.FC<ExerciseEditModalProps> = ({
   const [exWrongSentence, setExWrongSentence] = useState('');
   const [exErrorType, setExErrorType] = useState('');
   const [exIsHidden, setExIsHidden] = useState<boolean>(false);
+  const [pronunciationAccuracy, setPronunciationAccuracy] = useState<number>(70);
 
   // Vocab fields
   const [vocabWord, setVocabWord] = useState('');
@@ -122,6 +135,8 @@ export const ExerciseEditModal: React.FC<ExerciseEditModalProps> = ({
     setExWrongSentence(exercise.wrongSentence || '');
     setExErrorType(exercise.errorType || '');
     setExIsHidden(!!exercise.isHidden);
+    setExLessonId(exercise.lessonId || '');
+    setPronunciationAccuracy(exercise.pronunciationAccuracy ?? 70);
 
     // Audio / Listening
     setAudioUrl(exercise.audioUrl || '');
@@ -294,6 +309,15 @@ export const ExerciseEditModal: React.FC<ExerciseEditModalProps> = ({
     } else if (exType === 'error_correction') {
       updated.wrongSentence = exWrongSentence.trim();
       updated.errorType = exErrorType.trim();
+    } else if (exType === 'pronunciation') {
+      const target = (exCorrectText.trim() || vocabWord.trim() || exQuestion.trim());
+      const words = target.split(/\s+/).filter(Boolean);
+      const isSingle = words.length <= 1;
+      updated.correctText = target;
+      updated.vocabWord = isSingle ? target : undefined;
+      updated.pronunciationAccuracy = isSingle ? 100 : pronunciationAccuracy;
+      updated.isSingleWord = isSingle;
+      updated.targetWordsCount = words.length;
     } else if (exType === 'sentence_builder') {
       updated.scrambledWords = (exCorrectText.trim() || vocabWord.trim()).split(/\s+/);
     } else if (exType === 'spelling') {
@@ -320,6 +344,10 @@ export const ExerciseEditModal: React.FC<ExerciseEditModalProps> = ({
     } else if (exType === 'reading') {
       updated.readingQuestionType = readingQuestionType;
       updated.evidenceRegion = evidenceRegion.trim() || undefined;
+    }
+
+    if (exLessonId) {
+      updated.lessonId = exLessonId;
     }
 
     onSave(updated);
@@ -387,6 +415,38 @@ export const ExerciseEditModal: React.FC<ExerciseEditModalProps> = ({
               <div className="w-9 h-5 bg-neutral-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
             </label>
           </div>
+
+          {/* Lesson Selector / Transfer Exercise */}
+          {lessons && lessons.length > 0 && (
+            <div className={`p-3 rounded-xl border ${theme.border} ${theme.badgeBg} space-y-1.5`}>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold block flex items-center gap-1.5">
+                  <BookOpen className="w-3.5 h-3.5 text-sky-500" />
+                  <span>Bài học trực thuộc:</span>
+                </label>
+                {exercise && exLessonId !== exercise.lessonId && (
+                  <span className="text-amber-500 text-[11px] font-semibold bg-amber-500/10 px-2 py-0.5 rounded-full animate-pulse">
+                    ⚡ Sẽ chuyển sang bài học mới khi lưu
+                  </span>
+                )}
+              </div>
+              <select
+                value={exLessonId}
+                onChange={e => setExLessonId(e.target.value)}
+                className={`w-full px-3 py-2 text-xs rounded-xl ${theme.inputBg} border ${theme.border} focus:outline-none focus:border-sky-500 font-medium`}
+              >
+                {lessons.map(l => {
+                  const tp = topics?.find(t => t.id === l.topicId);
+                  const cl = tp ? classrooms?.find(c => c.id === tp.classroomId) : null;
+                  return (
+                    <option key={l.id} value={l.id}>
+                      {cl ? `[${cl.name}] ` : ''}{tp ? `${tp.title} → ` : ''}{l.title}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          )}
 
           {/* Type & Skill & Difficulty Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -957,6 +1017,82 @@ export const ExerciseEditModal: React.FC<ExerciseEditModalProps> = ({
             </div>
           )}
 
+          {/* Pronunciation Drill specific fields */}
+          {exType === 'pronunciation' && (() => {
+            const currentTarget = (exCorrectText.trim() || vocabWord.trim());
+            const words = currentTarget.split(/\s+/).filter(Boolean);
+            const isSingle = words.length <= 1;
+            return (
+              <div className="p-3.5 rounded-xl border border-teal-500/30 bg-teal-500/5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-teal-500">
+                    🎙️ Cài đặt bài tập phát âm (Pronunciation Drill):
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">
+                    {isSingle ? 'Từ đơn lẻ (yêu cầu 100%)' : `Câu (${words.length} từ) - Yêu cầu ≥ ${pronunciationAccuracy}%`}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className={`text-xs font-semibold ${theme.textMuted} block mb-1`}>Từ hoặc câu mục tiêu *:</label>
+                    <input
+                      type="text"
+                      value={exCorrectText || vocabWord}
+                      onChange={e => {
+                        setExCorrectText(e.target.value);
+                        if (e.target.value.split(/\s+/).filter(Boolean).length <= 1) {
+                          setVocabWord(e.target.value);
+                        }
+                      }}
+                      placeholder="VD: apple hoặc Good morning, how are you today?"
+                      className={`w-full p-2 rounded-xl ${theme.inputBg} text-xs border ${theme.border} font-semibold`}
+                    />
+                  </div>
+                  <div>
+                    <label className={`text-xs font-semibold ${theme.textMuted} block mb-1`}>Nghĩa tiếng Việt / Dịch câu:</label>
+                    <input
+                      type="text"
+                      value={vocabMeaning}
+                      onChange={e => setVocabMeaning(e.target.value)}
+                      placeholder="VD: quả táo / Chào buổi sáng..."
+                      className={`w-full p-2 rounded-xl ${theme.inputBg} text-xs border ${theme.border}`}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className={`text-xs font-semibold ${theme.textMuted} block mb-1`}>Phiên âm IPA (tùy chọn):</label>
+                  <input
+                    type="text"
+                    value={phonetic}
+                    onChange={e => setPhonetic(e.target.value)}
+                    placeholder="VD: /ˈæp.əl/"
+                    className={`w-full p-2 rounded-xl ${theme.inputBg} text-xs border ${theme.border} font-mono`}
+                  />
+                </div>
+
+                {!isSingle && (
+                  <div className="pt-2 border-t border-teal-500/20 space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold">Tỷ lệ % độ chính xác bắt buộc:</span>
+                      <span className="font-bold text-teal-500">{pronunciationAccuracy}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="50"
+                      max="95"
+                      step="5"
+                      value={pronunciationAccuracy}
+                      onChange={e => setPronunciationAccuracy(Number(e.target.value))}
+                      className="w-full h-2 bg-neutral-200 dark:bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-teal-500"
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           {/* Vocab Cloze specific fields */}
           {exType === 'vocab_cloze' && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl border border-inherit">
@@ -991,13 +1127,28 @@ export const ExerciseEditModal: React.FC<ExerciseEditModalProps> = ({
                 />
               </div>
               <div>
-                <label className={`text-xs font-semibold ${theme.textMuted} block mb-1`}>Khuyết ký tự (gợi ý):</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className={`text-xs font-semibold ${theme.textMuted}`}>Khuyết ký tự (gợi ý):</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const word = (vocabWord || exCorrectText || '').trim();
+                      if (word) {
+                        const { clozeLetters: pattern } = createClozeLettersPattern(word);
+                        setClozeLetters(pattern);
+                      }
+                    }}
+                    className="text-[11px] text-sky-500 hover:underline cursor-pointer font-medium"
+                  >
+                    ⚡ Tự tạo lại mẫu chuẩn
+                  </button>
+                </div>
                 <input
                   type="text"
                   value={clozeLetters}
                   onChange={e => setClozeLetters(e.target.value)}
                   placeholder="VD: f _ _ e n d l y"
-                  className={`w-full p-2 rounded-xl ${theme.inputBg} text-xs border ${theme.border}`}
+                  className={`w-full p-2 rounded-xl ${theme.inputBg} text-xs border ${theme.border} font-mono`}
                 />
               </div>
             </div>

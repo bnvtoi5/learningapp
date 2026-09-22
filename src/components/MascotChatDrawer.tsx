@@ -45,6 +45,7 @@ import { OpenCodeModelPicker } from './OpenCodeModelPicker';
 import { getModelInfo } from '../utils/aiProviders';
 import { QUICK_COMMAND_ICONS } from './AdminQuickCommandsManager';
 import { ConfirmModal } from './ConfirmModal';
+import { ChatMessageRenderer } from './ChatMessageRenderer';
 
 interface MascotChatDrawerProps {
   isOpen: boolean;
@@ -737,10 +738,10 @@ ${activePromptText}
 
                 {/* Bubble Container */}
                 <div
-                  className={`max-w-[85%] sm:max-w-[80%] rounded-2xl p-3 text-xs sm:text-sm shadow-xs select-text ${
+                  className={`rounded-2xl p-3 sm:p-3.5 text-xs sm:text-sm shadow-xs select-text transition-all ${
                     isUser
-                      ? 'bg-emerald-600 text-white rounded-br-xs'
-                      : `border ${theme.border} ${theme.highlight} ${theme.text} rounded-bl-xs`
+                      ? 'max-w-[85%] sm:max-w-[80%] bg-emerald-600 text-white rounded-br-xs'
+                      : `w-full max-w-[94%] sm:max-w-[90%] border ${theme.border} ${theme.highlight} ${theme.text} rounded-bl-xs`
                   }`}
                 >
                   {/* Quoted Message - Click để nhảy tới tin nhắn gốc */}
@@ -805,9 +806,9 @@ ${activePromptText}
                     </div>
                   )}
 
-                  {/* Message Content */}
-                  <div className="whitespace-pre-wrap break-words">
-                    {msg.text}
+                  {/* Message Content with Rich Markdown, GFM Tables & Interactive Code Blocks */}
+                  <div className="w-full">
+                    <ChatMessageRenderer content={msg.text} isUser={isUser} />
                   </div>
 
                   {/* Timestamp & Bot label */}
@@ -1049,7 +1050,8 @@ ${activePromptText}
           updatedProviderApiKeys, 
           updatedProviderBaseUrls, 
           updatedMascotPrompts,
-          updatedCustomModels
+          updatedCustomModels,
+          selectedMascotId
         ) => {
           setActiveProvider(provider);
           setActiveModel(modelId);
@@ -1064,6 +1066,7 @@ ${activePromptText}
             ...(updatedProviderBaseUrls ? { providerBaseUrls: updatedProviderBaseUrls } : {}),
             ...(updatedMascotPrompts ? { mascotCustomPrompts: updatedMascotPrompts } : {}),
             ...(updatedCustomModels ? { customProviderModels: updatedCustomModels } : {}),
+            ...(selectedMascotId ? { mascotType: selectedMascotId } : {}),
           });
         }}
       />

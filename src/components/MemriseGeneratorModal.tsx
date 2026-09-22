@@ -251,14 +251,14 @@ creative: sáng tạo, giàu trí tưởng tượng`
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-base sm:text-lg font-bold">
-                  AI Memrise: Tạo Bộ 4 Dạng Bài Tập Từ Vựng
+                  AI Memrise: Tạo Bộ Bài Tập Từ Vựng Đa Dạng (Flashcard & 6 Dạng Quiz)
                 </h3>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-500 border border-amber-500/30">
                   Memrise Style
                 </span>
               </div>
               <p className={`text-xs ${theme.textMuted}`}>
-                Chuyển danh sách từ vựng thành 4 dạng: Trắc nghiệm 4 đáp án, Điền từ vào ví dụ, Xếp chữ cái và Tự gõ từ
+                Chuyển danh sách từ vựng thành Flashcard Active Recall + 6 dạng Quiz: Trắc nghiệm xuôi/đảo, Điền ví dụ, Khuyết ký tự, Xếp chữ cái và Tự gõ từ
               </p>
             </div>
           </div>
@@ -614,6 +614,7 @@ creative: sáng tạo, giàu trí tưởng tượng`
                                 <span className="font-bold flex items-center gap-1 text-emerald-400">
                                   {ex.type === 'multiple_choice' && (ex.is_reverse ? 'Trắc nghiệm đảo ngược (Nghĩa ➔ Từ)' : 'Trắc nghiệm (Từ ➔ Nghĩa)')}
                                   {ex.type === 'fill_in_blank' && 'Điền từ (Fill in Blank)'}
+                                  {ex.type === 'vocab_cloze' && 'Khuyết ký tự (Vocab Cloze)'}
                                   {ex.type === 'spelling' && 'Sắp xếp ký tự (Spelling)'}
                                   {ex.type === 'typing' && 'Tự gõ từ (Typing)'}
                                 </span>
@@ -647,6 +648,15 @@ creative: sáng tạo, giàu trí tưởng tượng`
                                 <p className="text-[10px] text-sky-400 italic">
                                   Gợi ý: {ex.hint}
                                 </p>
+                              )}
+
+                              {ex.type === 'vocab_cloze' && (ex.clozeLetters || ex.clozeTemplate) && (
+                                <div className="flex items-center gap-2 pt-1 font-mono text-xs font-bold text-amber-300">
+                                  <span className="text-[10px] text-neutral-400 font-sans">Mẫu khuyết:</span>
+                                  <span className="bg-neutral-800 px-2 py-0.5 rounded border border-neutral-700 tracking-wider">
+                                    {ex.clozeLetters || ex.clozeTemplate}
+                                  </span>
+                                </div>
                               )}
 
                               {ex.shuffled_letters && (

@@ -11,6 +11,7 @@ export interface ClassroomCascadingFilterProps {
   selectedClassId: string;
   onSelectClassId: (classId: string) => void;
   showAllOption?: boolean;
+  allOptionLabel?: string;
   allNameLabel?: string;
   allCodeLabel?: string;
   layout?: 'horizontal' | 'vertical';
@@ -25,7 +26,8 @@ export const ClassroomCascadingFilter: React.FC<ClassroomCascadingFilterProps> =
   selectedClassId,
   onSelectClassId,
   showAllOption = true,
-  allNameLabel = 'Tất cả Tên Lớp',
+  allOptionLabel,
+  allNameLabel = allOptionLabel || 'Tất cả Tên Lớp',
   allCodeLabel = 'Tất cả Mã Lớp',
   layout = 'horizontal',
   size = 'sm',

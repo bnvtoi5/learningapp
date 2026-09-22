@@ -8,15 +8,18 @@ import {
   Trash2, 
   FileText, 
   CheckCircle2, 
-  AlertCircle,
-  HelpCircle,
-  Edit3,
-  Shuffle,
-  Volume2,
-  Code
+  AlertCircle, 
+  HelpCircle, 
+  Edit3, 
+  Shuffle, 
+  Volume2, 
+  Code,
+  Type
 } from 'lucide-react';
-import { Lesson, Topic, Exercise, ExerciseType, MemriseExerciseItem, MemriseGenerationResponse } from '../types';
+import { Lesson, Topic, Exercise, MemriseExerciseItem } from '../types';
 import { useTheme } from '../context/ThemeContext';
+import { convertMemriseItemToExercise, generateMemriseExercisesFromAI } from '../utils/memriseGenerator';
+import { parseVocabList } from '../utils/singleVocabGenerator';
 
 interface MemriseExerciseGeneratorProps {
   lessons: Lesson[];
@@ -26,7 +29,13 @@ interface MemriseExerciseGeneratorProps {
   onFinished?: () => void;
 }
 
-const SAMPLE_WORDS = ['resilient', 'authentic', 'diligent', 'profound', 'empathy'];
+const SAMPLE_WORDS = [
+  'resilient: kiên cường, mau phục hồi',
+  'authentic: đích thực, chân thật',
+  'diligent: chăm chỉ, cần cù',
+  'profound: sâu sắc, uyên thâm',
+  'empathy: sự thấu cảm, đồng cảm'
+];
 
 export const MemriseExerciseGenerator: React.FC<MemriseExerciseGeneratorProps> = ({
   lessons = [],
@@ -52,17 +61,14 @@ export const MemriseExerciseGenerator: React.FC<MemriseExerciseGeneratorProps> =
   const [jsonInput, setJsonInput] = useState<string>('');
   const [isCopied, setIsCopied] = useState<boolean>(false);
 
-  // Parse words from raw input
-  const parsedWords = React.useMemo(() => {
-    return vocabInput
-      .split(/[\n,;]+/)
-      .map(w => w.replace(/^[\d\s.\-•*)]+/, '').trim())
-      .filter(w => w.length > 0);
+  // Parse words from raw input using standard single vocab line parser
+  const parsedVocab = React.useMemo(() => {
+    return parseVocabList(vocabInput);
   }, [vocabInput]);
 
   const uniqueWords = React.useMemo(() => {
-    return Array.from(new Set(parsedWords));
-  }, [parsedWords]);
+    return Array.from(new Set(parsedVocab.map(item => item.word)));
+  }, [parsedVocab]);
 
   // Group generated exercises by word
   const groupedExercises = React.useMemo(() => {
@@ -80,7 +86,7 @@ export const MemriseExerciseGenerator: React.FC<MemriseExerciseGeneratorProps> =
     setErrorMsg(null);
     setSuccessMsg(null);
 
-    if (uniqueWords.length === 0) {
+    if (parsedVocab.length === 0) {
       setErrorMsg('Danh sách từ vựng trống. Vui lòng cung cấp dữ liệu từ vựng cần xử lý.');
       return;
     }
@@ -98,29 +104,22 @@ export const MemriseExerciseGenerator: React.FC<MemriseExerciseGeneratorProps> =
       : (settings.aiModel || 'gemini-3.1-flash-lite');
 
     try {
-      const response = await fetch('/api/generate-memrise-exercises', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          vocabularyList: uniqueWords,
-          vocabList: uniqueWords,
-          customApiKey: geminiApiKey,
-          model: effectiveModel,
-          batchSize: 3
-        }),
+      const result = await generateMemriseExercisesFromAI({
+        vocabInput,
+        customApiKey: geminiApiKey,
+        model: effectiveModel,
+        batchSize: 3
       });
 
-      const data: MemriseGenerationResponse = await response.json();
-
-      if (data.error) {
-        setErrorMsg(data.error);
+      if (result.status === 'error' || result.error) {
+        setErrorMsg(result.error || 'Có lỗi khi tạo bài tập Memrise.');
         setIsGenerating(false);
         return;
       }
 
-      if (data.exercises && data.exercises.length > 0) {
-        setGeneratedExercises(data.exercises);
-        setSuccessMsg(`Đã tạo thành công ${data.exercises.length} bài tập Memrise cho ${data.total_words_processed || uniqueWords.length} từ vựng!`);
+      if (result.exercises && result.exercises.length > 0) {
+        setGeneratedExercises(result.exercises);
+        setSuccessMsg(`Đã tạo thành công ${result.exercises.length} bài tập Memrise cho ${result.total_words_processed || parsedVocab.length} từ vựng!`);
       } else {
         setErrorMsg('Không nhận được dữ liệu bài tập từ AI. Vui lòng kiểm tra lại.');
       }
@@ -190,40 +189,7 @@ export const MemriseExerciseGenerator: React.FC<MemriseExerciseGeneratorProps> =
 
     let savedCount = 0;
     generatedExercises.forEach((item, idx) => {
-      // Map Memrise type to ExerciseType
-      let exType: ExerciseType = 'multiple_choice';
-      if (item.type === 'fill_in_blank') exType = 'fill_in_blank';
-      else if (item.type === 'spelling') exType = 'spelling';
-      else if (item.type === 'typing') exType = 'typing';
-      else if (item.type === 'multiple_choice') exType = 'multiple_choice';
-
-      // Find correct option index for multiple choice
-      let correctOpts: number[] = [0];
-      if (item.options && item.options.length > 0) {
-        const foundIdx = item.options.indexOf(item.correct_answer);
-        correctOpts = [foundIdx >= 0 ? foundIdx : 0];
-      }
-
-      const newEx: Exercise = {
-        id: `memrise_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 7)}`,
-        lessonId: selectedLessonId,
-        type: exType,
-        skill: 'vocabulary',
-        difficulty: 'scaffolded',
-        question: item.question,
-        vocabWord: item.word,
-        correctText: item.correct_answer,
-        hint: item.hint,
-        shuffledLetters: item.shuffled_letters,
-        memriseStage: item.type,
-        options: item.options,
-        correctOptions: correctOpts,
-        explanation: item.type === 'fill_in_blank' && item.hint 
-          ? `Gợi ý dịch: ${item.hint}` 
-          : `Từ vựng gốc: ${item.word}`,
-        order: idx + 1,
-      };
-
+      const newEx = convertMemriseItemToExercise(item, selectedLessonId, idx + 1);
       onSaveExercise(newEx);
       savedCount++;
     });
@@ -259,17 +225,20 @@ export const MemriseExerciseGenerator: React.FC<MemriseExerciseGeneratorProps> =
             </div>
             <div>
               <h3 className="text-base font-bold flex items-center gap-2">
-                <span>Bộ Tạo Bài Tập Memrise (AI 4 Dạng Chuẩn)</span>
+                <span>Bộ Tạo Bài Tập Memrise (Flashcard & 6 Dạng Quiz)</span>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-amber-500/20 text-amber-600 dark:text-amber-400">
-                  Memrise Drill
+                  7 Bước Ghi Nhớ
                 </span>
               </h3>
               <p className={`text-xs ${theme.textMuted} mt-0.5`}>
-                Chuyển đổi danh sách từ vựng thành 4 giai đoạn ghi nhớ: 
-                <strong> 1. Trắc nghiệm</strong> → 
-                <strong> 2. Điền từ ví dụ</strong> → 
-                <strong> 3. Xếp ký tự</strong> → 
-                <strong> 4. Tự gõ từ</strong>.
+                Chuyển đổi danh sách từ vựng thành 7 giai đoạn học tập: 
+                <strong> Flashcard</strong> → 
+                <strong> Trắc nghiệm xuôi</strong> → 
+                <strong> Trắc nghiệm đảo</strong> → 
+                <strong> Điền câu ví dụ</strong> → 
+                <strong> Khuyết ký tự</strong> → 
+                <strong> Xếp ký tự</strong> → 
+                <strong> Tự gõ từ</strong>.
               </p>
             </div>
           </div>
@@ -316,12 +285,12 @@ export const MemriseExerciseGenerator: React.FC<MemriseExerciseGeneratorProps> =
         <div className="flex items-center justify-between">
           <label className={`text-xs font-semibold ${theme.textMuted} flex items-center gap-1.5`}>
             <FileText className="w-3.5 h-3.5 text-emerald-500" />
-            <span>Danh sách từ vựng tiếng Anh:</span>
+            <span>Danh sách từ vựng tiếng Anh (mỗi dòng 1 từ):</span>
             <span className="text-rose-500">*</span>
           </label>
           <div className="flex items-center gap-2">
             <span className="text-[11px] font-bold text-emerald-500">
-              {uniqueWords.length} từ hợp lệ
+              {parsedVocab.length} từ hợp lệ
             </span>
             <button
               type="button"
@@ -338,31 +307,31 @@ export const MemriseExerciseGenerator: React.FC<MemriseExerciseGeneratorProps> =
           rows={5}
           value={vocabInput}
           onChange={e => setVocabInput(e.target.value)}
-          placeholder={`Ví dụ:\nresilient\nauthentic\ndiligent\nprofound\nempathy\n\n(Mỗi từ trên một dòng hoặc phân cách bởi dấu phẩy)`}
+          placeholder={`Ví dụ:\nresilient: kiên cường, mau phục hồi\nauthentic: đích thực, chân thật\ndiligent: chăm chỉ, cần cù\nprofound: sâu sắc, uyên thâm\nempathy: sự thấu cảm, đồng cảm\n\n(Mỗi dòng 1 từ vựng, có thể kèm nghĩa tiếng Việt sau dấu hai chấm)`}
           className={`w-full p-3.5 rounded-xl border ${theme.border} ${theme.inputBg} text-xs font-mono focus:border-emerald-500 leading-relaxed`}
         />
 
         {/* Action button */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
           <p className={`text-[11px] ${theme.textMuted}`}>
-            💡 Hệ thống AI sẽ tự động tạo trắc nghiệm nghĩa, câu ví dụ điền từ, tráo ký tự và bài gõ từ cho từng từ.
+            💡 Hệ thống AI sẽ tự động tạo chuỗi 7 bước ghi nhớ toàn diện (Flashcard + 6 Quiz đa dạng) cho từng từ.
           </p>
           <button
             id="btn-generate-memrise-ai"
             type="button"
-            disabled={isGenerating || uniqueWords.length === 0}
+            disabled={isGenerating || parsedVocab.length === 0}
             onClick={handleGenerateAI}
             className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-emerald-600 hover:opacity-90 text-white text-xs font-bold flex items-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer transition-all active:scale-95"
           >
             {isGenerating ? (
               <>
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                <span>Đang xử lý {uniqueWords.length} từ...</span>
+                <span>Đang xử lý {parsedVocab.length} từ...</span>
               </>
             ) : (
               <>
                 <Sparkles className="w-4 h-4" />
-                <span>Tạo {uniqueWords.length * 4} bài tập Memrise (AI)</span>
+                <span>Tạo {parsedVocab.length * 7} bài tập Memrise (AI)</span>
               </>
             )}
           </button>
@@ -458,21 +427,29 @@ export const MemriseExerciseGenerator: React.FC<MemriseExerciseGeneratorProps> =
                     </button>
                   </div>
                   <span className={`text-[11px] ${theme.textMuted} font-medium`}>
-                    4 dạng bài tập
+                    {items.length} dạng bài tập
                   </span>
                 </div>
 
-                {/* 4 Exercise Items Grid */}
+                {/* Exercise Items Grid */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 pt-1">
                   {items.map(ex => {
                     let badgeLabel = 'Trắc nghiệm';
                     let badgeColor = 'bg-blue-500/15 text-blue-500';
                     let icon = <HelpCircle className="w-3.5 h-3.5" />;
 
-                    if (ex.type === 'fill_in_blank') {
+                    if (ex.type === 'flashcard') {
+                      badgeLabel = 'Flashcard Học từ';
+                      badgeColor = 'bg-purple-500/15 text-purple-500';
+                      icon = <BookOpen className="w-3.5 h-3.5" />;
+                    } else if (ex.type === 'fill_in_blank') {
                       badgeLabel = 'Điền từ ví dụ';
                       badgeColor = 'bg-sky-500/15 text-sky-500';
                       icon = <FileText className="w-3.5 h-3.5" />;
+                    } else if (ex.type === 'vocab_cloze') {
+                      badgeLabel = 'Khuyết ký tự';
+                      badgeColor = 'bg-teal-500/15 text-teal-600 dark:text-teal-400';
+                      icon = <Type className="w-3.5 h-3.5" />;
                     } else if (ex.type === 'spelling') {
                       badgeLabel = 'Xếp ký tự';
                       badgeColor = 'bg-amber-500/15 text-amber-500';
@@ -509,6 +486,16 @@ export const MemriseExerciseGenerator: React.FC<MemriseExerciseGeneratorProps> =
                         </div>
 
                         {/* Specific details */}
+                        {ex.type === 'flashcard' && (
+                          <div className="space-y-1 pt-1 text-[11px]">
+                            {ex.phonetic && <span className="font-serif text-sky-500 mr-2">{ex.phonetic}</span>}
+                            {ex.meaning && <span className="font-medium text-emerald-500">{ex.meaning}</span>}
+                            {ex.example && (
+                              <p className={`italic ${theme.textMuted} mt-1`}>"{ex.example}"</p>
+                            )}
+                          </div>
+                        )}
+
                         {ex.type === 'multiple_choice' && ex.options && (
                           <div className="grid grid-cols-1 gap-1 pt-1">
                             {ex.options.map((opt, optIdx) => {
@@ -543,6 +530,20 @@ export const MemriseExerciseGenerator: React.FC<MemriseExerciseGeneratorProps> =
                           </div>
                         )}
 
+                        {ex.type === 'vocab_cloze' && (
+                          <div className="space-y-1.5 pt-1">
+                            <div className="flex items-center gap-2">
+                              <span className={`text-[11px] ${theme.textMuted}`}>Mẫu khuyết:</span>
+                              <span className="font-serif tracking-widest font-bold text-teal-600 dark:text-teal-400 bg-teal-500/10 px-2 py-0.5 rounded border border-teal-500/20 text-xs">
+                                {ex.clozeLetters || ex.clozeTemplate}
+                              </span>
+                            </div>
+                            <div className="text-[11px] font-bold text-emerald-500">
+                              Từ gốc: <span className="underline">{ex.correct_answer}</span>
+                            </div>
+                          </div>
+                        )}
+
                         {ex.type === 'spelling' && (
                           <div className="space-y-1.5 pt-1">
                             <div className="flex items-center gap-1 flex-wrap">
@@ -550,7 +551,7 @@ export const MemriseExerciseGenerator: React.FC<MemriseExerciseGeneratorProps> =
                               {(ex.shuffled_letters || []).map((l, lIdx) => (
                                 <span 
                                   key={lIdx}
-                                  className="w-5 h-5 rounded bg-amber-500/20 text-amber-600 dark:text-amber-400 font-mono font-bold text-xs flex items-center justify-center uppercase"
+                                  className="w-5 h-5 rounded bg-amber-500/20 text-amber-600 dark:text-amber-400 font-serif font-bold text-xs flex items-center justify-center uppercase"
                                 >
                                   {l}
                                 </span>

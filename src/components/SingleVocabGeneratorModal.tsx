@@ -22,6 +22,7 @@ import { useTheme } from '../context/ThemeContext';
 import { 
   generateSingleVocabFromAI, 
   convertSingleVocabItemToExercise,
+  createClozeLettersPattern,
   SingleVocabGeneratedItem,
   SingleVocabGenerationResult
 } from '../utils/singleVocabGenerator';
@@ -83,6 +84,12 @@ const VOCAB_EXERCISE_TYPES: { type: ExerciseType; label: string; desc: string; i
     label: 'Ghép cặp Từ - Nghĩa (Vocabulary Matching)', 
     desc: 'Nối từ tiếng Anh với định nghĩa hoặc bản dịch tiếng Việt tương ứng', 
     icon: '🔗' 
+  },
+  { 
+    type: 'pronunciation', 
+    label: 'Luyện phát âm (Pronunciation Drill)', 
+    desc: 'Lắng nghe phát âm mẫu và phát âm lại: Từ đơn đọc đúng là xong, câu nhiều chữ theo tỷ lệ %', 
+    icon: '🎙️' 
   }
 ];
 
@@ -541,7 +548,22 @@ emissions: khí thải, sự phát thải`
                           </div>
                           {editingItemData.type === 'vocab_cloze' && (
                             <div>
-                              <label className="block text-[11px] font-semibold mb-1">Mẫu khuyết (cách nhau bởi dấu cách, ví dụ: f _ _ e n d l y):</label>
+                              <div className="flex items-center justify-between mb-1">
+                                <label className="text-[11px] font-semibold">Mẫu khuyết (cách nhau bởi dấu cách, ví dụ: f _ _ e n d l y):</label>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const word = (editingItemData.correctAnswer || editingItemData.vocabWord || editingItemData.word || '').trim();
+                                    if (word) {
+                                      const { clozeLetters } = createClozeLettersPattern(word);
+                                      setEditingItemData({ ...editingItemData, clozeLetters, clozeTemplate: clozeLetters });
+                                    }
+                                  }}
+                                  className="text-[10px] text-sky-500 hover:underline cursor-pointer font-medium"
+                                >
+                                  ⚡ Tự tạo lại mẫu chuẩn
+                                </button>
+                              </div>
                               <input
                                 type="text"
                                 value={editingItemData.clozeLetters || editingItemData.clozeTemplate || ''}

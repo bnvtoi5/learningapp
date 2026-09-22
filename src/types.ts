@@ -17,6 +17,7 @@ export type DifficultyLevel =
 export type MasteryStatus = 'not_started' | 'learning' | 'mastered' | 'needs_review';
 
 export type ExerciseType = 
+  | 'pronunciation'       // Luyện phát âm (Từ vựng hoặc Câu, nghe mẫu & phát âm lại)
   | 'multiple_choice'    // Chọn đáp án (1 hoặc nhiều)
   | 'true_false'          // Đúng / Sai
   | 'matching'            // Nối cặp (từ - nghĩa, từ - ảnh, câu - đáp án)
@@ -92,6 +93,7 @@ export interface Exercise {
   vocabMeaning?: string; // Nghĩa tiếng Việt
   phonetic?: string; // Phiên âm (VD: /ˈfrend.li/)
   clozeLetters?: string; // Ký tự khuyết hoặc mẫu (VD: f _ _ e n d l y)
+  clozeTemplate?: string; // Mẫu hiển thị khuyết từ cho bài tập recall/cloze
 
   // Memrise 4-Stage Drill:
   shuffledLetters?: string[]; // Danh sách ký tự xáo trộn cho dạng spelling
@@ -122,16 +124,23 @@ export interface Exercise {
   mcLayout?: 'stacked' | 'grid_2x2'; // Bố cục trắc nghiệm: xếp chồng hoặc 4 ô vuông
   showOptionLabels?: boolean; // Bật/tắt hiển thị nhãn ABCD
   isReverseChoice?: boolean; // Trắc nghiệm đảo ngược: Nghĩa -> Chọn từ tiếng Anh
+
+  // Luyện phát âm (Pronunciation Drill):
+  pronunciationAccuracy?: number; // Ngưỡng % khớp yêu cầu đối với câu nhiều chữ (50-100%, mặc định 70%)
+  isSingleWord?: boolean; // True nếu là từ vựng đơn lẻ (nghe đúng là xong), False nếu là câu nhiều chữ (% khớp)
+  targetWordsCount?: number; // Số lượng từ trong văn bản phát âm
 }
 
 export interface MemriseExerciseItem {
   id: string;
   word: string;
-  type: 'flashcard' | 'multiple_choice' | 'fill_in_blank' | 'spelling' | 'typing';
+  type: 'flashcard' | 'multiple_choice' | 'fill_in_blank' | 'vocab_cloze' | 'spelling' | 'typing';
   question: string;
   options?: string[];
   correct_answer: string;
   hint?: string;
+  clozeLetters?: string;
+  clozeTemplate?: string;
   shuffled_letters?: string[];
   meaning?: string;
   phonetic?: string;
@@ -326,6 +335,7 @@ export interface StudentPermissions {
 export interface User {
   id: string;
   username: string;
+  email?: string;
   password: string;
   fullName: string;
   role: UserRole;

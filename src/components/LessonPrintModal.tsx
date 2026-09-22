@@ -556,9 +556,9 @@ export const LessonPrintModal: React.FC<LessonPrintModalProps> = ({
                       >
                         <div 
                           className="w-4 h-4 rounded-full border shrink-0 flex items-center justify-center"
-                          style={{ backgroundColor: item.swatchBg, borderColor: item.swatchBorder }}
+                          style={{ backgroundColor: item.swatchBg, borderColor: item.swatchBorder, color: item.accent }}
                         >
-                          <Icon className="w-2.5 h-2.5" style={{ color: item.accent }} />
+                          <Icon className="w-2.5 h-2.5" />
                         </div>
                         <div className="min-w-0 flex-1">
                           <span className="text-[11px] block truncate font-medium">{item.name}</span>
@@ -605,7 +605,7 @@ export const LessonPrintModal: React.FC<LessonPrintModalProps> = ({
                       const isChecked = selectedSlideIds.includes(slide.id);
                       return (
                         <div
-                          key={slide.id}
+                          key={`print_select_slide_${slide.id || 'slide'}_${idx}`}
                           onClick={() => handleToggleSlide(slide.id)}
                           className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-start gap-2.5 ${
                             isChecked
@@ -873,7 +873,7 @@ export const LessonPrintModal: React.FC<LessonPrintModalProps> = ({
         <div ref={printContainerRef}>
           {selectedSlides.map((slide, idx) => (
             <div 
-              key={slide.id || idx}
+              key={`print_pdf_sheet_${slide.id || 'slide'}_${idx}`}
               className="pdf-export-sheet"
               style={{
                 width: '794px',

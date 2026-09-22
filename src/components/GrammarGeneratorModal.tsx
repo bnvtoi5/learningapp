@@ -13,7 +13,10 @@ import {
   Square,
   Bookmark,
   Check,
-  AlignLeft
+  AlignLeft,
+  Copy,
+  HelpCircle,
+  Code
 } from 'lucide-react';
 import { Topic, Lesson, Exercise, DifficultyLevel } from '../types';
 import { useTheme } from '../context/ThemeContext';
@@ -69,8 +72,58 @@ export const GrammarGeneratorModal: React.FC<GrammarGeneratorModalProps> = ({
   const [saveSuccessCount, setSaveSuccessCount] = useState<number | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editingItemData, setEditingItemData] = useState<GrammarGeneratedItem | null>(null);
+  const [showPromptPreview, setShowPromptPreview] = useState(false);
+  const [copiedPrompt, setCopiedPrompt] = useState(false);
 
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  const currentSystemPrompt = `Bạn là chuyên gia sư phạm tiếng Anh hàng đầu, chuyên thiết kế bài tập ngữ pháp theo giáo trình Cambridge/IELTS/TOEFL.
+NHIỆM VỤ:
+Tạo ra chính xác ${questionCount} câu hỏi bài tập ngữ pháp chất lượng cao chuyên sâu về chủ điểm: "${topicInput.trim() || 'Chủ điểm ngữ pháp'}".
+${ruleNote.trim() ? `Ghi chú ngữ pháp bổ sung từ giáo viên: "${ruleNote.trim()}"` : ''}
+Dạng bài yêu cầu: "${exerciseType}"
+Độ khó: "${difficulty}"
+
+HƯỚNG DẪN CÁC DẠNG BÀI:
+- Nếu targetType = "sentence_builder":
+  + question: "Sắp xếp các từ sau thành câu hoàn chỉnh đúng ngữ pháp"
+  + scrambledWords: Mảng các từ bị xáo trộn thứ tự
+  + correctAnswer: Câu tiếng Anh chuẩn xác hoàn chỉnh
+  + hint: Gợi ý công thức hoặc nghĩa câu
+  + explanation: Giải thích chi tiết trật tự từ và công thức ngữ pháp bằng tiếng Việt.
+- Nếu targetType = "error_correction":
+  + question: "Tìm và sửa lỗi sai ngữ pháp trong câu sau"
+  + errorSentence: Câu tiếng Anh chứa duy nhất 1 lỗi sai điển hình về chủ điểm ngữ pháp này
+  + errorPart: Từ/cụm từ bị sai
+  + correction: Từ/cụm từ sửa đúng
+  + correctAnswer: correction
+  + hint: Vị trí hoặc dấu hiệu lỗi
+  + explanation: Phân tích vì sao sai và tại sao sửa như vậy bằng tiếng Việt.
+- Nếu targetType = "multiple_choice":
+  + question: Câu tiếng Anh có chỗ trống "____" hoặc yêu cầu chọn phương án đúng
+  + options: 4 phương án trắc nghiệm A, B, C, D tập trung vào các bẫy ngữ pháp thường gặp
+  + correctOptionIdx: 0, 1, 2 hoặc 3
+  + correctAnswer: Phương án đúng
+  + hint: Dấu hiệu nhận biết thì, liên từ, hoặc cấu trúc
+  + explanation: Giải thích chi tiết từng đáp án vì sao đúng và vì sao 3 phương án còn lại sai bằng tiếng Việt.
+- Nếu targetType = "fill_in_blank":
+  + question: Câu tiếng Anh có "____ (từ gốc trong ngoặc)"
+  + correctAnswer: Dạng đúng của từ sau khi chia theo quy tắc ngữ pháp
+  + hint: Dấu hiệu nhận biết
+  + explanation: Giải thích quy tắc chia từ bằng tiếng Việt.
+- Nếu targetType = "translation":
+  + question: Dịch câu tiếng Việt sau sang tiếng Anh áp dụng cấu trúc ${topicInput.trim() || 'ngữ pháp'}
+  + correctAnswer: Câu tiếng Anh chuẩn xác
+  + hint: Cấu trúc cần dùng
+  + explanation: Phân tích cấu trúc câu tiếng Anh bằng tiếng Việt.
+- Nếu targetType = "mixed":
+  + Chia đều các câu hỏi theo các dạng trên (sentence_builder, error_correction, multiple_choice, fill_in_blank, translation).`;
+
+  const handleCopyPrompt = () => {
+    navigator.clipboard.writeText(currentSystemPrompt);
+    setCopiedPrompt(true);
+    setTimeout(() => setCopiedPrompt(false), 2000);
+  };
 
   const geminiApiKey = settings.providerApiKeys?.gemini || settings.customApiKey || settings.customGeminiApiKey;
   const effectiveModel = (settings.aiProviderType === 'gemini' || !settings.aiProviderType)
@@ -287,11 +340,16 @@ export const GrammarGeneratorModal: React.FC<GrammarGeneratorModalProps> = ({
           </div>
 
           {/* INPUT FORM */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="space-y-3">
             <div className="space-y-1.5">
-              <label className="text-xs font-bold block">
-                Tên chủ điểm ngữ pháp:
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold block">
+                  Tên chủ điểm ngữ pháp:
+                </label>
+                <span className="text-[10px] text-purple-400 font-medium">
+                  Chủ đề cốt lõi AI sẽ tập trung tạo câu hỏi
+                </span>
+              </div>
               <input
                 type="text"
                 value={topicInput}
@@ -299,22 +357,66 @@ export const GrammarGeneratorModal: React.FC<GrammarGeneratorModalProps> = ({
                   setTopicInput(e.target.value);
                   if (errorMessage) setErrorMessage(null);
                 }}
-                placeholder="Ví dụ: Câu bị động (Passive Voice) với Modal Verbs"
+                placeholder="Ví dụ: Câu bị động (Passive Voice) với Modal Verbs hoặc Phân biệt Gerund và To-Infinitive..."
                 className={`w-full p-2.5 rounded-xl border ${theme.border} ${theme.inputBg} ${theme.text} text-xs outline-none focus:ring-2 focus:ring-purple-500`}
               />
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-bold block">
-                Ghi chú cấu trúc / Dấu hiệu cần nhấn mạnh (tùy chọn):
-              </label>
-              <input
-                type="text"
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold block">
+                  Ghi chú cấu trúc, công thức & yêu cầu chi tiết (Tùy chọn):
+                </label>
+                <span className="text-[10px] text-purple-400 font-medium">
+                  Nhập công thức, dấu hiệu nhận biết, bẫy ngữ pháp, danh sách từ ngoại lệ...
+                </span>
+              </div>
+              <textarea
+                rows={3}
                 value={ruleNote}
                 onChange={e => setRuleNote(e.target.value)}
-                placeholder="Ví dụ: S + modal + be + V3/ed (must be done, should be checked)"
-                className={`w-full p-2.5 rounded-xl border ${theme.border} ${theme.inputBg} ${theme.text} text-xs outline-none focus:ring-2 focus:ring-purple-500`}
+                placeholder="Ví dụ:&#10;- Công thức: S + modal + be + V3/ed (must be done, should be checked)&#10;- Nhấn mạnh dấu hiệu: since/for, already, yet&#10;- Tạo các câu bẫy về mạo từ hoặc danh từ số nhiều&#10;- Giải thích chi tiết dấu hiệu nhận biết từng đáp án"
+                className={`w-full p-2.5 rounded-xl border ${theme.border} ${theme.inputBg} ${theme.text} text-xs outline-none focus:ring-2 focus:ring-purple-500 leading-relaxed resize-y`}
               />
+            </div>
+
+            {/* PROMPT PREVIEW TOGGLE */}
+            <div className={`rounded-xl border ${theme.border} overflow-hidden transition-all`}>
+              <button
+                type="button"
+                onClick={() => setShowPromptPreview(!showPromptPreview)}
+                className={`w-full px-3 py-2 text-left text-xs font-semibold flex items-center justify-between opacity-80 hover:opacity-100 transition-opacity bg-neutral-500/5`}
+              >
+                <span className="flex items-center gap-1.5 text-purple-400">
+                  <Code className="w-3.5 h-3.5" />
+                  {showPromptPreview ? 'Ẩn Prompt System gửi đến Gemini AI' : 'Xem Prompt System chi tiết gửi đến Gemini AI'}
+                </span>
+                <span className="text-[10px] text-neutral-400">
+                  {showPromptPreview ? 'Thu gọn ▲' : 'Mở rộng ▼'}
+                </span>
+              </button>
+
+              {showPromptPreview && (
+                <div className="p-3 bg-neutral-900/90 text-neutral-200 border-t border-neutral-700/50 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-amber-400 flex items-center gap-1">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      Prompt thực tế sẽ gửi tới API Gemini:
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleCopyPrompt}
+                      className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-[11px] font-medium transition-colors flex items-center gap-1 text-white cursor-pointer"
+                    >
+                      {copiedPrompt ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      <span>{copiedPrompt ? 'Đã sao chép!' : 'Sao chép Prompt'}</span>
+                    </button>
+                  </div>
+                  <pre className="text-[11px] font-mono leading-relaxed p-2.5 rounded-lg bg-black/50 border border-white/10 whitespace-pre-wrap max-h-48 overflow-y-auto select-all text-neutral-300">
+                    {currentSystemPrompt}
+                  </pre>
+                </div>
+              )}
             </div>
           </div>
 

@@ -21,6 +21,8 @@ interface ThemeContextType {
     bodyText: string;
     headingText: string;
     questionText: string;
+    fontSize: string;
+    lineHeight: string;
   };
 }
 
@@ -150,6 +152,8 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       bodyText: `${bodyText} ${lh}`,
       headingText: `${headingText} font-semibold ${lh}`,
       questionText: `${questionText} font-medium ${lh}`,
+      fontSize: bodyText,
+      lineHeight: lh,
     };
   };
 

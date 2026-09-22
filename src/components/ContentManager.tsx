@@ -20,6 +20,7 @@ import {
   Filter,
   Copy,
   MoveRight,
+  FolderInput,
   CheckSquare,
   Square,
   Eye,
@@ -1191,6 +1192,22 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                               <Edit3 className="w-3.5 h-3.5" />
                             </button>
                             <button
+                              id={`btn-move-exercise-${ex.id}`}
+                              type="button"
+                              onClick={() => {
+                                setSelectedExerciseIds([ex.id]);
+                                setBulkModal({
+                                  isOpen: true,
+                                  action: 'move',
+                                  contentType: 'exercise',
+                                });
+                              }}
+                              className={`p-1.5 rounded-lg ${theme.badgeBg} hover:text-amber-500 cursor-pointer`}
+                              title="Chuyển câu hỏi này sang bài học khác"
+                            >
+                              <FolderInput className="w-3.5 h-3.5" />
+                            </button>
+                            <button
                               id={`btn-delete-exercise-${ex.id}`}
                               type="button"
                               onClick={() => {
@@ -1541,7 +1558,13 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
         exercise={editingExercise}
         isOpen={!!editingExercise}
         onClose={() => setEditingExercise(null)}
-        onSave={onUpdateExercise}
+        lessons={lessons}
+        topics={topics}
+        classrooms={classrooms}
+        onSave={(updated) => {
+          onUpdateExercise(updated);
+          setEditingExercise(null);
+        }}
       />
 
       {/* Lecture Viewer Modal */}

@@ -37,13 +37,22 @@ import {
   Rows,
   Columns,
   Check,
-  Printer
+  Printer,
+  Wand2,
+  Bot,
+  RotateCcw,
+  Loader2,
+  Send,
+  FileText,
+  LayoutGrid,
+  Zap
 } from 'lucide-react';
 import { Lesson, LessonSlide, MediaAsset } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import { MediaLibraryModal } from './MediaLibraryModal';
 import { attachAudioBarListeners } from '../utils/audioBarController';
 import { LessonPrintModal } from './LessonPrintModal';
+import { generateLessonContentFromAI, LessonAiAssistantResult, ensureUniqueSlideIds } from '../utils/lessonAiAssistant';
 
 interface LessonContentEditorModalProps {
   isOpen: boolean;
@@ -52,9 +61,55 @@ interface LessonContentEditorModalProps {
   onSave: (updatedLesson: Lesson) => void;
 }
 
+// Quick Prompt presets for Gemini in Docs Assistant
+const GEMINI_QUICK_PROMPTS = [
+  {
+    title: '🚀 Toàn bộ bài giảng 3 thể & ví dụ',
+    desc: 'Tự động tạo 3 slide: Công thức & Bảng thể câu, Mẹo nhớ, Lưu ý & Ví dụ',
+    prompt: 'Soạn bài giảng chuẩn hóa gồm 3 trang: Trang 1 là Công thức cốt lõi & Bảng phân loại thể câu (+, -, ?); Trang 2 là Dấu hiệu nhận biết & Mẹo ghi nhớ; Trang 3 là Lưu ý ngoại lệ & 3 Ví dụ thực tế có dịch nghĩa.',
+    mode: 'full_lecture' as const,
+  },
+  {
+    title: '📐 Khung công thức (+, -, ?)',
+    desc: 'Chèn khung công thức chính và phân tích ký hiệu',
+    prompt: 'Tạo khung công thức chính chuẩn đẹp, giải thích rõ các thành phần ký hiệu và quy tắc chia động từ.',
+    mode: 'single_block' as const,
+  },
+  {
+    title: '📊 Bảng phân loại 3 thể câu',
+    desc: 'Tạo bảng so sánh thể câu, cấu trúc và ví dụ',
+    prompt: 'Tạo bảng phân loại 3 thể câu (Khẳng định, Phủ định, Nghi vấn) với cột Thể câu, Cấu trúc và Ví dụ tiếng Anh minh họa in đậm từ khóa.',
+    mode: 'single_block' as const,
+  },
+  {
+    title: '💡 Khung mẹo nhớ & Dấu hiệu',
+    desc: 'Chèn khung ghi nhớ các từ khóa hay gặp',
+    prompt: 'Tạo khung mẹo nhớ màu tím với các từ khóa nhận biết quan trọng (dấu hiệu thời gian/ngữ cảnh) và quy tắc ghi nhớ dễ hiểu.',
+    mode: 'single_block' as const,
+  },
+  {
+    title: '⚠️ Khung cảnh báo bẫy ngữ pháp',
+    desc: 'Chèn khung lưu ý các trường hợp ngoại lệ',
+    prompt: 'Tạo khung lưu ý màu vàng cam cảnh báo các bẫy ngữ pháp thường gặp trong bài thi và lỗi học sinh hay mắc phải.',
+    mode: 'single_block' as const,
+  },
+  {
+    title: '💬 Bộ ví dụ thực tế kèm dịch',
+    desc: 'Tạo 3 ví dụ câu có dịch nghĩa & phân tích',
+    prompt: 'Tạo 3 khung ví dụ câu tiếng Anh thực tế trong đời sống, có câu tiếng Anh in đậm cấu trúc và bản dịch tiếng Việt giải thích rõ nghĩa.',
+    mode: 'single_block' as const,
+  },
+  {
+    title: '🪄 Chuẩn hóa & Làm đẹp trang này',
+    desc: 'Format lại nội dung hiện có thành các khung hộp chuẩn',
+    prompt: 'Đọc nội dung hiện có trên trang và format lại thành các khung hộp chuẩn (công thức, bảng, mẹo nhớ, ví dụ) đẹp mắt và trực quan.',
+    mode: 'refine' as const,
+  }
+];
+
 // Starter template for a grammar lesson slide
 const DEFAULT_GRAMMAR_SLIDE_1: LessonSlide = {
-  id: 'slide_1',
+  id: 'default_template_slide_1',
   title: 'Trang 1: Định nghĩa & Công thức cốt lõi',
   contentHtml: `
 <div class="formula-box" data-block-type="box" style="width: 100%; margin: 12px 0;">
@@ -100,7 +155,7 @@ const DEFAULT_GRAMMAR_SLIDE_1: LessonSlide = {
 };
 
 const DEFAULT_GRAMMAR_SLIDE_2: LessonSlide = {
-  id: 'slide_2',
+  id: 'default_template_slide_2',
   title: 'Trang 2: Dấu hiệu nhận biết & Mẹo nhớ',
   contentHtml: `
 <div class="tip-box" data-block-type="box" style="width: 100%; margin: 12px 0;">
@@ -136,7 +191,7 @@ export const LessonContentEditorModal: React.FC<LessonContentEditorModalProps> =
   lesson,
   onSave,
 }) => {
-  const { getThemeClasses } = useTheme();
+  const { settings, getThemeClasses } = useTheme();
   const theme = getThemeClasses();
 
   const [slides, setSlides] = useState<LessonSlide[]>([]);
@@ -144,6 +199,16 @@ export const LessonContentEditorModal: React.FC<LessonContentEditorModalProps> =
   const [viewMode, setViewMode] = useState<'edit' | 'preview'>('edit');
   const [activeSlideTitle, setActiveSlideTitle] = useState<string>('');
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+
+  // Gemini in Docs State
+  const [isGeminiModalOpen, setIsGeminiModalOpen] = useState(false);
+  const [geminiPrompt, setGeminiPrompt] = useState('');
+  const [geminiMode, setGeminiMode] = useState<'full_lecture' | 'single_block' | 'refine'>('full_lecture');
+  const [isGeminiLoading, setIsGeminiLoading] = useState(false);
+  const [geminiResult, setGeminiResult] = useState<LessonAiAssistantResult | null>(null);
+  const [geminiError, setGeminiError] = useState<string | null>(null);
+  const [geminiPreviewSlideIdx, setGeminiPreviewSlideIdx] = useState(0);
+  const geminiAbortRef = useRef<AbortController | null>(null);
 
   // Media Library Modal
   const [isMediaLibraryOpen, setIsMediaLibraryOpen] = useState(false);
@@ -173,13 +238,15 @@ export const LessonContentEditorModal: React.FC<LessonContentEditorModalProps> =
     if (!isOpen || !lesson) return;
 
     if (lesson.slides && lesson.slides.length > 0) {
-      setSlides(lesson.slides);
+      const sanitized = ensureUniqueSlideIds(lesson.slides);
+      setSlides(sanitized);
       setActiveSlideIndex(0);
-      setActiveSlideTitle(lesson.slides[0].title);
+      setActiveSlideTitle(sanitized[0].title);
     } else {
+      const baseTime = Date.now();
       if (lesson.knowledgeSummary) {
         const initialSlide: LessonSlide = {
-          id: `slide_${Date.now()}_1`,
+          id: `slide_${baseTime}_1_${Math.random().toString(36).substring(2, 7)}`,
           title: 'Trang 1: Kiến thức cốt lõi',
           contentHtml: `
 <h2 style="font-size: 18px; font-weight: bold; margin-bottom: 8px;">${lesson.title}</h2>
@@ -190,7 +257,10 @@ export const LessonContentEditorModal: React.FC<LessonContentEditorModalProps> =
         setActiveSlideIndex(0);
         setActiveSlideTitle(initialSlide.title);
       } else {
-        const defaultSlides = [DEFAULT_GRAMMAR_SLIDE_1, DEFAULT_GRAMMAR_SLIDE_2];
+        const defaultSlides = [
+          { ...DEFAULT_GRAMMAR_SLIDE_1, id: `slide_${baseTime}_1_${Math.random().toString(36).substring(2, 7)}` },
+          { ...DEFAULT_GRAMMAR_SLIDE_2, id: `slide_${baseTime}_2_${Math.random().toString(36).substring(2, 7)}` }
+        ];
         setSlides(defaultSlides);
         setActiveSlideIndex(0);
         setActiveSlideTitle(defaultSlides[0].title);
@@ -303,7 +373,7 @@ export const LessonContentEditorModal: React.FC<LessonContentEditorModalProps> =
   const handleAddSlide = () => {
     const newSlideNumber = slides.length + 1;
     const newSlide: LessonSlide = {
-      id: `slide_${Date.now()}_${newSlideNumber}`,
+      id: `slide_${Date.now()}_${newSlideNumber}_${Math.random().toString(36).substring(2, 7)}`,
       title: `Trang ${newSlideNumber}: Nội dung bài giảng`,
       contentHtml: `
 <h2 style="font-size: 18px; font-weight: bold; margin-bottom: 8px;">Tiêu đề mục học phần ${newSlideNumber}</h2>
@@ -319,7 +389,7 @@ export const LessonContentEditorModal: React.FC<LessonContentEditorModalProps> =
     const current = slides[activeSlideIndex];
     if (!current) return;
     const duplicate: LessonSlide = {
-      id: `slide_${Date.now()}`,
+      id: `slide_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       title: `${current.title} (Bản sao)`,
       contentHtml: current.contentHtml,
     };
@@ -505,6 +575,108 @@ export const LessonContentEditorModal: React.FC<LessonContentEditorModalProps> =
 
     insertHtmlSnippet(html);
     setIsTableModalOpen(false);
+  };
+
+  // Gemini in Docs Assistant Actions
+  const handleOpenGeminiModal = (mode?: 'full_lecture' | 'single_block' | 'refine') => {
+    if (mode) setGeminiMode(mode);
+    if (!geminiPrompt) {
+      if (lesson?.title) {
+        setGeminiPrompt(`Soạn bài giảng chuẩn hóa về "${lesson.title}" với bảng 3 thể (+, -, ?), các ví dụ thực tế kèm dịch nghĩa và mẹo nhớ quan trọng.`);
+      } else {
+        setGeminiPrompt('Soạn bài giảng ngữ pháp tiếng Anh với công thức 3 thể, bảng phân loại, mẹo nhớ và ví dụ minh họa.');
+      }
+    }
+    setGeminiError(null);
+    setIsGeminiModalOpen(true);
+  };
+
+  const handleRunGeminiAssistant = async (customPromptToRun?: string, customModeToRun?: 'full_lecture' | 'single_block' | 'refine') => {
+    const promptToUse = (customPromptToRun || geminiPrompt).trim();
+    const modeToUse = customModeToRun || geminiMode;
+    
+    if (!promptToUse) return;
+    setIsGeminiLoading(true);
+    setGeminiError(null);
+    setGeminiResult(null);
+
+    const controller = new AbortController();
+    geminiAbortRef.current = controller;
+
+    try {
+      const currentHtml = editorRef.current?.innerHTML || slides[activeSlideIndex]?.contentHtml || '';
+      const geminiApiKey = settings.providerApiKeys?.gemini || settings.customApiKey || settings.customGeminiApiKey;
+      const model = settings.aiModel || 'gemini-3.1-flash-lite';
+
+      const result = await generateLessonContentFromAI({
+        prompt: promptToUse,
+        mode: modeToUse,
+        lessonTitle: lesson?.title || '',
+        topicContext: lesson?.knowledgeSummary || '',
+        currentContent: modeToUse === 'refine' ? currentHtml : undefined,
+        customApiKey: geminiApiKey,
+        model,
+        signal: controller.signal,
+      });
+
+      if (result.status === 'success') {
+        setGeminiResult(result);
+        setGeminiPreviewSlideIdx(0);
+      } else {
+        setGeminiError(result.error || 'Không thể tạo nội dung từ AI.');
+      }
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') {
+        setGeminiError(err.message || 'Lỗi kết nối AI.');
+      }
+    } finally {
+      setIsGeminiLoading(false);
+      geminiAbortRef.current = null;
+    }
+  };
+
+  const handleStopGemini = () => {
+    if (geminiAbortRef.current) {
+      geminiAbortRef.current.abort();
+      geminiAbortRef.current = null;
+    }
+    setIsGeminiLoading(false);
+  };
+
+  const handleApplyGeminiResult = (action: 'replace_all' | 'append_slides' | 'insert_cursor' | 'replace_current') => {
+    if (!geminiResult) return;
+
+    if (geminiResult.mode === 'full_lecture' && geminiResult.slides && geminiResult.slides.length > 0) {
+      if (action === 'replace_all') {
+        const uniqueSlides = ensureUniqueSlideIds(geminiResult.slides);
+        setSlides(uniqueSlides);
+        setActiveSlideIndex(0);
+        setActiveSlideTitle(uniqueSlides[0].title);
+        if (editorRef.current) {
+          isUpdatingFromState.current = true;
+          editorRef.current.innerHTML = uniqueSlides[0].contentHtml;
+          isUpdatingFromState.current = false;
+        }
+      } else if (action === 'append_slides') {
+        const newSlidesToAppend = geminiResult.slides.map((s, idx) => ({
+          ...s,
+          id: `slide_${Date.now()}_${slides.length + idx + 1}_${Math.random().toString(36).substring(2, 7)}`,
+        }));
+        const combined = ensureUniqueSlideIds([...slides, ...newSlidesToAppend]);
+        setSlides(combined);
+      }
+    } else if (geminiResult.contentHtml) {
+      if (action === 'insert_cursor') {
+        insertHtmlSnippet(geminiResult.contentHtml);
+      } else if (action === 'replace_current') {
+        if (editorRef.current) {
+          editorRef.current.innerHTML = geminiResult.contentHtml;
+          handleEditorInput();
+        }
+      }
+    }
+
+    setIsGeminiModalOpen(false);
   };
 
   // Media Library Asset Selection
@@ -750,7 +922,7 @@ export const LessonContentEditorModal: React.FC<LessonContentEditorModalProps> =
               const isActive = idx === activeSlideIndex;
               return (
                 <div 
-                  key={slide.id}
+                  key={`editor_slide_tab_${slide.id || 'slide'}_${idx}`}
                   className={`flex items-center rounded-xl border transition-all shrink-0 ${
                     isActive 
                       ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm' 
@@ -1161,6 +1333,25 @@ export const LessonContentEditorModal: React.FC<LessonContentEditorModalProps> =
                   Mẫu khung học tập
                 </div>
               </div>
+
+              {/* Group 5: Gemini AI Help Me Write (Google Docs Style) */}
+              <div className="flex flex-col justify-between p-1.5 rounded-xl bg-linear-to-r from-purple-500/15 via-indigo-500/15 to-emerald-500/15 border border-purple-500/40 shrink-0 shadow-sm">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => handleOpenGeminiModal('full_lecture')}
+                    className="px-3 py-1.5 rounded-lg bg-linear-to-r from-purple-600 via-indigo-600 to-emerald-600 hover:opacity-90 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-purple-500/20 cursor-pointer transition-all active:scale-95"
+                    title="Mở Trợ lý AI Gemini Soạn bài thông minh phong cách Google Docs (Help me write)"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+                    <span>✨ Gemini Soạn bài</span>
+                  </button>
+                </div>
+                <div className="text-[10px] text-center text-purple-700 dark:text-purple-300 font-bold tracking-wider uppercase mt-1 pt-0.5 border-t border-purple-500/30">
+                  Gemini in Docs
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -1266,9 +1457,9 @@ export const LessonContentEditorModal: React.FC<LessonContentEditorModalProps> =
         )}
 
         {/* Scrollable Document Canvas (ONLY THIS SCROLLS underneath the pinned Home Ribbon) */}
-        <div className="flex-1 overflow-y-auto min-h-0 bg-black/20 p-4 sm:p-6">
+        <div className="flex-1 overflow-y-auto min-h-0 bg-black/20 p-4 sm:p-6 relative">
           {viewMode === 'edit' ? (
-            <div className="w-full flex justify-center">
+            <div className="w-full flex flex-col items-center">
               {/* Word Document Sheet Page */}
               <div 
                 className={`w-full max-w-4xl min-h-[580px] p-6 sm:p-10 rounded-2xl border ${theme.border} ${theme.card} shadow-xl focus:outline-none lecture-content leading-relaxed`}
@@ -1282,6 +1473,19 @@ export const LessonContentEditorModal: React.FC<LessonContentEditorModalProps> =
                 onSelect={saveCurrentSelection}
                 onClick={saveCurrentSelection}
               />
+
+              {/* Floating Gemini AI Prompt Trigger */}
+              <div className="sticky bottom-4 right-4 self-end mt-4 z-20">
+                <button
+                  type="button"
+                  onClick={() => handleOpenGeminiModal('full_lecture')}
+                  className="px-3.5 py-2 rounded-2xl bg-linear-to-r from-purple-600 via-indigo-600 to-emerald-600 hover:opacity-95 text-white font-bold text-xs flex items-center gap-2 shadow-xl shadow-purple-900/30 border border-white/20 cursor-pointer transition-all active:scale-95"
+                  title="Mở Trợ lý AI Gemini Soạn bài thông minh (Help me write)"
+                >
+                  <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+                  <span>✨ Trợ lý Gemini Soạn bài</span>
+                </button>
+              </div>
             </div>
           ) : (
             /* Student View Preview Mode */
@@ -1502,6 +1706,338 @@ export const LessonContentEditorModal: React.FC<LessonContentEditorModalProps> =
         onClose={() => setIsPrintModalOpen(false)}
         lesson={lesson ? { ...lesson, slides } : null}
       />
+
+      {/* Gemini in Docs AI Assistant Modal (Help Me Write / Structure Lesson Content) */}
+      {isGeminiModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-md animate-fadeIn">
+          <div className={`${theme.card} w-full max-w-3xl max-h-[92vh] rounded-3xl border border-purple-500/40 shadow-2xl flex flex-col overflow-hidden animate-scaleUp`}>
+            {/* Header with Gemini Gradient Accent */}
+            <div className="p-4 sm:px-6 border-b border-inherit bg-linear-to-r from-purple-900/40 via-indigo-900/30 to-emerald-900/30 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-2xl bg-linear-to-tr from-purple-600 via-indigo-600 to-emerald-500 flex items-center justify-center shadow-lg shadow-purple-500/30 text-white font-bold">
+                  <Sparkles className="w-5 h-5 text-amber-200 animate-pulse" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-extrabold text-base tracking-tight bg-linear-to-r from-purple-300 via-indigo-200 to-emerald-300 bg-clip-text text-transparent">
+                      Trợ lý AI Soạn bài (Gemini in Docs)
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                      Help me write
+                    </span>
+                  </div>
+                  <p className={`text-xs ${theme.textMuted}`}>
+                    Tự động tạo bài giảng chuẩn hóa với khung công thức, bảng 3 thể (+, -, ?), mẹo nhớ & ví dụ
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (isGeminiLoading) handleStopGemini();
+                  setIsGeminiModalOpen(false);
+                }}
+                className={`p-2 rounded-xl ${theme.textMuted} hover:text-white hover:bg-white/10 transition-colors cursor-pointer`}
+                title="Đóng trợ lý"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
+              {/* Mode Selection Tabs */}
+              <div>
+                <label className={`block text-xs font-bold uppercase tracking-wider mb-2 ${theme.textMuted}`}>
+                  Chọn định dạng bạn muốn Gemini hỗ trợ:
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setGeminiMode('full_lecture')}
+                    className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
+                      geminiMode === 'full_lecture'
+                        ? 'bg-linear-to-r from-purple-600/20 to-indigo-600/20 border-purple-500 text-purple-300 shadow-md shadow-purple-500/10'
+                        : `${theme.border} ${theme.textMuted} hover:bg-white/5`
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 font-bold text-xs">
+                      <span>📑</span>
+                      <span>1. Toàn bộ bài giảng (2-4 Slide)</span>
+                    </div>
+                    <p className="text-[11px] opacity-80 mt-1">
+                      Phân chia khoa học các trang: Công thức & Bảng thể câu, Mẹo nhớ, Lưu ý & Ví dụ
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setGeminiMode('single_block')}
+                    className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
+                      geminiMode === 'single_block'
+                        ? 'bg-linear-to-r from-emerald-600/20 to-teal-600/20 border-emerald-500 text-emerald-300 shadow-md shadow-emerald-500/10'
+                        : `${theme.border} ${theme.textMuted} hover:bg-white/5`
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 font-bold text-xs">
+                      <span>🧩</span>
+                      <span>2. Chèn 1 khối nội dung</span>
+                    </div>
+                    <p className="text-[11px] opacity-80 mt-1">
+                      Tạo công thức, bảng so sánh hoặc mẹo nhớ để chèn ngay vào vị trí con trỏ
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setGeminiMode('refine')}
+                    className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
+                      geminiMode === 'refine'
+                        ? 'bg-linear-to-r from-amber-600/20 to-orange-600/20 border-amber-500 text-amber-300 shadow-md shadow-amber-500/10'
+                        : `${theme.border} ${theme.textMuted} hover:bg-white/5`
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 font-bold text-xs">
+                      <span>🪄</span>
+                      <span>3. Chuẩn hóa trang hiện tại</span>
+                    </div>
+                    <p className="text-[11px] opacity-80 mt-1">
+                      Format lại nội dung đang có trên trang thành các khung hộp và bảng mẫu đẹp mắt
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              {/* Prompt Input Box */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className={`text-xs font-bold ${theme.textMuted}`}>
+                    Yêu cầu soạn thảo cho Gemini:
+                  </label>
+                  <span className="text-[11px] text-purple-400 font-medium">
+                    {lesson?.title ? `Chủ đề: ${lesson.title}` : ''}
+                  </span>
+                </div>
+                <div className="relative">
+                  <textarea
+                    rows={3}
+                    value={geminiPrompt}
+                    onChange={e => setGeminiPrompt(e.target.value)}
+                    placeholder="Ví dụ: Soạn bài giảng Thì Quá khứ hoàn thành với bảng 3 thể (+, -, ?), 3 ví dụ thực tế kèm dịch nghĩa và mẹo nhớ dấu hiệu by the time, before, after..."
+                    className={`w-full p-3.5 pr-12 rounded-2xl ${theme.inputBg} border border-purple-500/40 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/60 leading-relaxed`}
+                  />
+                  <div className="absolute right-3 bottom-3 flex items-center gap-1.5">
+                    {isGeminiLoading ? (
+                      <button
+                        type="button"
+                        onClick={handleStopGemini}
+                        className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1 shadow-sm cursor-pointer"
+                        title="Dừng tạo"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                        <span>Dừng</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleRunGeminiAssistant()}
+                        disabled={!geminiPrompt.trim()}
+                        className="px-4 py-1.5 rounded-xl bg-linear-to-r from-purple-600 to-indigo-600 hover:opacity-90 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-purple-500/20 cursor-pointer"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-amber-200" />
+                        <span>Soạn thảo</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Prompt Chips */}
+              <div>
+                <label className={`block text-xs font-bold uppercase tracking-wider mb-2 ${theme.textMuted}`}>
+                  Gợi ý yêu cầu nhanh (1 Click):
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {GEMINI_QUICK_PROMPTS.map((qp, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => {
+                        setGeminiPrompt(qp.prompt);
+                        setGeminiMode(qp.mode);
+                        handleRunGeminiAssistant(qp.prompt, qp.mode);
+                      }}
+                      className={`p-2.5 rounded-xl border ${theme.border} hover:border-purple-500/50 bg-purple-500/5 hover:bg-purple-500/10 text-left transition-all flex flex-col justify-center cursor-pointer`}
+                    >
+                      <div className="font-bold text-xs text-purple-400 flex items-center justify-between">
+                        <span>{qp.title}</span>
+                        <ArrowRight className="w-3 h-3 opacity-60" />
+                      </div>
+                      <p className="text-[11px] opacity-75 mt-0.5 line-clamp-1">{qp.desc}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Error Message */}
+              {geminiError && (
+                <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{geminiError}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRunGeminiAssistant()}
+                    className="px-3 py-1 rounded-lg bg-rose-600/30 hover:bg-rose-600/40 font-bold"
+                  >
+                    Thử lại
+                  </button>
+                </div>
+              )}
+
+              {/* Loading Shimmer State */}
+              {isGeminiLoading && (
+                <div className="p-6 rounded-2xl bg-purple-500/10 border border-purple-500/30 text-center space-y-3 animate-pulse">
+                  <div className="flex items-center justify-center gap-2 text-purple-300 font-bold text-sm">
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span>Gemini đang phân tích và thiết kế nội dung bài học...</span>
+                  </div>
+                  <p className={`text-xs ${theme.textMuted}`}>
+                    Đang tạo các khung công thức chuẩn, cấu trúc bảng 3 thể và bộ ví dụ ngữ cảnh sinh động...
+                  </p>
+                </div>
+              )}
+
+              {/* Result Live Preview */}
+              {geminiResult && !isGeminiLoading && (
+                <div className="space-y-4 pt-2 border-t border-inherit">
+                  {/* Summary Banner */}
+                  <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2 text-emerald-400 font-semibold">
+                      <Check className="w-4 h-4" />
+                      <span>{geminiResult.summary || 'Đã tạo thành công nội dung bài học từ Gemini'}</span>
+                    </div>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300">
+                      {geminiResult.mode === 'full_lecture' ? `${geminiResult.slides?.length || 0} Trang Slide` : 'Khối nội dung'}
+                    </span>
+                  </div>
+
+                  {/* Multi-Slide Tab Selector (If full_lecture) */}
+                  {geminiResult.mode === 'full_lecture' && geminiResult.slides && geminiResult.slides.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                        {geminiResult.slides.map((s, sIdx) => (
+                          <button
+                            key={`gemini_slide_preview_${s.id || 'slide'}_${sIdx}`}
+                            type="button"
+                            onClick={() => setGeminiPreviewSlideIdx(sIdx)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                              geminiPreviewSlideIdx === sIdx
+                                ? 'bg-purple-600 text-white shadow-md'
+                                : `${theme.inputBg} border ${theme.border} ${theme.textMuted} hover:text-white`
+                            }`}
+                          >
+                            <span>Trang {sIdx + 1}: </span>
+                            <span className="font-normal opacity-90">{s.title.replace(/^Trang \d+:\s*/i, '')}</span>
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Rendered Preview of Active Slide */}
+                      <div className={`p-5 rounded-2xl border ${theme.border} bg-white dark:bg-neutral-900 shadow-inner max-h-[360px] overflow-y-auto lecture-content`}>
+                        <div className="text-xs font-bold text-purple-500 uppercase tracking-wider mb-2 border-b border-inherit pb-1">
+                          {geminiResult.slides[geminiPreviewSlideIdx]?.title}
+                        </div>
+                        <div 
+                          dangerouslySetInnerHTML={{ 
+                            __html: geminiResult.slides[geminiPreviewSlideIdx]?.contentHtml || '' 
+                          }} 
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Single Block or Refine Preview */}
+                  {(geminiResult.mode === 'single_block' || geminiResult.mode === 'refine') && geminiResult.contentHtml && (
+                    <div className={`p-5 rounded-2xl border ${theme.border} bg-white dark:bg-neutral-900 shadow-inner max-h-[360px] overflow-y-auto lecture-content`}>
+                      <div 
+                        dangerouslySetInnerHTML={{ 
+                          __html: geminiResult.contentHtml 
+                        }} 
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Footer Actions */}
+            <div className="p-4 sm:px-6 border-t border-inherit bg-black/20 flex flex-wrap items-center justify-between gap-3 shrink-0">
+              <div className="flex items-center gap-2 text-xs text-neutral-400">
+                <span>Model: <b>{settings.aiModel || 'gemini-3.1-flash-lite'}</b></span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsGeminiModalOpen(false)}
+                  className={`px-4 py-2 rounded-xl border ${theme.border} text-xs font-semibold hover:bg-white/5 cursor-pointer`}
+                >
+                  Đóng
+                </button>
+
+                {geminiResult && geminiResult.mode === 'full_lecture' && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleApplyGeminiResult('append_slides')}
+                      className="px-3.5 py-2 rounded-xl bg-indigo-600/80 hover:bg-indigo-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                      title="Thêm các trang này vào sau các trang hiện có"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Thêm vào sau</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleApplyGeminiResult('replace_all')}
+                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-600/20 cursor-pointer"
+                      title="Thay thế toàn bộ bài giảng bằng nội dung mới này"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Áp dụng toàn bộ ({geminiResult.slides?.length || 0} trang)</span>
+                    </button>
+                  </>
+                )}
+
+                {geminiResult && geminiResult.mode === 'single_block' && (
+                  <button
+                    type="button"
+                    onClick={() => handleApplyGeminiResult('insert_cursor')}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-600/20 cursor-pointer"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Chèn vào vị trí con trỏ</span>
+                  </button>
+                )}
+
+                {geminiResult && geminiResult.mode === 'refine' && (
+                  <button
+                    type="button"
+                    onClick={() => handleApplyGeminiResult('replace_current')}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-600/20 cursor-pointer"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Cập nhật lên trang hiện tại</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -9,6 +9,7 @@ import {
   AlertCircle, 
   HelpCircle, 
   ArrowRight, 
+  ArrowLeft,
   RotateCcw, 
   Sparkles, 
   FileText, 
@@ -31,6 +32,9 @@ import { soundManager, triggerHaptic, speakText } from '../utils/audio';
 import { ListeningAudioPlayer } from './ListeningAudioPlayer';
 import { InteractiveMatchingBoard } from './InteractiveMatchingBoard';
 import { CHUNK_SIZE, QUIZ_TYPES_PER_WORD, orderStandardExercisesInBatches } from '../utils/memriseGenerator';
+import { createClozeLettersPattern } from '../utils/singleVocabGenerator';
+import { InteractivePronunciationPractice } from './InteractivePronunciationPractice';
+import { evaluatePronunciation } from '../utils/pronunciationUtils';
 
 interface PracticeSessionProps {
   exercises: Exercise[];
@@ -111,6 +115,9 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
   // Cloze Passage & Sub-questions states
   const [clozeAnswers, setClozeAnswers] = useState<{ [blankIdx: number]: string }>({});
   const [subAnswers, setSubAnswers] = useState<{ [subId: string]: string | number | boolean }>({});
+
+  // Active Recall: Vocab Cloze slot-by-slot typing state
+  const [clozeSlotInputs, setClozeSlotInputs] = useState<{ [slotIdx: number]: string }>({});
 
   // Cài đặt trắc nghiệm (Multiple Choice settings): Bố cục xếp chồng / 4 ô vuông và Bật/tắt nhãn ABCD
   const [mcLayout, setMcLayout] = useState<'stacked' | 'grid_2x2'>(() => {
@@ -244,15 +251,49 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
   const generateClozePattern = (word: string, customPattern?: string) => {
     if (customPattern && customPattern.trim()) return customPattern;
     if (!word) return '';
-    // Show first and last letter, replace middle with underscores
+    const { clozeLetters } = createClozeLettersPattern(word);
+    return clozeLetters;
+  };
+
+  // Structured Cloze Slots parser for interactive slot-by-slot typing
+  const parseVocabClozeSlots = (word: string, customPattern?: string) => {
+    if (!word) return [];
     const chars = word.split('');
-    if (chars.length <= 3) return chars[0] + ' ' + '_ '.repeat(chars.length - 1);
-    return chars.map((c, i) => {
-      if (i === 0 || i === chars.length - 1 || i === Math.floor(chars.length / 2)) {
-        return c;
+    let pattern = customPattern && customPattern.trim() ? customPattern.trim() : '';
+
+    if (pattern) {
+      const tokens = pattern.split(/\s+/);
+      if (tokens.length === chars.length) {
+        return chars.map((ch, idx) => {
+          const tok = tokens[idx];
+          const isSpace = ch === ' ';
+          const isBlank = !isSpace && (tok === '_' || tok.includes('_'));
+          return {
+            index: idx,
+            expectedChar: ch,
+            isBlank,
+            givenChar: isBlank || isSpace ? undefined : ch,
+            isSpace,
+          };
+        });
       }
-      return '_';
-    }).join(' ');
+    }
+
+    // Default fallback via createClozeLettersPattern with high randomness
+    const { clozeLetters } = createClozeLettersPattern(word);
+    const tokens = clozeLetters.split(/\s+/);
+    return chars.map((ch, idx) => {
+      const tok = tokens[idx] || '_';
+      const isSpace = ch === ' ';
+      const isBlank = !isSpace && (tok === '_' || tok.includes('_'));
+      return {
+        index: idx,
+        expectedChar: ch,
+        isBlank,
+        givenChar: isBlank || isSpace ? undefined : ch,
+        isSpace,
+      };
+    });
   };
 
   // Reset inputs on question change
@@ -275,6 +316,19 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
     setIsListeningSpeech(false);
     setClozeAnswers({});
     setSubAnswers({});
+    setClozeSlotInputs({});
+
+    // Auto-focus first blank slot for vocab_cloze
+    if (currentEx.type === 'vocab_cloze') {
+      setTimeout(() => {
+        const target = (currentEx.correct_answer || currentEx.vocabWord || currentEx.correctText || currentEx.word || '').trim();
+        const slots = parseVocabClozeSlots(target, currentEx.clozeLetters || currentEx.clozeTemplate);
+        const firstBlank = slots.find(s => s.isBlank);
+        if (firstBlank) {
+          document.getElementById(`cloze-slot-${firstBlank.index}`)?.focus();
+        }
+      }, 80);
+    }
 
     // Sentence builder words
     if (currentEx.type === 'sentence_builder') {
@@ -361,7 +415,24 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
       correctAnsStr = currentEx.vocabWord || currentEx.correctText || 'Đã thuộc';
     } else {
       switch (currentEx.type) {
-        case 'vocab_cloze':
+        case 'vocab_cloze': {
+          const targetWord = (currentEx.correct_answer || currentEx.vocabWord || currentEx.correctText || currentEx.word || '').trim();
+          const target = targetWord.toLowerCase();
+          const slots = parseVocabClozeSlots(targetWord, currentEx.clozeLetters || currentEx.clozeTemplate);
+          
+          const assembled = slots.map(s => {
+            if (s.isSpace) return ' ';
+            if (!s.isBlank) return s.expectedChar;
+            return clozeSlotInputs[s.index] || '';
+          }).join('').trim().toLowerCase();
+
+          const user = assembled.length === target.length ? assembled : (textAnswer.trim().toLowerCase() || assembled);
+          correct = user === target;
+          userAnsStr = assembled || textAnswer.trim() || 'Chưa điền đủ ký tự';
+          correctAnsStr = targetWord;
+          break;
+        }
+
         case 'listen_spell':
         case 'typing': {
           const target = (currentEx.correct_answer || currentEx.vocabWord || currentEx.correctText || currentEx.word || '').trim().toLowerCase();
@@ -530,12 +601,21 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
           break;
         }
 
+        case 'pronunciation':
         case 'speaking': {
-          const targetClean = (currentEx.correctText || currentEx.question).trim().toLowerCase().replace(/[.,!?;:]/g, '');
-          const userClean = (spokenTranscript || textAnswer).trim().toLowerCase().replace(/[.,!?;:]/g, '');
-          correct = userClean === targetClean || (userClean.length > 0 && targetClean.includes(userClean));
-          userAnsStr = spokenTranscript || textAnswer || 'Đã đọc thành tiếng';
-          correctAnsStr = currentEx.correctText || currentEx.question;
+          const target = (currentEx.correctText || currentEx.vocabWord || currentEx.question || '').trim();
+          const words = target.split(/\s+/).filter(Boolean);
+          const isSingle = currentEx.isSingleWord !== undefined ? currentEx.isSingleWord : (words.length <= 1);
+          const threshold = isSingle ? 100 : (currentEx.pronunciationAccuracy || 70);
+
+          const evalResult = evaluatePronunciation(target, spokenTranscript || textAnswer, {
+            isSingleWord: isSingle,
+            requiredThreshold: threshold,
+          });
+
+          correct = evalResult.isPassed;
+          userAnsStr = `${evalResult.spokenText || 'Chưa đọc'} (${evalResult.accuracyPercent}%)`;
+          correctAnsStr = `${target} (Yêu cầu: ${isSingle ? 'Đọc đúng từ (100%)' : `≥ ${threshold}%`})`;
           break;
         }
 
@@ -568,6 +648,13 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
     setResults(prev => [...prev, { exerciseId: currentEx.id, isCorrect: correct }]);
   };
 
+  // Previous question (allow students to easily review the previous question)
+  const handlePrevious = () => {
+    if (currentIndex > 0) {
+      setCurrentIndex(prev => prev - 1);
+    }
+  };
+
   // Next question
   const handleNext = () => {
     // If we reached the end of the current round and there are further rounds remaining
@@ -598,6 +685,17 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
     setSelectedOptions([]);
     setTextAnswer('');
     setIsCardFlipped(false);
+    setClozeSlotInputs({});
+    if (currentEx.type === 'vocab_cloze') {
+      setTimeout(() => {
+        const target = (currentEx.correct_answer || currentEx.vocabWord || currentEx.correctText || currentEx.word || '').trim();
+        const slots = parseVocabClozeSlots(target, currentEx.clozeLetters || currentEx.clozeTemplate);
+        const firstBlank = slots.find(s => s.isBlank);
+        if (firstBlank) {
+          document.getElementById(`cloze-slot-${firstBlank.index}`)?.focus();
+        }
+      }, 50);
+    }
     if (currentEx.type === 'sentence_builder') {
       const words = currentEx.scrambledWords || currentEx.correctText?.split(' ') || [];
       setAvailableWords([...words].sort(() => Math.random() - 0.5));
@@ -633,14 +731,28 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
     <div className={`w-full max-w-2xl mx-auto space-y-4 pb-20 ${typo.fontSize} ${typo.lineHeight} animate-in fade-in duration-150`}>
       {/* Top Header Bar */}
       <div className="flex items-center justify-between gap-3">
-        <button
-          id="btn-exit-practice"
-          onClick={onExit}
-          className={`p-2 rounded-xl border ${theme.border} ${theme.badgeBg} hover:opacity-80 transition-opacity`}
-          title="Thoát phiên học"
-        >
-          <X className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            id="btn-exit-practice"
+            onClick={onExit}
+            className={`p-2 rounded-xl border ${theme.border} ${theme.badgeBg} hover:opacity-80 transition-opacity cursor-pointer`}
+            title="Thoát phiên học"
+          >
+            <X className="w-4 h-4" />
+          </button>
+
+          {currentIndex > 0 && (
+            <button
+              id="btn-prev-question-header"
+              onClick={handlePrevious}
+              className={`py-2 px-2.5 sm:px-3 rounded-xl border ${theme.border} ${theme.badgeBg} hover:opacity-80 transition-all text-xs font-semibold flex items-center gap-1 text-neutral-700 dark:text-neutral-300 cursor-pointer`}
+              title="Xem lại câu hỏi trước"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Câu trước</span>
+            </button>
+          )}
+        </div>
 
         {/* Progress Bar */}
         <div className="flex-1">
@@ -786,41 +898,192 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
         {/* INTERACTIVE WORK AREA ACCORDING TO EXERCISE TYPE */}
         {/* ------------------------------------------------------------- */}
 
-        {/* 1. VOCAB CLOZE (Active Recall Spelling) */}
-        {currentEx.type === 'vocab_cloze' && (
-          <div className="space-y-4 pt-2">
-            <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5 text-center space-y-2">
-              <span className={`text-[11px] uppercase tracking-wider ${theme.textMuted} font-semibold block`}>
-                Mẫu chữ cái gợi ý:
-              </span>
-              <div className="text-2xl font-mono tracking-widest font-bold text-emerald-500">
-                {generateClozePattern(currentEx.vocabWord || currentEx.correctText || '', currentEx.clozeLetters)}
+        {/* 1. VOCAB CLOZE (Active Recall In-Place Slot Typing) */}
+        {currentEx.type === 'vocab_cloze' && (() => {
+          const targetWord = (currentEx.correct_answer || currentEx.vocabWord || currentEx.correctText || currentEx.word || '').trim();
+          const slots = parseVocabClozeSlots(targetWord, currentEx.clozeLetters || currentEx.clozeTemplate);
+          const blankSlots = slots.filter(s => s.isBlank);
+
+          const handleSlotChange = (slotIdx: number, val: string) => {
+            if (isChecked) return;
+            const char = val.slice(-1);
+            const newInputs = { ...clozeSlotInputs, [slotIdx]: char };
+            setClozeSlotInputs(newInputs);
+
+            if (char) {
+              const nextBlank = slots.find(s => s.isBlank && s.index > slotIdx);
+              if (nextBlank) {
+                const el = document.getElementById(`cloze-slot-${nextBlank.index}`);
+                if (el) el.focus();
+              }
+            }
+          };
+
+          const handleSlotKeyDown = (slotIdx: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              if (!isChecked) handleCheck();
+              return;
+            }
+
+            if (e.key === 'Backspace') {
+              const currentVal = clozeSlotInputs[slotIdx] || '';
+              if (!currentVal) {
+                e.preventDefault();
+                const prevBlanks = slots.filter(s => s.isBlank && s.index < slotIdx);
+                const prevBlank = prevBlanks[prevBlanks.length - 1];
+                if (prevBlank) {
+                  setClozeSlotInputs(prev => ({ ...prev, [prevBlank.index]: '' }));
+                  const el = document.getElementById(`cloze-slot-${prevBlank.index}`);
+                  if (el) el.focus();
+                }
+              }
+            } else if (e.key === 'ArrowLeft') {
+              e.preventDefault();
+              const prevBlanks = slots.filter(s => s.isBlank && s.index < slotIdx);
+              const prevBlank = prevBlanks[prevBlanks.length - 1];
+              if (prevBlank) {
+                document.getElementById(`cloze-slot-${prevBlank.index}`)?.focus();
+              }
+            } else if (e.key === 'ArrowRight') {
+              e.preventDefault();
+              const nextBlank = slots.find(s => s.isBlank && s.index > slotIdx);
+              if (nextBlank) {
+                document.getElementById(`cloze-slot-${nextBlank.index}`)?.focus();
+              }
+            }
+          };
+
+          const handleSlotPaste = (startSlotIdx: number, e: React.ClipboardEvent<HTMLInputElement>) => {
+            e.preventDefault();
+            const text = e.clipboardData.getData('text').trim();
+            if (!text) return;
+            const chars = text.split('');
+            const futureBlanks = slots.filter(s => s.isBlank && s.index >= startSlotIdx);
+            const newInputs = { ...clozeSlotInputs };
+            chars.forEach((c, idx) => {
+              if (futureBlanks[idx]) {
+                newInputs[futureBlanks[idx].index] = c;
+              }
+            });
+            setClozeSlotInputs(newInputs);
+          };
+
+          return (
+            <div className="space-y-4 pt-2">
+              {/* Meaning & Phonetic Prompt Card */}
+              <div className="p-4 rounded-2xl border border-sky-500/30 bg-sky-500/5 text-center space-y-2">
+                <div className="flex items-center justify-center gap-2">
+                  <span className="text-[11px] uppercase tracking-wider text-sky-600 dark:text-sky-400 font-bold px-2.5 py-0.5 rounded-full bg-sky-500/10 border border-sky-500/20">
+                    💡 Gõ trực tiếp vào các vị trí gạch chân
+                  </span>
+                </div>
+
+                {currentEx.vocabMeaning && (
+                  <div className="text-base sm:text-lg font-bold text-sky-950 dark:text-sky-100">
+                    "{currentEx.vocabMeaning}"
+                  </div>
+                )}
+
+                {currentEx.phonetic && (
+                  <div className={`text-xs font-mono ${theme.textMuted} tracking-wider`}>
+                    Phiên âm: <span className="font-semibold text-sky-500">{currentEx.phonetic}</span>
+                  </div>
+                )}
               </div>
-              {currentEx.vocabMeaning && (
-                <p className={`text-xs ${theme.textMuted}`}>
-                  Nghĩa: <strong>{currentEx.vocabMeaning}</strong>
-                </p>
+
+              {/* Interactive In-Place Slot Boxes */}
+              <div className="py-2.5">
+                <div className="flex items-center justify-center gap-1.5 sm:gap-2 flex-wrap">
+                  {slots.map(slot => {
+                    if (slot.isSpace) {
+                      return <div key={slot.index} className="w-2.5 sm:w-3" />;
+                    }
+
+                    if (!slot.isBlank) {
+                      // Given fixed letter
+                      return (
+                        <div
+                          key={slot.index}
+                          className={`w-8 h-11 sm:w-10 sm:h-12 rounded-lg border-2 ${theme.border} ${theme.highlight} flex flex-col items-center justify-center font-serif font-bold text-base sm:text-lg ${theme.text} select-none shadow-xs relative`}
+                          title="Ký tự gợi ý sẵn"
+                        >
+                          <span className="uppercase">{slot.givenChar}</span>
+                          <span className="absolute bottom-1 w-4 h-0.5 rounded-full bg-neutral-300 dark:bg-neutral-600" />
+                        </div>
+                      );
+                    }
+
+                    // Blank slot for user input with distinct highlight color and underline
+                    const userChar = clozeSlotInputs[slot.index] || '';
+                    const hasChar = !!userChar;
+                    const isSlotCorrect = isChecked && isCorrect;
+                    const isSlotIncorrect = isChecked && !isCorrect;
+
+                    return (
+                      <div key={slot.index} className="relative group">
+                        <input
+                          id={`cloze-slot-${slot.index}`}
+                          type="text"
+                          inputMode="text"
+                          maxLength={1}
+                          disabled={isChecked}
+                          value={userChar}
+                          onChange={e => handleSlotChange(slot.index, e.target.value)}
+                          onKeyDown={e => handleSlotKeyDown(slot.index, e)}
+                          onPaste={e => handleSlotPaste(slot.index, e)}
+                          autoComplete="off"
+                          autoCorrect="off"
+                          autoCapitalize="none"
+                          spellCheck={false}
+                          className={`w-8 h-11 sm:w-10 sm:h-12 text-center font-serif font-bold text-base sm:text-lg rounded-lg border-2 transition-all outline-none uppercase select-none ${
+                            isChecked
+                              ? isSlotCorrect
+                                ? 'border-emerald-500 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 ring-2 ring-emerald-500/30'
+                                : 'border-rose-500 bg-rose-500/15 text-rose-600 dark:text-rose-400 ring-2 ring-rose-500/30'
+                              : hasChar
+                                ? 'border-sky-500 bg-sky-500/15 text-sky-600 dark:text-sky-400 font-bold shadow-xs ring-2 ring-sky-500/30'
+                                : `border-dashed border-sky-400/80 dark:border-sky-500/60 bg-sky-500/5 ${theme.text} focus:border-solid focus:border-sky-500 focus:bg-sky-500/10 focus:ring-3 focus:ring-sky-500/25`
+                          }`}
+                        />
+                        {/* Distinct Underline Accent for user typed slots */}
+                        <div 
+                          className={`absolute bottom-1 left-1.5 right-1.5 h-0.5 rounded-full transition-all pointer-events-none ${
+                            isChecked
+                              ? isSlotCorrect ? 'bg-emerald-500' : 'bg-rose-500'
+                              : hasChar 
+                                ? 'bg-sky-500 scale-100' 
+                                : 'bg-sky-400/50 dark:bg-sky-500/40 group-focus-within:bg-sky-500 group-focus-within:scale-100'
+                          }`} 
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Quick actions for cloze */}
+              {blankSlots.length > 0 && !isChecked && Object.keys(clozeSlotInputs).length > 0 && (
+                <div className="text-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setClozeSlotInputs({});
+                      const firstBlank = slots.find(s => s.isBlank);
+                      if (firstBlank) {
+                        document.getElementById(`cloze-slot-${firstBlank.index}`)?.focus();
+                      }
+                    }}
+                    className={`text-[11px] ${theme.textMuted} hover:text-rose-500 inline-flex items-center gap-1 cursor-pointer`}
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    <span>Xóa các ô để gõ lại</span>
+                  </button>
+                </div>
               )}
             </div>
-
-            <div>
-              <label className={`text-xs font-semibold ${theme.textMuted} block mb-1.5`}>
-                Gõ từ vựng hoàn chỉnh:
-              </label>
-              <input
-                id="input-vocab-cloze"
-                type="text"
-                autoFocus
-                disabled={isChecked}
-                value={textAnswer}
-                onChange={e => setTextAnswer(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && !isChecked && handleCheck()}
-                placeholder="Nhập từ chính xác..."
-                className={`w-full p-3.5 rounded-xl ${theme.inputBg} text-base font-semibold text-center border ${theme.border} focus:border-emerald-500`}
-              />
-            </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* 2. FLASHCARD RECALL (Học từ vựng trước khi vào Quiz / Spaced Repetition) */}
         {currentEx.type === 'flashcard_recall' && (
@@ -925,7 +1188,18 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
 
             {/* Self Rating Buttons */}
             {!isChecked && (
-              <div className="flex gap-3">
+              <div className="flex gap-2.5 flex-wrap sm:flex-nowrap">
+                {currentIndex > 0 && (
+                  <button
+                    id="btn-flashcard-prev"
+                    onClick={handlePrevious}
+                    className={`py-3 px-3.5 rounded-xl border ${theme.border} ${theme.card} hover:${theme.highlight} text-neutral-800 dark:text-neutral-200 font-bold text-xs flex items-center justify-center gap-1 cursor-pointer transition-all active:scale-95`}
+                    title="Quay lại câu trước"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                    <span className="hidden sm:inline">Câu trước</span>
+                  </button>
+                )}
                 <button
                   id="btn-flashcard-forget"
                   onClick={() => handleCheck(false, 'Chưa nhớ (Cần ôn lại)')}
@@ -990,7 +1264,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
             )}
 
             {/* Assembled Letters Box */}
-            <div className={`p-4 rounded-xl border ${theme.border} ${theme.highlight} min-h-[64px] flex items-center justify-center gap-1.5 flex-wrap`}>
+            <div className={`p-4 rounded-xl border ${theme.border} ${theme.highlight} min-h-[68px] flex items-center justify-center gap-2 flex-wrap`}>
               {assembledLetters.length === 0 ? (
                 <span className={`text-xs ${theme.textMuted}`}>
                   Chạm các chữ cái bên dưới để ghép từ...
@@ -1007,7 +1281,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
                       setAssembledLetters(prev => prev.filter((_, i) => i !== idx));
                       setAvailableLetters(prev => [...prev, { id: `${returned}_${Date.now()}_${Math.random()}`, letter: returned }]);
                     }}
-                    className="w-9 h-10 rounded-lg bg-emerald-600 text-white font-bold text-sm shadow-sm flex items-center justify-center uppercase active:scale-95 transition-transform"
+                    className="w-9 h-11 sm:w-11 sm:h-12 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-serif font-bold text-base sm:text-lg shadow-sm flex items-center justify-center uppercase active:scale-95 transition-all select-none cursor-pointer"
                   >
                     {letter}
                   </button>
@@ -1016,7 +1290,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
             </div>
 
             {/* Available Letters Pool */}
-            <div className="flex items-center justify-center gap-1.5 flex-wrap">
+            <div className="flex items-center justify-center gap-1.5 sm:gap-2 flex-wrap">
               {availableLetters.map(item => (
                 <button
                   key={item.id}
@@ -1026,7 +1300,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
                     setAssembledLetters(prev => [...prev, item.letter]);
                     setAvailableLetters(prev => prev.filter(l => l.id !== item.id));
                   }}
-                  className={`w-9 h-10 rounded-lg border ${theme.border} ${theme.card} font-bold text-sm shadow-sm flex items-center justify-center uppercase hover:border-emerald-500 active:scale-95 transition-all`}
+                  className={`w-9 h-11 sm:w-11 sm:h-12 rounded-xl border-2 ${theme.border} ${theme.card} font-serif font-bold text-base sm:text-lg shadow-xs flex items-center justify-center uppercase hover:border-emerald-500 hover:bg-emerald-500/10 active:scale-95 transition-all select-none cursor-pointer`}
                 >
                   {item.letter}
                 </button>
@@ -1620,17 +1894,44 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
           </div>
         )}
 
+        {/* 11. PRONUNCIATION & SPEAKING DRILL */}
+        {(currentEx.type === 'pronunciation' || currentEx.type === 'speaking') && (
+          <InteractivePronunciationPractice
+            exercise={currentEx}
+            disabled={isChecked}
+            onEvaluationComplete={(isPassed, spokenText, accuracyPercent) => {
+              setSpokenTranscript(spokenText);
+              if (isPassed) {
+                // Tự động kiểm tra và hoàn thành câu khi đọc đúng
+                handleCheck(true, `${spokenText} (${accuracyPercent}%)`);
+              }
+            }}
+          />
+        )}
+
         {/* ------------------------------------------------------------- */}
         {/* CHECK & FEEDBACK SECTION */}
         {/* ------------------------------------------------------------- */}
 
         {!isChecked ? (
           currentEx.type !== 'flashcard_recall' && (
-            <div className="pt-3">
+            <div className="pt-3 flex items-center gap-2.5">
+              {currentIndex > 0 && (
+                <button
+                  id="btn-prev-question-bottom"
+                  type="button"
+                  onClick={handlePrevious}
+                  className={`py-3.5 px-4 rounded-xl border ${theme.border} ${theme.card} hover:${theme.highlight} text-neutral-800 dark:text-neutral-200 font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer transition-all active:scale-95`}
+                  title="Quay lại câu trước"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  <span>Câu trước</span>
+                </button>
+              )}
               <button
                 id="btn-check-practice-answer"
                 onClick={() => handleCheck()}
-                className="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition-all active:scale-98"
+                className="flex-1 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition-all active:scale-98 cursor-pointer"
               >
                 Kiểm tra câu trả lời
               </button>
@@ -1719,8 +2020,20 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
               </div>
             )}
 
-            {/* Action buttons: Next / Retry */}
-            <div className="pt-2 flex items-center gap-2">
+            {/* Action buttons: Prev / Retry / Next */}
+            <div className="pt-2 flex items-center gap-2 flex-wrap sm:flex-nowrap">
+              {currentIndex > 0 && (
+                <button
+                  id="btn-prev-question-after-check"
+                  type="button"
+                  onClick={handlePrevious}
+                  className={`py-2.5 px-3.5 rounded-xl border ${theme.border} ${theme.card} hover:${theme.highlight} text-neutral-800 dark:text-neutral-200 text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer transition-all active:scale-95`}
+                  title="Quay lại câu trước"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Câu trước</span>
+                </button>
+              )}
               {!isCorrect && (
                 <button
                   id="btn-retry-question"
@@ -1734,7 +2047,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
               <button
                 id="btn-next-question"
                 onClick={handleNext}
-                className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-sm"
+                className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-sm cursor-pointer"
               >
                 <span>{currentIndex < availableExercises.length - 1 ? 'Câu tiếp theo' : 'Xem kết quả'}</span>
                 <ArrowRight className="w-3.5 h-3.5" />
