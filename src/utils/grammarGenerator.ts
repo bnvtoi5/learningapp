@@ -6,6 +6,8 @@ export interface GrammarGeneratedItem {
   topic: string;
   type: ExerciseType;
   question: string;
+  originalSentence?: string;
+  transformationCue?: string;
   hint?: string;
   correctAnswer: string;
   options?: string[];
@@ -20,17 +22,93 @@ export interface GrammarGeneratedItem {
 export interface GrammarGenerationResult {
   status: 'success' | 'error';
   topic: string;
+  inferredRule?: string;
   targetType: string;
   items: GrammarGeneratedItem[];
   error?: string;
 }
 
 /**
+ * Các chủ điểm chuyển đổi câu tương đương thông dụng nhất (Sentence Transformation Presets)
+ */
+export const POPULAR_TRANSFORMATION_TOPICS = [
+  { 
+    id: 'when_while_past', 
+    title: 'Nối câu bằng WHEN / WHILE (Quá khứ tiếp diễn & Quá khứ đơn)', 
+    rule: 'While + S + was/were V-ing, S + V2/ed  <=>  S + was/were V-ing when S + V2/ed',
+    sampleInput: `TASK 2: COMBINE THE TWO SENTENCES USING WHEN OR WHILE WHERE APPROPRIATE. (p.44)
+Key:
+1. While they were cleaning the streets, it started to rain. / They were cleaning the streets when it started to rain.
+2. While I was watching TV, I saw the floods and landslides in the area. / I was watching TV when I saw the floods and landslides in the area.
+3. While Tim was searching for employment opportunities, he found a job advert from a non-governmental organisation. / Tim was searching for employment opportunities when he found a job advert from a non-governmental organisation.
+4. They decided to help build a community centre for young people while they were visiting some poor villages. / They were visiting some poor villages when they decided to help build a community centre for young people.`
+  },
+  { 
+    id: 'conditional_2_to_3', 
+    title: 'Chuyển đổi câu điều kiện (Loại 2 ➔ Loại 3 hoặc If ➔ Unless)', 
+    rule: 'If + S + V2/ed, S + would + V  ➔  If + S + had + V3/ed, S + would have + V3/ed. Unless = If... not.',
+    sampleInput: `Chuyển đổi câu điều kiện tương đương:
+1. If you don't study hard, you will fail the test. -> Unless you study hard, you will fail the test.
+2. I didn't know your phone number, so I didn't call you. -> If I had known your phone number, I would have called you.
+3. Because he was careless, he crashed the car. -> If he hadn't been careless, he wouldn't have crashed the car.`
+  },
+  { 
+    id: 'active_to_passive', 
+    title: 'Chủ động ➔ Bị động (Active ➔ Passive Voice)', 
+    rule: 'S + V + O ➔ O + be + V3/ed + (by S). Chú ý chia thì của "be" và modal verbs.',
+    sampleInput: `Chuyển từ câu chủ động sang bị động tương đương:
+1. Volunteer students are cleaning the dirty streets now. -> The dirty streets are being cleaned by volunteer students now.
+2. They built this community center in 2020. -> This community center was built in 2020.
+3. We must protect wild animals from poaching. -> Wild animals must be protected from poaching.`
+  },
+  { 
+    id: 'direct_to_reported', 
+    title: 'Trực tiếp ➔ Gián tiếp (Reported Speech)', 
+    rule: 'Lùi thì, đổi đại từ, đổi trạng từ chỉ thời gian và nơi chốn.',
+    sampleInput: `Chuyển sang câu tường thuật gián tiếp:
+1. "I saw the floods on TV yesterday," Tom said. -> Tom said that he had seen the floods on TV the day before.
+2. "Are you looking for a volunteer job?" Mary asked me. -> Mary asked me if I was looking for a volunteer job.`
+  },
+  { 
+    id: 'because_to_because_of', 
+    title: 'Because / Although ➔ Because of / In spite of', 
+    rule: 'Because + Clause ➔ Because of + N/V-ing. Although + Clause ➔ Despite / In spite of + N/V-ing.',
+    sampleInput: `Viết lại câu dùng Because of hoặc In spite of:
+1. Because it was raining heavily, we couldn't go camping. -> Because of the heavy rain, we couldn't go camping.
+2. Although they were tired, they continued helping the flood victims. -> In spite of being tired, they continued helping the flood victims.`
+  },
+  { 
+    id: 'so_such_too_enough', 
+    title: 'So...that / Such...that ➔ Too...to / Enough to', 
+    rule: 'So + adj + that <=> Such + (a/an) + adj + N + that <=> Too + adj + (for O) + to V <=> Not + adj + enough + to V',
+    sampleInput: `Viết lại câu tương đương:
+1. The flood water was so deep that cars could not pass. -> The flood water was too deep for cars to pass.
+2. He wasn't strong enough to carry that heavy bag. -> He was too weak to carry that heavy bag.`
+  },
+  { 
+    id: 'comparisons_rewriting', 
+    title: 'So sánh hơn ➔ So sánh bằng / So sánh nhất', 
+    rule: 'A is more ... than B <=> B is not as ... as A. No one is as ... as A <=> A is the most ...',
+    sampleInput: `Viết lại câu so sánh tương đương:
+1. Playing tennis is more interesting than watching TV. -> Watching TV is not as interesting as playing tennis.
+2. Mount Everest is higher than any other mountain in the world. -> Mount Everest is the highest mountain in the world.`
+  },
+  { 
+    id: 'wish_if_only', 
+    title: 'Câu ước WISH / IF ONLY', 
+    rule: 'Ước trái hiện tại: S + wish + S + V2/ed (were). Ước trái quá khứ: S + wish + S + had + V3/ed.',
+    sampleInput: `Viết lại câu dùng WISH / IF ONLY:
+1. I don't have enough time to volunteer for this project. -> I wish I had enough time to volunteer for this project.
+2. Tim regrets not taking that job opportunity. -> Tim wishes he had taken that job opportunity.`
+  }
+];
+
+/**
  * Các chủ điểm ngữ pháp thông dụng được tạo sẵn gợi ý cho giáo viên
  */
 export const POPULAR_GRAMMAR_TOPICS = [
   { id: 'present_perfect', title: 'Hiện tại hoàn thành (Present Perfect)', rule: 'have/has + V3/ed (since/for, already, yet)' },
-  { id: 'past_simple_vs_continuous', title: 'Quá khứ đơn & Quá khứ tiếp diễn', rule: 'when/while, hành động đang diễn ra thì hành động khác chen vào' },
+  { id: 'past_simple_vs_continuous', title: 'Quá khứ đơn & Quá khứ tiếp diễn (When/While)', rule: 'when/while, hành động đang diễn ra thì hành động khác chen vào' },
   { id: 'conditional_2_3', title: 'Câu điều kiện loại 2 & 3 (Conditionals)', rule: 'If + S + V2/ed, S + would + V / If + S + had V3, S + would have V3' },
   { id: 'passive_voice', title: 'Câu bị động (Passive Voice)', rule: 'S + be + V3/ed + by O' },
   { id: 'relative_clauses', title: 'Mệnh đề quan hệ (who, whom, which, that, whose)', rule: 'Đại từ quan hệ xác định và không xác định' },
@@ -136,6 +214,8 @@ export async function generateGrammarExercisesFromAI(params: {
   difficulty?: DifficultyLevel;
   customApiKey?: string;
   model?: string;
+  mode?: 'general' | 'transformation';
+  rawInput?: string;
   signal?: AbortSignal;
 }): Promise<GrammarGenerationResult> {
   const { 
@@ -146,6 +226,8 @@ export async function generateGrammarExercisesFromAI(params: {
     difficulty = 'guided', 
     customApiKey, 
     model, 
+    mode = 'general',
+    rawInput,
     signal 
   } = params;
 
@@ -159,14 +241,14 @@ export async function generateGrammarExercisesFromAI(params: {
     };
   }
 
-  const trimmed = topic.trim();
-  if (!trimmed) {
+  const effectiveInput = (rawInput && rawInput.trim()) ? rawInput.trim() : topic.trim();
+  if (!effectiveInput) {
     return {
       status: 'error',
       topic,
       targetType: exerciseType,
       items: [],
-      error: 'Vui lòng nhập chủ điểm ngữ pháp cần tạo bài tập.'
+      error: 'Vui lòng nhập chủ điểm ngữ pháp hoặc dán nội dung/ví dụ cần tạo bài tập.'
     };
   }
 
@@ -193,7 +275,9 @@ export async function generateGrammarExercisesFromAI(params: {
       headers: { 'Content-Type': 'application/json' },
       signal,
       body: JSON.stringify({
-        topic: trimmed,
+        topic: topic.trim(),
+        rawInput: effectiveInput,
+        mode,
         ruleNote,
         exerciseType,
         questionCount,
@@ -209,8 +293,29 @@ export async function generateGrammarExercisesFromAI(params: {
         return data as GrammarGenerationResult;
       }
       if (data.error) {
-        console.warn('[Grammar AI] Server error:', data.error);
+        return {
+          status: 'error',
+          topic,
+          targetType: exerciseType,
+          items: [],
+          error: typeof data.error === 'string' ? data.error : JSON.stringify(data.error)
+        };
       }
+    } else {
+      let serverErr = 'Không thể kết nối đến máy chủ AI. Vui lòng thử lại.';
+      try {
+        const errJson = await res.json();
+        if (errJson?.error) {
+          serverErr = typeof errJson.error === 'string' ? errJson.error : JSON.stringify(errJson.error);
+        }
+      } catch {}
+      return {
+        status: 'error',
+        topic,
+        targetType: exerciseType,
+        items: [],
+        error: serverErr
+      };
     }
   } catch (err: any) {
     if (err?.name === 'AbortError' || signal?.aborted) {
@@ -236,7 +341,7 @@ export async function generateGrammarExercisesFromAI(params: {
   }
 
   return generateOfflineGrammarExercises({
-    topic: trimmed,
+    topic: effectiveInput,
     exerciseType,
     count: questionCount,
     difficulty
@@ -258,7 +363,11 @@ export function convertGrammarItemToExercise(
     skill: 'grammar',
     difficulty,
     question: item.question,
+    instruction: item.type === 'translation' 
+      ? (item.hint ? `Gợi ý: ${item.hint}` : 'Viết lại câu sao cho nghĩa tương đương')
+      : (item.hint ? `Gợi ý: ${item.hint}` : undefined),
     hint: item.hint,
+    grammarHint: item.hint,
     explanation: item.explanation,
     correct_answer: item.correctAnswer,
     options: item.options || [],

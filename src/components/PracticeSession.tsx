@@ -543,8 +543,16 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
         case 'translation': {
           const cleanedUser = textAnswer.trim().toLowerCase().replace(/[.,!?;:]/g, '');
           const targetAnswer = currentEx.correct_answer || currentEx.correctText || currentEx.word || currentEx.vocabWord || '';
-          const cleanedTarget = targetAnswer.trim().toLowerCase().replace(/[.,!?;:]/g, '');
-          correct = cleanedUser === cleanedTarget;
+          const targetAlternatives = targetAnswer.split(/\s*[/|]\s*/).filter(Boolean);
+          if (targetAlternatives.length > 1) {
+            correct = targetAlternatives.some(alt => {
+              const cleanedAlt = alt.trim().toLowerCase().replace(/[.,!?;:]/g, '');
+              return cleanedUser === cleanedAlt;
+            });
+          } else {
+            const cleanedTarget = targetAnswer.trim().toLowerCase().replace(/[.,!?;:]/g, '');
+            correct = cleanedUser === cleanedTarget;
+          }
           userAnsStr = textAnswer.trim() || 'Chưa nhập';
           correctAnsStr = targetAnswer;
           break;
@@ -566,8 +574,17 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
             correctAnsStr = pairs.map(p => `${p.left} → ${p.right}`).join('; ');
           } else {
             const cleanedUser = textAnswer.trim().toLowerCase().replace(/[.,!?;:]/g, '');
-            const cleanedTarget = (currentEx.correctText || '').trim().toLowerCase().replace(/[.,!?;:]/g, '');
-            correct = cleanedUser === cleanedTarget;
+            const targetAnswer = currentEx.correctText || '';
+            const targetAlternatives = targetAnswer.split(/\s*[/|]\s*/).filter(Boolean);
+            if (targetAlternatives.length > 1) {
+              correct = targetAlternatives.some(alt => {
+                const cleanedAlt = alt.trim().toLowerCase().replace(/[.,!?;:]/g, '');
+                return cleanedUser === cleanedAlt;
+              });
+            } else {
+              const cleanedTarget = targetAnswer.trim().toLowerCase().replace(/[.,!?;:]/g, '');
+              correct = cleanedUser === cleanedTarget;
+            }
             userAnsStr = textAnswer.trim() || 'Chưa nhập';
             correctAnsStr = currentEx.correctText || '';
           }
@@ -576,8 +593,17 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
 
         case 'sentence_builder': {
           const userBuilt = assembledWords.join(' ').trim().toLowerCase().replace(/[.,!?;:]/g, '');
-          const targetStr = (currentEx.correctText || '').trim().toLowerCase().replace(/[.,!?;:]/g, '');
-          correct = userBuilt === targetStr;
+          const targetStr = (currentEx.correctText || '').trim();
+          const targetAlternatives = targetStr.split(/\s*[/|]\s*/).filter(Boolean);
+          if (targetAlternatives.length > 1) {
+            correct = targetAlternatives.some(alt => {
+              const cleanedAlt = alt.trim().toLowerCase().replace(/[.,!?;:]/g, '');
+              return userBuilt === cleanedAlt;
+            });
+          } else {
+            const cleanedTarget = targetStr.toLowerCase().replace(/[.,!?;:]/g, '');
+            correct = userBuilt === cleanedTarget;
+          }
           userAnsStr = assembledWords.join(' ');
           correctAnsStr = currentEx.correctText || '';
           break;

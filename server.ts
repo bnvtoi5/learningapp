@@ -6,6 +6,116 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+/**
+ * Trích xuất và phân tích cú pháp JSON an toàn từ phản hồi của AI.
+ * Sử dụng thuật toán đếm ngoặc cân bằng (Balanced Braces) để loại bỏ mọi ký tự thừa
+ * hoặc nhận xét mà AI có thể thêm vào sau khối JSON (ngăn chặn triệt để lỗi
+ * "Unexpected non-whitespace character after JSON").
+ */
+function safeExtractJson(text: string): any {
+  if (!text || typeof text !== 'string') {
+    throw new Error("Phản hồi từ AI rỗng hoặc không đúng định dạng.");
+  }
+  const trimmed = text.trim();
+
+  // 1. Thử parse trực tiếp
+  try {
+    return JSON.parse(trimmed);
+  } catch {}
+
+  // 2. Gỡ bỏ code block markdown (```json ... ```)
+  const cleaned = trimmed
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+
+  try {
+    return JSON.parse(cleaned);
+  } catch {}
+
+  // 3. Trích xuất chính xác khối JSON bằng thuật toán đếm ngoặc cân bằng (Balanced Braces)
+  const firstBrace = cleaned.indexOf('{');
+  const firstBracket = cleaned.indexOf('[');
+  let startIdx = -1;
+  let isObject = true;
+
+  if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+    startIdx = firstBrace;
+    isObject = true;
+  } else if (firstBracket !== -1) {
+    startIdx = firstBracket;
+    isObject = false;
+  }
+
+  if (startIdx !== -1) {
+    const openChar = isObject ? '{' : '[';
+    const closeChar = isObject ? '}' : ']';
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let endIdx = -1;
+
+    for (let i = startIdx; i < cleaned.length; i++) {
+      const char = cleaned[i];
+
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === '\\' && inString) {
+        escaped = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = !inString;
+        continue;
+      }
+
+      if (!inString) {
+        if (char === openChar) {
+          depth++;
+        } else if (char === closeChar) {
+          depth--;
+          if (depth === 0) {
+            endIdx = i;
+            break;
+          }
+        }
+      }
+    }
+
+    if (endIdx !== -1) {
+      const candidate = cleaned.substring(startIdx, endIdx + 1);
+      try {
+        return JSON.parse(candidate);
+      } catch {
+        // Loại bỏ dấu phẩy thừa trước khi đóng ngoặc (trailing comma fix)
+        try {
+          const sanitized = candidate
+            .replace(/,\s*([\]}])/g, '$1')
+            .replace(/[\u0000-\u001F\u007F-\u009F]/g, (c) => c === '\n' || c === '\r' || c === '\t' ? c : '');
+          return JSON.parse(sanitized);
+        } catch {}
+      }
+    }
+  }
+
+  // 4. Fallback cuối cùng: Regex
+  const regex = /\{[\s\S]*\}/;
+  const match = cleaned.match(regex);
+  if (match) {
+    try {
+      return JSON.parse(match[0]);
+    } catch {
+      const sanitized = match[0].replace(/,\s*([\]}])/g, '$1');
+      return JSON.parse(sanitized);
+    }
+  }
+
+  throw new Error("Không thể phân tích dữ liệu JSON từ AI. Dữ liệu không đúng cấu trúc.");
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -2288,15 +2398,29 @@ Trả về DUY NHẤT JSON hợp lệ:
     }
   });
 
-  // AI Tạo Bài Tập Ngữ Pháp (Grammar Task Generator)
+  // AI Tạo Bài Tập Ngữ Pháp & Chuyển Đổi Dạng Tương Đương (Grammar & Sentence Transformation Generator)
   app.post("/api/grammar-generate", async (req, res) => {
     try {
-      const { topic, ruleNote, exerciseType, questionCount = 5, difficulty, customApiKey, model } = req.body;
+      const { 
+        topic, 
+        ruleNote, 
+        exerciseType, 
+        questionCount = 5, 
+        difficulty, 
+        customApiKey, 
+        model, 
+        mode = "general", // 'general' | 'transformation'
+        rawInput 
+      } = req.body;
 
-      if (!topic || typeof topic !== "string" || !topic.trim()) {
+      const effectiveInput = (rawInput && typeof rawInput === "string" && rawInput.trim().length > 0)
+        ? rawInput.trim()
+        : (topic && typeof topic === "string" ? topic.trim() : "");
+
+      if (!effectiveInput) {
         return res.json({
           status: "error",
-          error: "Vui lòng nhập chủ điểm ngữ pháp cần tạo bài tập."
+          error: "Vui lòng nhập chủ điểm ngữ pháp hoặc dán nội dung/ví dụ cần tạo bài tập."
         });
       }
 
@@ -2315,9 +2439,104 @@ Trả về DUY NHẤT JSON hợp lệ:
       const count = Math.min(Math.max(Number(questionCount) || 5, 1), 25);
       const targetDiff = difficulty || "guided";
 
-      const systemInstruction = `Bạn là chuyên gia sư phạm tiếng Anh hàng đầu, chuyên thiết kế bài tập ngữ pháp theo giáo trình Cambridge/IELTS/TOEFL.
+      // Kiểm tra xem input có phải là dạng bài tập chuyển đổi tương đương hoặc có ví dụ/key từ SGK hay không
+      const isTransformationMode = mode === "transformation" || 
+        /chuyển|viết lại|biến đổi|tương đương|combine|rewrite|passive|conditional|when.*while|direct.*indirect|reported|unless|so sánh|wish|despite|although/i.test(effectiveInput);
+
+      let systemInstruction = "";
+
+      if (isTransformationMode) {
+        systemInstruction = `Bạn là Chuyên gia Sư phạm Ngôn ngữ Tiếng Anh hàng đầu (IELTS 9.0, Giảng viên luyện thi Cambridge & Ngữ pháp Chuyên sâu).
+NHIỆM VỤ ĐẶC BIỆT: THIẾT KẾ BÀI TẬP "CHUYỂN ĐỔI DẠNG TƯƠNG ĐƯƠNG / VIẾT LẠI CÂU (SENTENCE TRANSFORMATION & COMBINATION)".
+
+NGUỒN DỮ LIỆU ĐẦU VÀO TỪ NGƯỜI DÙNG:
+Người dùng có thể cung cấp:
+1. Một yêu cầu ngắn gọn, có thể hơi mơ hồ (ví dụ: "chuyển câu điều kiện 2 sang 3", "chủ động sang bị động", "nối câu bằng when/while", "luyện tập wish", "so sánh hơn sang bằng", "because sang because of", v.v.).
+2. HOẶC một đoạn văn bản thô từ Sách giáo khoa / Sách giáo viên / Đề thi chứa chỉ dẫn sư phạm, số trang, các câu đề bài và phần Key đáp án (như: "TASK 2: COMBINE THE TWO SENTENCES USING WHEN OR WHILE WHERE APPROPRIATE... Key: 1. While they were cleaning the streets, it started to rain. / They were cleaning the streets when it started to rain...").
+
+QUY TRÌNH XỬ LÝ THÔNG MINH CỦA AI:
+BƯỚC 1 - NHẬN DIỆN VÀ PHÂN TÍCH QUY TẮC CHUYỂN ĐỔI (INFERRED RULE):
+- Đọc hiểu ý định của người dùng và bóc tách cấu trúc chuyển đổi ngữ pháp tương đương.
+- Tóm tắt công thức chuyển đổi ngắn gọn, rõ ràng (ví dụ: "Công thức When/While: S + was/were V-ing when S + V2/ed <=> While S + was/were V-ing, S + V2/ed").
+- Ghi vào trường "inferredRule".
+
+BƯỚC 2 - KHAI THÁC & SÁNG TẠO NỘI DUNG BÀI TẬP:
+- Nếu người dùng cung cấp các câu ví dụ hoặc Key sẵn có trong văn bản, hãy TRÍCH XUẤT và chuyển thể các câu đó thành các câu bài tập chuẩn mực.
+- Nếu số lượng câu trong văn bản ít hơn số lượng yêu cầu (${count} câu), hãy SÁNG TẠO THÊM các câu mới có độ tương đồng cấu trúc và bám sát ngữ cảnh thực tế tự nhiên để đạt đủ ${count} câu.
+- Đảm bảo các câu tiếng Anh mang tính tự nhiên, chuẩn ngữ pháp bản xứ, không gượng gạo.
+
+BƯỚC 3 - TẠO CÁC DẠNG BÀI THEO YÊU CẦU ("${targetType}"):
+- Nếu targetType = "sentence_transformation" hoặc targetType = "translation":
+  + type: "translation"
+  + question: Đưa ra câu gốc (hoặc 2 câu đơn cần kết hợp) và chỉ dẫn viết lại. Ví dụ: "Kết hợp 2 câu sau dùng WHEN hoặc WHILE: 'They were cleaning the streets. It started to rain.' (Gợi ý bắt đầu bằng: While...)" hoặc "Viết lại câu sau sao cho nghĩa không đổi: 'If you don't study hard, you will fail the exam.' (Bắt đầu bằng: Unless...)"
+  + correctAnswer: Câu tiếng Anh tương đương hoàn chỉnh. NẾU CÓ NHIỀU CÁCH VIẾT TƯƠNG ĐƯƠNG ĐỀU ĐÚNG, HÃY PHÂN TÁCH BẰNG DẤU GẠCH CHÉO " / " (Ví dụ: "While they were cleaning the streets, it started to rain. / They were cleaning the streets when it started to rain.").
+  + hint: Cấu trúc hoặc từ gợi ý mở đầu.
+  + explanation: Phân tích vì sao chuyển đổi như vậy, giải thích cấu trúc ngữ pháp tương đương bằng tiếng Việt dễ hiểu.
+
+- Nếu targetType = "multiple_choice":
+  + type: "multiple_choice"
+  + question: "Chọn câu có nghĩa tương đương và đúng ngữ pháp nhất với câu sau: '[Câu gốc]'"
+  + options: Mảng 4 phương án A, B, C, D gồm 1 đáp án viết lại tương đương chính xác và 3 đáp án nhiễu chứa các lỗi ngữ pháp kinh điển (nhầm thì, sai liên từ, sai phân từ 2, đổi sai nghĩa).
+  + correctOptionIdx: 0, 1, 2 hoặc 3.
+  + correctAnswer: Chuỗi phương án đúng.
+  + explanation: Phân tích cặn kẽ tại sao phương án này tương đương đúng và tại sao 3 phương án còn lại sai ngữ pháp/sai nghĩa.
+
+- Nếu targetType = "sentence_builder":
+  + type: "sentence_builder"
+  + question: "Sắp xếp các từ sau thành câu tương đương với câu: '[Câu gốc]'"
+  + scrambledWords: Mảng các từ bị xáo trộn để ghép thành câu tương đương.
+  + correctAnswer: Câu hoàn chỉnh đúng chuẩn.
+  + explanation: Giải thích trật tự từ và công thức.
+
+- If targetType = "error_correction":
+  + type: "error_correction"
+  + question: "Tìm và sửa lỗi sai trong câu chuyển đổi sau:"
+  + errorSentence: Câu chuyển đổi bị cài 1 lỗi ngữ pháp điển hình về chủ điểm tương đương này.
+  + errorPart: Phần từ/cụm từ sai.
+  + correction: Phần từ/cụm từ sửa đúng.
+  + correctAnswer: correction.
+  + explanation: Giải thích lỗi sai và cách khắc phục bằng tiếng Việt.
+
+- If targetType = "fill_in_blank":
+  + type: "fill_in_blank"
+  + question: "Điền liên từ hoặc dạng đúng của từ vào chỗ trống để hoàn thành câu tương đương: '[Câu gốc]' ➔ '[Câu chuyển đổi có chỗ trống ____]'"
+  + correctAnswer: Từ hoặc cụm từ cần điền.
+  + hint: Gợi ý nhận biết.
+  + explanation: Giải thích quy tắc bằng tiếng Việt.
+
+- If targetType = "mixed" hoặc mặc định:
+  + Phân bổ đa dạng các dạng bài trên (ưu tiên nhiều câu viết lại câu tương đương translation, trắc nghiệm tương đương multiple_choice, sắp xếp câu sentence_builder, sửa lỗi sai error_correction, điền liên từ fill_in_blank) để học sinh luyện tập toàn diện từ nhận biết đến tự sản sinh ngôn ngữ.
+
+ĐỊNH DẠNG JSON ĐẦU RA BẮT BUỘC:
+{
+  "status": "success",
+  "topic": "[Tên chủ điểm chuyển đổi ngữ pháp]",
+  "inferredRule": "[Công thức / Quy tắc chuyển đổi tương đương tóm tắt]",
+  "targetType": "${targetType}",
+  "items": [
+    {
+      "id": "trans_1",
+      "topic": "[Tên chủ điểm]",
+      "type": "translation | multiple_choice | sentence_builder | error_correction | fill_in_blank",
+      "question": "string",
+      "originalSentence": "[Câu gốc nếu có]",
+      "transformationCue": "[Từ gợi ý nếu có, vd: While / Unless / Had / passive]",
+      "hint": "string",
+      "correctAnswer": "string (nếu có nhiều cách tương đương, phân tách bằng ' / ')",
+      "options": ["string", "string", "string", "string"], // nếu multiple_choice
+      "correctOptionIdx": 0, // nếu multiple_choice
+      "scrambledWords": ["string"], // nếu sentence_builder
+      "errorSentence": "string", // nếu error_correction
+      "errorPart": "string", // nếu error_correction
+      "correction": "string", // nếu error_correction
+      "explanation": "Giải thích chi tiết quy tắc chuyển đổi tương đương bằng tiếng Việt"
+    }
+  ]
+}`;
+      } else {
+        systemInstruction = `Bạn là chuyên gia sư phạm tiếng Anh hàng đầu, chuyên thiết kế bài tập ngữ pháp theo giáo trình Cambridge/IELTS/TOEFL.
 NHIỆM VỤ:
-Tạo ra chính xác ${count} câu hỏi bài tập ngữ pháp chất lượng cao chuyên sâu về chủ điểm: "${topic.trim()}".
+Tạo ra chính xác ${count} câu hỏi bài tập ngữ pháp chất lượng cao chuyên sâu về chủ điểm: "${effectiveInput}".
 ${ruleNote ? `Ghi chú ngữ pháp bổ sung từ giáo viên: "${ruleNote.trim()}"` : ""}
 Dạng bài yêu cầu: "${targetType}"
 Độ khó: "${targetDiff}"
@@ -2350,8 +2569,8 @@ HƯỚNG DẪN CÁC DẠNG BÀI:
   + hint: Dấu hiệu nhận biết
   + explanation: Giải thích quy tắc chia từ bằng tiếng Việt.
 - Nếu targetType = "translation":
-  + question: Dịch câu tiếng Việt sau sang tiếng Anh áp dụng cấu trúc ${topic}
-  + correctAnswer: Câu tiếng Anh chuẩn xác
+  + question: Dịch câu tiếng Việt sau sang tiếng Anh hoặc viết lại câu áp dụng cấu trúc ngữ pháp
+  + correctAnswer: Câu tiếng Anh chuẩn xác (nếu có nhiều cách đều đúng thì phân tách bằng ' / ')
   + hint: Cấu trúc cần dùng
   + explanation: Phân tích cấu trúc câu tiếng Anh bằng tiếng Việt.
 - Nếu targetType = "mixed":
@@ -2360,26 +2579,28 @@ HƯỚNG DẪN CÁC DẠNG BÀI:
 ĐỊNH DẠNG JSON ĐẦU RA:
 {
   "status": "success",
-  "topic": "${topic.trim()}",
+  "topic": "${effectiveInput}",
+  "inferredRule": "[Tóm tắt công thức ngữ pháp cốt lõi]",
   "targetType": "${targetType}",
   "items": [
     {
       "id": "string",
-      "topic": "${topic.trim()}",
+      "topic": "${effectiveInput}",
       "type": "multiple_choice | sentence_builder | error_correction | fill_in_blank | translation",
       "question": "string",
       "hint": "string",
       "correctAnswer": "string",
-      "options": ["string", "string", "string", "string"], // nếu multiple_choice
-      "correctOptionIdx": 0, // nếu multiple_choice
-      "scrambledWords": ["string"], // nếu sentence_builder
-      "errorSentence": "string", // nếu error_correction
-      "errorPart": "string", // nếu error_correction
-      "correction": "string", // nếu error_correction
+      "options": ["string", "string", "string", "string"],
+      "correctOptionIdx": 0,
+      "scrambledWords": ["string"],
+      "errorSentence": "string",
+      "errorPart": "string",
+      "correction": "string",
       "explanation": "Giải thích chi tiết bằng tiếng Việt"
     }
   ]
 }`;
+      }
 
       const ai = new GoogleGenAI({
         apiKey,
@@ -2390,26 +2611,56 @@ HƯỚNG DẪN CÁC DẠNG BÀI:
         }
       });
 
-      const targetModel = model?.trim() || "gemini-3.8-flash";
-      const response = await ai.models.generateContent({
-        model: targetModel,
-        contents: [{ role: "user", parts: [{ text: `Hãy tạo ${count} bài tập ngữ pháp về: ${topic.trim()}` }] }],
-        config: {
-          systemInstruction,
-          responseMimeType: "application/json",
-          temperature: 0.3,
-        }
-      });
+      // Danh sách model ưu tiên: gemini-3.1-flash-lite cực nhanh, ổn định, tránh bị lỗi 503 High Demand
+      const requestedModel = model?.trim();
+      const candidateModels = Array.from(new Set([
+        requestedModel || "gemini-3.1-flash-lite",
+        "gemini-3.1-flash-lite",
+        "gemini-2.5-flash",
+        "gemini-flash-latest"
+      ])).filter(Boolean);
 
-      const replyText = response.text?.trim() || "{}";
-      try {
-        const parsed = JSON.parse(replyText);
-        return res.json(parsed);
-      } catch (e) {
-        const cleaned = replyText.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim();
-        const parsed = JSON.parse(cleaned);
-        return res.json(parsed);
+      let responseText = "";
+      let lastError: any = null;
+
+      for (const m of candidateModels) {
+        try {
+          console.log(`[Grammar Generate] Trying model ${m}...`);
+          const response = await ai.models.generateContent({
+            model: m,
+            contents: [{ 
+              role: "user", 
+              parts: [{ 
+                text: `YÊU CẦU SOẠN BÀI TẬP:\n${effectiveInput}\n\n${ruleNote ? `GHI CHÚ / BỔ SUNG: ${ruleNote.trim()}` : ""}\n\nHãy phân tích kỹ nội dung trên và tạo đúng ${count} câu bài tập chất lượng cao theo đúng định dạng JSON.` 
+              }] 
+            }],
+            config: {
+              systemInstruction,
+              responseMimeType: "application/json",
+              temperature: 0.2,
+            }
+          });
+
+          if (response?.text?.trim()) {
+            responseText = response.text.trim();
+            console.log(`[Grammar Generate] Successfully generated with model ${m}`);
+            break;
+          }
+        } catch (err: any) {
+          console.warn(`[Grammar Generate] Model ${m} failed:`, err?.message || err);
+          lastError = err;
+          // Tiếp tục thử model tiếp theo trong candidateModels
+        }
       }
+
+      if (!responseText) {
+        throw new Error(lastError?.message || "Không thể nhận phản hồi từ mô hình AI. Vui lòng thử lại sau giây lát.");
+      }
+
+      // Trích xuất JSON an toàn bằng thuật toán Balanced Braces
+      const parsed = safeExtractJson(responseText);
+
+      return res.json(parsed);
     } catch (err: any) {
       console.error("Grammar generation error:", err);
       return res.status(500).json({ error: err.message || "Lỗi xử lý tạo bài tập ngữ pháp." });
@@ -2599,14 +2850,8 @@ ${currentContent}
       });
 
       const replyText = response.text?.trim() || "{}";
-      try {
-        const parsed = JSON.parse(replyText);
-        return res.json(parsed);
-      } catch (e) {
-        const cleaned = replyText.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim();
-        const parsed = JSON.parse(cleaned);
-        return res.json(parsed);
-      }
+      const parsed = safeExtractJson(replyText);
+      return res.json(parsed);
     } catch (err: any) {
       console.error("Lesson AI Assistant error:", err);
       return res.status(500).json({ error: err.message || "Lỗi xử lý Trợ lý AI Soạn bài." });

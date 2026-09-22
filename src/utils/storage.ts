@@ -516,17 +516,58 @@ export function bulkResetResolvedErrors(errorIds: string[]): ErrorLog[] {
 }
 
 // -------------------------------------------------------------
-// CRUD Helpers for Topics, Lessons, Exercises
+// CRUD Helpers for Topics, Lessons, Exercises with Two-Way Timestamp Tracking
 // -------------------------------------------------------------
 
+export function mergeCollectionsWithTimestamp<T extends { id: string; updatedAt?: number }>(
+  localItems: T[],
+  cloudItems: T[]
+): { merged: T[]; itemsToSyncUp: T[] } {
+  const localMap = new Map<string, T>(localItems.map(item => [item.id, item]));
+  const mergedMap = new Map<string, T>();
+  const itemsToSyncUp: T[] = [];
+
+  for (const cloudItem of cloudItems) {
+    const localItem = localMap.get(cloudItem.id);
+    if (!localItem) {
+      mergedMap.set(cloudItem.id, cloudItem);
+    } else {
+      const localUpdated = localItem.updatedAt || 0;
+      const cloudUpdated = cloudItem.updatedAt || 0;
+      if (localUpdated > cloudUpdated) {
+        // Local is newer! Preserve local modification
+        mergedMap.set(localItem.id, localItem);
+        itemsToSyncUp.push(localItem);
+      } else {
+        // Cloud is newer or same
+        mergedMap.set(cloudItem.id, cloudItem);
+      }
+    }
+  }
+
+  // Any items that exist locally but not in cloud yet
+  for (const [id, localItem] of localMap.entries()) {
+    if (!mergedMap.has(id)) {
+      mergedMap.set(id, localItem);
+      itemsToSyncUp.push(localItem);
+    }
+  }
+
+  return {
+    merged: Array.from(mergedMap.values()),
+    itemsToSyncUp
+  };
+}
+
 export function updateTopic(updatedTopic: Topic): Topic[] {
+  const withTime: Topic = { ...updatedTopic, updatedAt: Date.now() };
   const topics = loadTopics();
-  const exists = topics.some(t => t.id === updatedTopic.id);
+  const exists = topics.some(t => t.id === withTime.id);
   const next = exists
-    ? topics.map(t => t.id === updatedTopic.id ? updatedTopic : t)
-    : [...topics, updatedTopic];
+    ? topics.map(t => t.id === withTime.id ? withTime : t)
+    : [...topics, withTime];
   saveTopics(next);
-  syncDocToCloud('topics', updatedTopic.id, updatedTopic);
+  syncDocToCloud('topics', withTime.id, withTime);
   return next;
 }
 
@@ -535,13 +576,14 @@ export function deleteTopic(topicId: string) {
 }
 
 export function updateLesson(updatedLesson: Lesson): Lesson[] {
+  const withTime: Lesson = { ...updatedLesson, updatedAt: Date.now() };
   const lessons = loadLessons();
-  const exists = lessons.some(l => l.id === updatedLesson.id);
+  const exists = lessons.some(l => l.id === withTime.id);
   const next = exists
-    ? lessons.map(l => l.id === updatedLesson.id ? updatedLesson : l)
-    : [...lessons, updatedLesson];
+    ? lessons.map(l => l.id === withTime.id ? withTime : l)
+    : [...lessons, withTime];
   saveLessons(next);
-  syncDocToCloud('lessons', updatedLesson.id, updatedLesson);
+  syncDocToCloud('lessons', withTime.id, withTime);
   return next;
 }
 
@@ -550,13 +592,14 @@ export function deleteLesson(lessonId: string) {
 }
 
 export function updateExercise(updatedExercise: Exercise): Exercise[] {
+  const withTime: Exercise = { ...updatedExercise, updatedAt: Date.now() };
   const exercises = loadExercises();
-  const exists = exercises.some(e => e.id === updatedExercise.id);
+  const exists = exercises.some(e => e.id === withTime.id);
   const next = exists
-    ? exercises.map(e => e.id === updatedExercise.id ? updatedExercise : e)
-    : [...exercises, updatedExercise];
+    ? exercises.map(e => e.id === withTime.id ? withTime : e)
+    : [...exercises, withTime];
   saveExercises(next);
-  syncDocToCloud('exercises', updatedExercise.id, updatedExercise);
+  syncDocToCloud('exercises', withTime.id, withTime);
   return next;
 }
 
@@ -569,10 +612,11 @@ export function reorderTopics(orderedTopics: Topic[]): Topic[] {
   const orderMap = new Map<string, number>();
   orderedTopics.forEach((t, idx) => orderMap.set(t.id, idx));
 
+  const now = Date.now();
   const changedTopics: Topic[] = [];
   const next = currentTopics.map(t => {
     if (orderMap.has(t.id)) {
-      const updated = { ...t, order: orderMap.get(t.id)! };
+      const updated = { ...t, order: orderMap.get(t.id)!, updatedAt: now };
       changedTopics.push(updated);
       return updated;
     }
@@ -591,10 +635,11 @@ export function reorderLessons(orderedLessons: Lesson[]): Lesson[] {
   const orderMap = new Map<string, number>();
   orderedLessons.forEach((l, idx) => orderMap.set(l.id, idx));
 
+  const now = Date.now();
   const changedLessons: Lesson[] = [];
   const next = currentLessons.map(l => {
     if (orderMap.has(l.id)) {
-      const updated = { ...l, order: orderMap.get(l.id)! };
+      const updated = { ...l, order: orderMap.get(l.id)!, updatedAt: now };
       changedLessons.push(updated);
       return updated;
     }
@@ -613,10 +658,11 @@ export function reorderExercises(orderedExercises: Exercise[]): Exercise[] {
   const orderMap = new Map<string, number>();
   orderedExercises.forEach((e, idx) => orderMap.set(e.id, idx));
 
+  const now = Date.now();
   const changedExercises: Exercise[] = [];
   const next = currentExercises.map(e => {
     if (orderMap.has(e.id)) {
-      const updated = { ...e, order: orderMap.get(e.id)! };
+      const updated = { ...e, order: orderMap.get(e.id)!, updatedAt: now };
       changedExercises.push(updated);
       return updated;
     }
@@ -1028,9 +1074,10 @@ export function bulkDeleteTopics(topicIds: string[]): {
 export function bulkMoveTopics(topicIds: string[], targetClassroomId: string): Topic[] {
   const topicIdSet = new Set(topicIds);
   const updatedTopicsList: Topic[] = [];
+  const now = Date.now();
   const topics = loadTopics().map(t => {
     if (topicIdSet.has(t.id)) {
-      const updated = { ...t, classroomId: targetClassroomId };
+      const updated = { ...t, classroomId: targetClassroomId, updatedAt: now };
       updatedTopicsList.push(updated);
       syncDocToCloud('topics', updated.id, updated);
       return updated;
@@ -1163,9 +1210,10 @@ export function bulkDeleteLessons(lessonIds: string[]): {
 export function bulkMoveLessons(lessonIds: string[], targetTopicId: string): Lesson[] {
   const lessonIdSet = new Set(lessonIds);
   const updatedLessonsList: Lesson[] = [];
+  const now = Date.now();
   const lessons = loadLessons().map(l => {
     if (lessonIdSet.has(l.id)) {
-      const updated = { ...l, topicId: targetTopicId };
+      const updated = { ...l, topicId: targetTopicId, updatedAt: now };
       updatedLessonsList.push(updated);
       syncDocToCloud('lessons', updated.id, updated);
       return updated;
@@ -1265,9 +1313,10 @@ export function bulkDeleteExercises(exerciseIds: string[]): {
 export function bulkMoveExercises(exerciseIds: string[], targetLessonId: string): Exercise[] {
   const exerciseIdSet = new Set(exerciseIds);
   const updatedExercisesList: Exercise[] = [];
+  const now = Date.now();
   const exercises = loadExercises().map(e => {
     if (exerciseIdSet.has(e.id)) {
-      const updated = { ...e, lessonId: targetLessonId };
+      const updated = { ...e, lessonId: targetLessonId, updatedAt: now };
       updatedExercisesList.push(updated);
       syncDocToCloud('exercises', updated.id, updated);
       return updated;
@@ -1435,11 +1484,34 @@ export async function syncDatabaseWithCloud(onDataChanged?: () => void): Promise
     }
 
     if (cloudData.hasData) {
-      // Cloud has existing data -> update LocalStorage to perfectly mirror cloud
-      localStorage.setItem(STORAGE_KEYS.CLASSROOMS, JSON.stringify(cloudData.classrooms || []));
-      localStorage.setItem(STORAGE_KEYS.TOPICS, JSON.stringify(cloudData.topics || []));
-      localStorage.setItem(STORAGE_KEYS.LESSONS, JSON.stringify(cloudData.lessons || []));
-      localStorage.setItem(STORAGE_KEYS.EXERCISES, JSON.stringify(cloudData.exercises || []));
+      // Safely merge cloud with local data, preserving any newer local modifications (e.g. moved exercises)
+      if (cloudData.classrooms && cloudData.classrooms.length > 0) {
+        const localClassrooms = loadClassrooms();
+        const { merged, itemsToSyncUp } = mergeCollectionsWithTimestamp(localClassrooms, cloudData.classrooms);
+        saveClassrooms(merged);
+        if (itemsToSyncUp.length > 0) syncBatchDocsToCloud('classrooms', itemsToSyncUp);
+      }
+
+      if (cloudData.topics && cloudData.topics.length > 0) {
+        const localTopics = loadTopics();
+        const { merged, itemsToSyncUp } = mergeCollectionsWithTimestamp(localTopics, cloudData.topics);
+        saveTopics(merged);
+        if (itemsToSyncUp.length > 0) syncBatchDocsToCloud('topics', itemsToSyncUp);
+      }
+
+      if (cloudData.lessons && cloudData.lessons.length > 0) {
+        const localLessons = loadLessons();
+        const { merged, itemsToSyncUp } = mergeCollectionsWithTimestamp(localLessons, cloudData.lessons);
+        saveLessons(merged);
+        if (itemsToSyncUp.length > 0) syncBatchDocsToCloud('lessons', itemsToSyncUp);
+      }
+
+      if (cloudData.exercises && cloudData.exercises.length > 0) {
+        const localExercises = loadExercises();
+        const { merged, itemsToSyncUp } = mergeCollectionsWithTimestamp(localExercises, cloudData.exercises);
+        saveExercises(merged);
+        if (itemsToSyncUp.length > 0) syncBatchDocsToCloud('exercises', itemsToSyncUp);
+      }
       if (cloudData.users && cloudData.users.length > 0) {
         localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(cloudData.users));
         

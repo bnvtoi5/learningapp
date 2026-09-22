@@ -38,6 +38,7 @@ import {
   reorderTopics,
   reorderLessons,
   reorderExercises,
+  mergeCollectionsWithTimestamp,
   loadErrors, 
   saveErrors, 
   loadStats, 
@@ -163,21 +164,33 @@ function MainApp() {
 
     // 4. Real-time live listener from Firestore across all devices and tabs
     const unsubscribe = subscribeToAllCollections((cloudData) => {
-      if (cloudData.classrooms) {
-        setClassrooms(cloudData.classrooms);
-        localStorage.setItem('study_app_classrooms', JSON.stringify(cloudData.classrooms));
+      if (cloudData.classrooms && cloudData.classrooms.length > 0) {
+        setClassrooms(prev => {
+          const { merged } = mergeCollectionsWithTimestamp(prev, cloudData.classrooms!);
+          localStorage.setItem('study_app_classrooms', JSON.stringify(merged));
+          return merged;
+        });
       }
-      if (cloudData.topics) {
-        setTopics(cloudData.topics);
-        localStorage.setItem('study_app_topics', JSON.stringify(cloudData.topics));
+      if (cloudData.topics && cloudData.topics.length > 0) {
+        setTopics(prev => {
+          const { merged } = mergeCollectionsWithTimestamp(prev, cloudData.topics!);
+          localStorage.setItem('study_app_topics', JSON.stringify(merged));
+          return merged;
+        });
       }
-      if (cloudData.lessons) {
-        setLessons(cloudData.lessons);
-        localStorage.setItem('study_app_lessons', JSON.stringify(cloudData.lessons));
+      if (cloudData.lessons && cloudData.lessons.length > 0) {
+        setLessons(prev => {
+          const { merged } = mergeCollectionsWithTimestamp(prev, cloudData.lessons!);
+          localStorage.setItem('study_app_lessons', JSON.stringify(merged));
+          return merged;
+        });
       }
-      if (cloudData.exercises) {
-        setExercises(cloudData.exercises);
-        localStorage.setItem('study_app_exercises', JSON.stringify(cloudData.exercises));
+      if (cloudData.exercises && cloudData.exercises.length > 0) {
+        setExercises(prev => {
+          const { merged } = mergeCollectionsWithTimestamp(prev, cloudData.exercises!);
+          localStorage.setItem('study_app_exercises', JSON.stringify(merged));
+          return merged;
+        });
       }
       // Keep errors local to prevent cloud overwriting and eliminate Firestore read/writes
       if (cloudData.users && cloudData.users.length > 0) {

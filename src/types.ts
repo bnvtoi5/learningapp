@@ -129,6 +129,7 @@ export interface Exercise {
   pronunciationAccuracy?: number; // Ngưỡng % khớp yêu cầu đối với câu nhiều chữ (50-100%, mặc định 70%)
   isSingleWord?: boolean; // True nếu là từ vựng đơn lẻ (nghe đúng là xong), False nếu là câu nhiều chữ (% khớp)
   targetWordsCount?: number; // Số lượng từ trong văn bản phát âm
+  updatedAt?: number; // Dấu thời gian cập nhật để đồng bộ hai chiều chính xác giữa local và cloud
 }
 
 export interface MemriseExerciseItem {
@@ -244,6 +245,7 @@ export interface Lesson {
   order: number;
   isHidden?: boolean; // Trạng thái ẩn đối với học sinh
   shuffleExercises?: boolean; // Xáo trộn ngẫu nhiên thứ tự câu hỏi khi phát cho học sinh (Mặc định: false - giữ nguyên thứ tự thiết kế)
+  updatedAt?: number;
 }
 
 export interface Topic {
@@ -256,6 +258,7 @@ export interface Topic {
   createdAt: number;
   order?: number; // Thứ tự hiển thị của Chủ đề / Unit
   isHidden?: boolean; // Trạng thái ẩn đối với học sinh
+  updatedAt?: number;
 }
 
 export interface ErrorLog {
