@@ -26,6 +26,7 @@ import {
 import { AIProviderType, MascotType, CustomAIModel } from '../types';
 import { AI_PROVIDERS, PROVIDER_LIST, getModelInfo } from '../utils/aiProviders';
 import { DEFAULT_MASCOT_PROMPTS, MASCOT_HANDLES } from '../utils/mascotAI';
+import { testAIConnection } from '../utils/aiConnectionTester';
 import { MASCOT_LIST } from '../utils/mascotSprites';
 import { useTheme } from '../context/ThemeContext';
 import { soundManager } from '../utils/audio';
@@ -209,27 +210,22 @@ export const OpenCodeModelPicker: React.FC<OpenCodeModelPickerProps> = ({
     const activeUrl = baseUrlInput?.trim() || urlsByProvider[activeProvider]?.trim() || '';
 
     try {
-      const res = await fetch('/api/test-ai-connection', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: activeProvider,
-          model: selectedModelId,
-          customApiKey: activeKey,
-          baseUrl: activeUrl,
-        }),
+      const result = await testAIConnection({
+        provider: activeProvider,
+        model: selectedModelId,
+        customApiKey: activeKey,
+        baseUrl: activeUrl,
       });
 
-      const data = await res.json();
-      if (res.ok && data.success) {
+      if (result.success) {
         setTestingStatus('success');
-        setTestResultMessage(data.message || `Kết nối thành công với model "${selectedModelId}"!`);
-        if (typeof data.latencyMs === 'number') {
-          setTestLatency(data.latencyMs);
+        setTestResultMessage(result.message || `Kết nối thành công với model "${selectedModelId}"!`);
+        if (typeof result.latencyMs === 'number') {
+          setTestLatency(result.latencyMs);
         }
       } else {
         setTestingStatus('error');
-        setTestResultMessage(data.error || `Kiểm tra thất bại (Mã lỗi ${res.status}).`);
+        setTestResultMessage(result.error || 'Kiểm tra thất bại. Vui lòng kiểm tra lại API Key hoặc Model ID.');
       }
     } catch (err: any) {
       setTestingStatus('error');

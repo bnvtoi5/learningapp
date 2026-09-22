@@ -58,6 +58,7 @@ import { GrammarGeneratorModal } from './GrammarGeneratorModal';
 import { PronunciationGeneratorModal } from './PronunciationGeneratorModal';
 import { OpenCodeModelPicker } from './OpenCodeModelPicker';
 import { AI_PROVIDERS } from '../utils/aiProviders';
+import { testAIConnection } from '../utils/aiConnectionTester';
 import { getDistinctClassNames, getClassroomsByName } from '../utils/classroomHelpers';
 import { createClozeLettersPattern } from '../utils/singleVocabGenerator';
 import { speakText } from '../utils/audio';
@@ -167,28 +168,23 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
       const customKey = current.providerApiKeys?.[provider] || current.customApiKey || '';
       const baseUrl = current.providerBaseUrls?.[provider] || current.customBaseUrl || '';
 
-      const res = await fetch('/api/test-ai-connection', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider,
-          model,
-          customApiKey: customKey,
-          baseUrl,
-        }),
+      const result = await testAIConnection({
+        provider,
+        model,
+        customApiKey: customKey,
+        baseUrl,
       });
 
-      const data = await res.json();
-      if (res.ok && data.success) {
+      if (result.success) {
         setApiTestResult({
           status: 'success',
-          message: data.message || `Kết nối thành công với model "${model}"!`,
-          latencyMs: data.latencyMs,
+          message: result.message || `Kết nối thành công với model "${model}"!`,
+          latencyMs: result.latencyMs,
         });
       } else {
         setApiTestResult({
           status: 'error',
-          message: data.error || `Kiểm tra thất bại (Mã lỗi ${res.status}).`,
+          message: result.error || 'Kiểm tra thất bại. Vui lòng kiểm tra lại API Key hoặc Model ID.',
         });
       }
     } catch (err: any) {

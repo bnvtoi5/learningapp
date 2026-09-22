@@ -287,8 +287,15 @@ export async function generateGrammarExercisesFromAI(params: {
       })
     });
 
-    if (res.ok) {
-      const data = await res.json();
+    const rawText = await res.text();
+    let data: any = null;
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      console.warn('[Grammar AI] Response is not valid JSON:', rawText.slice(0, 100));
+    }
+
+    if (res.ok && data) {
       if (data.status === 'success' && Array.isArray(data.items) && data.items.length > 0) {
         return data as GrammarGenerationResult;
       }
@@ -302,13 +309,12 @@ export async function generateGrammarExercisesFromAI(params: {
         };
       }
     } else {
-      let serverErr = 'Không thể kết nối đến máy chủ AI. Vui lòng thử lại.';
-      try {
-        const errJson = await res.json();
-        if (errJson?.error) {
-          serverErr = typeof errJson.error === 'string' ? errJson.error : JSON.stringify(errJson.error);
-        }
-      } catch {}
+      let serverErr = 'Không thể kết nối đến máy chủ AI. Vui lòng kiểm tra lại kết nối mạng hoặc thử lại.';
+      if (data?.error) {
+        serverErr = typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
+      } else if (rawText && rawText.includes('The page c')) {
+        serverErr = 'Không thể kết nối đến máy chủ AI từ thiết bị này. Vui lòng nhập API Key cá nhân trong phần chọn Mô hình để tạo bài tập trực tiếp.';
+      }
       return {
         status: 'error',
         topic,
