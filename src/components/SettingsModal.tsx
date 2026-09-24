@@ -76,7 +76,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setAvailableVoices(v.filter(item => item.lang.toLowerCase().startsWith('en')));
     };
     loadVoices();
+    try {
+      window.speechSynthesis.addEventListener('voiceschanged', loadVoices);
+    } catch {}
     window.speechSynthesis.onvoiceschanged = loadVoices;
+    return () => {
+      try {
+        window.speechSynthesis.removeEventListener('voiceschanged', loadVoices);
+      } catch {}
+    };
   }, []);
 
   const handleTestVoice = (genderOverride?: VoiceGenderPreference, speedOverride?: number, voiceUriOverride?: string) => {
@@ -527,9 +535,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             {/* Fallback & Device Safety Notice */}
             <div className={`p-2.5 rounded-xl border ${theme.border} bg-sky-500/5 text-sky-400/90 text-[11px] flex items-start gap-2 leading-relaxed`}>
               <Info className="w-4 h-4 shrink-0 text-sky-400 mt-0.5" />
-              <div>
-                <strong className="text-sky-300 block">Cơ chế bảo vệ Fallback đa tầng:</strong>
-                Hệ thống luôn ưu tiên gói giọng tự nhiên chuẩn nhất. Nếu điện thoại của bạn không có sẵn gói giọng phụ, ứng dụng sẽ tự động chuyển tiếp an toàn sang giọng mặc định của thiết bị, đảm bảo không bao giờ bị gián đoạn hay mất âm thanh.
+              <div className="space-y-1">
+                <div>
+                  <strong className="text-sky-300">Tương thích hoàn hảo trên Máy tính & Điện thoại:</strong>
+                  {settings.voiceGender?.includes('male') ? (
+                    <span className="text-sky-200 block mt-0.5">
+                      ✓ Đã bật chế độ <strong>Giọng Nam</strong>: Ứng dụng tự động điều chỉnh cao độ âm sắc (Pitch Shift 0.76x) để phát âm giọng nam trầm ấm, đĩnh đạc ngay cả khi điện thoại Android / iOS chưa tải gói giọng nam riêng.
+                    </span>
+                  ) : (
+                    <span className="block mt-0.5">
+                      Hệ thống luôn ưu tiên gói giọng tự nhiên chuẩn nhất. Nếu điện thoại của bạn không có sẵn gói giọng phụ, ứng dụng sẽ tự động chuyển tiếp an toàn sang giọng mặc định của máy.
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
 

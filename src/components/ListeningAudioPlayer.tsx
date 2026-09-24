@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { resolveMediaUrl } from '../utils/mediaDb';
-import { getBestVoiceForPreference } from '../utils/audio';
+import { getBestVoiceForPreference, getPitchForPreference } from '../utils/audio';
 
 interface ListeningAudioPlayerProps {
   audioUrl?: string;
@@ -112,6 +112,7 @@ export const ListeningAudioPlayer: React.FC<ListeningAudioPlayerProps> = ({
     if (bestVoice) {
       utterance.voice = bestVoice;
     }
+    utterance.pitch = getPitchForPreference(settings?.voiceGender, bestVoice);
 
     utterance.onstart = () => {
       setIsPlaying(true);

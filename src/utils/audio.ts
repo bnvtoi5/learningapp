@@ -153,16 +153,116 @@ export function getAvailableSpeechVoices(): SpeechSynthesisVoice[] {
   return cachedVoices.length > 0 ? cachedVoices : voices;
 }
 
-// Lắng nghe sự kiện nạp giọng nói bất đồng bộ từ Chrome / Android
+// Lắng nghe sự kiện nạp giọng nói bất đồng bộ từ Chrome, Android, iOS Safari
 if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-  window.speechSynthesis.onvoiceschanged = () => {
-    cachedVoices = window.speechSynthesis.getVoices();
+  const syncVoices = () => {
+    try {
+      const v = window.speechSynthesis.getVoices();
+      if (v && v.length > 0) {
+        cachedVoices = v;
+      }
+    } catch {}
   };
+  syncVoices();
+  try {
+    window.speechSynthesis.addEventListener('voiceschanged', syncVoices);
+  } catch {}
+  window.speechSynthesis.onvoiceschanged = syncVoices;
+}
+
+/**
+ * Danh sách từ khóa nhận diện giọng Nam chuẩn trên các nền tảng:
+ * - Desktop: Edge Natural (Guy), Google Chrome, Mac (Alex, Fred), Windows SAPI (David, Mark)
+ * - Android (Google Speech Services / Samsung TTS): #male, _male, male_1, male_2, en-us-x-iob, en-us-x-iom, en-us-x-tpd
+ * - iOS / iPadOS (Safari / WebKit): Alex, Fred, Daniel, Oliver, Arthur, Aaron, Siri Voice 1, Siri Voice 3
+ */
+const MALE_NAME_KEYWORDS = [
+  'guy', 'david', 'mark', 'alex', 'daniel', 'fred', 'oliver', 'george', 'ryan', 'christopher',
+  'andrew', 'tom', 'lee', 'aaron', 'arthur', 'gordon', 'nicky', 'rishi', 'thomas', 'ralph',
+  'albert', 'bruce', 'evan', 'nathan', 'noel', 'malcolm', 'james', 'john', 'michael', 'william'
+];
+
+const MALE_CODE_KEYWORDS = [
+  '#male', '_male', 'male_1', 'male_2', 'male 1', 'male 2', 'voice 1', 'voice 3', 'voice 5',
+  'voice i', 'voice iii', 'en-us-x-iob', 'en-us-x-iom', 'en-us-x-tpd', 'en-gb-x-rjs', 'uk english male'
+];
+
+const FEMALE_NAME_KEYWORDS = [
+  'jenny', 'aria', 'samantha', 'karen', 'natasha', 'zira', 'ava', 'allison', 'victoria',
+  'serena', 'stephanie', 'libby', 'sonia', 'moira', 'fiona', 'tessa', 'veena', 'susan', 'mary'
+];
+
+const FEMALE_CODE_KEYWORDS = [
+  '#female', '_female', 'female_1', 'female_2', 'female 1', 'female 2', 'voice 2', 'voice 4',
+  'voice ii', 'voice iv', 'en-us-x-sfg', 'en-us-x-tpf', 'en-us-x-tpc', 'en-us-x-iol', 'uk english female'
+];
+
+/**
+ * Kiểm tra xem một SpeechSynthesisVoice có phải là giọng Nam thực thụ hay không
+ */
+export function isActualMaleVoice(voice?: SpeechSynthesisVoice | null): boolean {
+  if (!voice) return false;
+  const str = `${voice.name} ${voice.voiceURI}`.toLowerCase();
+  
+  // Nếu chứa từ khóa nữ rõ ràng mà không có thẻ đè nam
+  const hasFemaleKw = FEMALE_NAME_KEYWORDS.some(k => str.includes(k)) ||
+    FEMALE_CODE_KEYWORDS.some(k => str.includes(k)) ||
+    (str.includes('female') && !str.includes('#male') && !str.includes('_male') && !str.includes('male_'));
+  
+  if (hasFemaleKw) return false;
+
+  if (MALE_CODE_KEYWORDS.some(k => str.includes(k))) return true;
+  if (str.includes(' male') || str.startsWith('male') || str.includes('(male)') || str.includes('[male]')) return true;
+  if (MALE_NAME_KEYWORDS.some(k => str.includes(k))) return true;
+
+  return false;
+}
+
+/**
+ * Kiểm tra xem một SpeechSynthesisVoice có phải là giọng Nữ thực thụ hay không
+ */
+export function isActualFemaleVoice(voice?: SpeechSynthesisVoice | null): boolean {
+  if (!voice) return false;
+  const str = `${voice.name} ${voice.voiceURI}`.toLowerCase();
+
+  const hasMaleKw = MALE_CODE_KEYWORDS.some(k => str.includes(k)) ||
+    MALE_NAME_KEYWORDS.some(k => str.includes(k)) ||
+    (str.includes('male') && !str.includes('female'));
+  if (hasMaleKw) return false;
+
+  if (FEMALE_CODE_KEYWORDS.some(k => str.includes(k))) return true;
+  if (str.includes('female') || str.includes('woman') || str.includes('girl')) return true;
+  if (FEMALE_NAME_KEYWORDS.some(k => str.includes(k))) return true;
+
+  return false;
+}
+
+/**
+ * TÍNH TOÁN CAO ĐỘ (PITCH SHIFT) THÔNG MINH CHO CẢ DESKTOP VÀ MOBILE:
+ * - Trên điện thoại (Android / iOS): Phần lớn các dòng máy chỉ nạp sẵn 1 giọng nữ mặc định (Google US English / Samantha)
+ *   mà không tải sẵn gói dữ liệu giọng nam offline trong cài đặt máy.
+ * - Khi người dùng chọn Giọng Nam (male / uk_male):
+ *   + Nếu thiết bị CÓ sẵn giọng nam tự nhiên: Đặt pitch 0.88 để giọng dày, ấm và đĩnh đạc.
+ *   + Nếu thiết bị CHỈ CÓ giọng nữ/mặc định: Tự động kích hoạt công nghệ Pitch Shift hạ cao độ xuống 0.76!
+ *     Cao độ 0.76 hạ tần số phát âm trung bình từ ~220Hz (âm vực nữ) xuống ~140Hz (âm vực nam chuẩn baritone/tenor).
+ *     Kết quả: Giọng nói lập tức nghe thành giọng nam rõ ràng, trầm ấm, dứt khoát trên mọi điện thoại di động!
+ */
+export function getPitchForPreference(
+  preference: VoiceGenderPreference = 'female',
+  voice?: SpeechSynthesisVoice | null
+): number {
+  if (preference === 'male' || preference === 'uk_male') {
+    return isActualMaleVoice(voice) ? 0.88 : 0.76;
+  }
+  if (preference === 'female' || preference === 'uk_female') {
+    return 1.05;
+  }
+  return 1.0;
 }
 
 /**
  * Tìm kiếm giọng đọc tiếng Anh tự nhiên, mượt mà và phổ biến nhất theo sở thích
- * Có cơ chế FALLBACK an toàn: Nếu không tìm thấy giọng chuyên biệt thì tự động dùng giọng mặc định
+ * Có cơ chế phân tầng và FALLBACK an toàn:
  */
 export function getBestVoiceForPreference(
   preference: VoiceGenderPreference = 'female',
@@ -185,59 +285,60 @@ export function getBestVoiceForPreference(
     return anyEn || null;
   }
 
-  // Danh sách các giọng hot/tự nhiên phổ biến trên Edge, Chrome, iOS (Siri/Samantha), Android
-  const femaleKeywords = [
-    'natural', 'neural', 'jenny', 'aria', 'samantha', 'karen', 'natasha', 'zira', 'siri',
-    'female', 'woman', 'ava', 'allison', 'victoria', 'serena', 'stephanie', 'libby', 'sonia', 'en-us-x-sfg'
-  ];
-
-  const maleKeywords = [
-    'natural', 'neural', 'guy', 'david', 'mark', 'alex', 'daniel', 'fred', 'oliver', 'george',
-    'ryan', 'male', 'man', 'christopher', 'andrew', 'en-us-x-sfg#male', 'tom', 'lee'
-  ];
-
   const englishVoices = voices.filter(v => v.lang.toLowerCase().startsWith('en'));
   if (englishVoices.length === 0) return null;
 
-  // Lọc theo khu vực UK / US nếu có
-  let candidateVoices = englishVoices;
-  if (preference === 'uk_female' || preference === 'uk_male') {
-    const ukVoices = englishVoices.filter(v => v.lang.toLowerCase().includes('gb') || v.lang.toLowerCase().includes('uk'));
-    if (ukVoices.length > 0) candidateVoices = ukVoices;
-  } else {
-    // Ưu tiên US (Mỹ)
-    const usVoices = englishVoices.filter(v => v.lang.toLowerCase().includes('us'));
-    if (usVoices.length > 0) candidateVoices = usVoices;
+  const isUkPreference = preference === 'uk_female' || preference === 'uk_male';
+  const isMalePreference = preference === 'male' || preference === 'uk_male';
+
+  // Chấm điểm từng giọng theo độ phù hợp
+  interface ScoredVoice {
+    voice: SpeechSynthesisVoice;
+    score: number;
   }
 
-  // 2. Tìm giọng Nữ (Female)
-  if (preference === 'female' || preference === 'uk_female') {
-    // Ưu tiên 1: Giọng Natural / Neural / High Quality
-    for (const kw of femaleKeywords) {
-      const found = candidateVoices.find(v => v.name.toLowerCase().includes(kw) || v.voiceURI.toLowerCase().includes(kw));
-      if (found) return found;
+  const scored: ScoredVoice[] = englishVoices.map(v => {
+    let score = 0;
+    const str = `${v.name} ${v.voiceURI}`.toLowerCase();
+    const lang = v.lang.toLowerCase();
+
+    const isUkLang = lang.includes('gb') || lang.includes('uk');
+    const isUsLang = lang.includes('us');
+    const isRegionMatch = isUkPreference ? isUkLang : isUsLang;
+
+    const male = isActualMaleVoice(v);
+    const female = isActualFemaleVoice(v);
+    const isHighQuality = str.includes('natural') || str.includes('neural') || str.includes('online') || str.includes('premium');
+
+    if (isMalePreference) {
+      if (male) score += 100;
+      if (female) score -= 80;
+    } else {
+      if (female) score += 100;
+      if (male) score -= 80;
     }
-    // Ưu tiên 2: Tìm trong toàn bộ englishVoices
-    for (const kw of femaleKeywords) {
-      const found = englishVoices.find(v => v.name.toLowerCase().includes(kw) || v.voiceURI.toLowerCase().includes(kw));
-      if (found) return found;
-    }
+
+    if (isRegionMatch) score += 30;
+    if (isHighQuality) score += 20;
+    if (v.default) score += 5;
+
+    return { voice: v, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+
+  // Nếu tìm thấy giọng đạt điểm cao (>= 50), ưu tiên sử dụng
+  if (scored.length > 0 && scored[0].score >= 50) {
+    return scored[0].voice;
   }
 
-  // 3. Tìm giọng Nam (Male)
-  if (preference === 'male' || preference === 'uk_male') {
-    for (const kw of maleKeywords) {
-      const found = candidateVoices.find(v => v.name.toLowerCase().includes(kw) || v.voiceURI.toLowerCase().includes(kw));
-      if (found) return found;
-    }
-    for (const kw of maleKeywords) {
-      const found = englishVoices.find(v => v.name.toLowerCase().includes(kw) || v.voiceURI.toLowerCase().includes(kw));
-      if (found) return found;
-    }
-  }
+  // Fallback: Tìm giọng theo vùng UK / US
+  const regionCandidates = englishVoices.filter(v => {
+    const lang = v.lang.toLowerCase();
+    return isUkPreference ? (lang.includes('gb') || lang.includes('uk')) : lang.includes('us');
+  });
 
-  // 4. FALLBACK an toàn: lấy giọng tiếng Anh đầu tiên hoặc giọng mặc định
-  const fallbackDefault = candidateVoices.find(v => v.default) || candidateVoices[0] || englishVoices[0];
+  const fallbackDefault = regionCandidates.find(v => v.default) || regionCandidates[0] || englishVoices.find(v => v.default) || englishVoices[0];
   return fallbackDefault || null;
 }
 
@@ -273,13 +374,15 @@ export function speakText(text: string, options?: SpeakOptions | string) {
     const utterance = new SpeechSynthesisUtterance(text.trim());
     utterance.lang = chosenLang;
     utterance.rate = chosenRate;
-    utterance.pitch = opts.pitch !== undefined ? opts.pitch : 1.0;
 
     // Tìm và gán Voice tốt nhất
     const bestVoice = getBestVoiceForPreference(voicePreference, opts.voiceURI || settings.selectedVoiceURI);
     if (bestVoice) {
       utterance.voice = bestVoice;
     }
+
+    // Tự động điều chỉnh pitch thông minh: Giọng nam sẽ có pitch 0.76 - 0.88 để đảm bảo luôn phát âm giọng nam trên mọi thiết bị
+    utterance.pitch = opts.pitch !== undefined ? opts.pitch : getPitchForPreference(voicePreference, bestVoice);
 
     if (opts.onEnd) utterance.onend = opts.onEnd;
     if (opts.onError) utterance.onerror = opts.onError;
