@@ -24,13 +24,15 @@ import {
   VolumeX,
   Info,
   Sliders,
-  ChevronDown
+  ChevronDown,
+  AlertTriangle,
+  CheckCircle2
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { ThemeMode, FontSize, LineSpacing, VoiceGenderPreference, User, MascotType } from '../types';
 import { exportAllData, importData, clearAllDatabase, syncDatabaseWithCloud, loadUsers, loadClassrooms, loadTopics, loadLessons, loadExercises, loadErrors, loadMediaAssets } from '../utils/storage';
 import { syncAllToCloud } from '../lib/firebase';
-import { speakText, getAvailableSpeechVoices } from '../utils/audio';
+import { speakText, getAvailableSpeechVoices, isActualMaleVoice, isActualFemaleVoice } from '../utils/audio';
 import { ConfirmModal } from './ConfirmModal';
 import { MASCOT_LIST } from '../utils/mascotSprites';
 import defaultConfig from '../../firebase-applet-config.json';
@@ -68,6 +70,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [isPlayingTestVoice, setIsPlayingTestVoice] = useState(false);
   const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [showAdvancedVoices, setShowAdvancedVoices] = useState(false);
+  const [showMobileTtsGuide, setShowMobileTtsGuide] = useState(false);
+  const [mobileOsTab, setMobileOsTab] = useState<'android' | 'ios'>('android');
+  const [isRefreshingVoices, setIsRefreshingVoices] = useState(false);
+  const [voiceRefreshMessage, setVoiceRefreshMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof navigator !== 'undefined') {
+      const ua = navigator.userAgent.toLowerCase();
+      if (ua.includes('iphone') || ua.includes('ipad') || ua.includes('ipod')) {
+        setMobileOsTab('ios');
+      }
+    }
+  }, []);
+
+  const handleRefreshVoices = () => {
+    setIsRefreshingVoices(true);
+    setVoiceRefreshMessage(null);
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      setIsRefreshingVoices(false);
+      return;
+    }
+    const v = window.speechSynthesis.getVoices();
+    const enVoices = v.filter(item => item.lang.toLowerCase().startsWith('en'));
+    setAvailableVoices(enVoices);
+    const males = enVoices.filter(item => isActualMaleVoice(item));
+    setTimeout(() => {
+      setIsRefreshingVoices(false);
+      if (males.length > 0) {
+        setVoiceRefreshMessage(`Tuyệt vời! Đã tìm thấy ${males.length} giọng Nam (${males.map(m => m.name).slice(0, 2).join(', ')})!`);
+        updateSettings({ selectedVoiceURI: males[0].voiceURI });
+        handleTestVoice(undefined, undefined, males[0].voiceURI);
+      } else {
+        setVoiceRefreshMessage(`Hiện tại máy vẫn chỉ có ${enVoices.length} giọng (chưa có gói giọng Nam của Google/Apple). Bạn làm theo 4 bước bên dưới rồi bấm quét lại nhé!`);
+        setShowMobileTtsGuide(true);
+      }
+    }, 400);
+  };
 
   useEffect(() => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
@@ -403,9 +442,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               {/* Advanced Voice Selection Dropdown */}
               {showAdvancedVoices && availableVoices.length > 0 && (
                 <div className="p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 space-y-2 animate-fadeIn">
-                  <label className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 block">
-                    Danh sách tất cả các giọng tiếng Anh phát hiện được trên máy của bạn:
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 block">
+                      Danh sách tất cả các giọng tiếng Anh phát hiện được trên máy của bạn:
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleRefreshVoices}
+                      disabled={isRefreshingVoices}
+                      className="text-[10px] text-emerald-500 hover:underline flex items-center gap-1 cursor-pointer"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${isRefreshingVoices ? 'animate-spin' : ''}`} />
+                      <span>Quét lại</span>
+                    </button>
+                  </div>
                   <select
                     value={settings.selectedVoiceURI || ''}
                     onChange={e => {
@@ -417,12 +467,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     }}
                     className={`w-full px-3 py-2 text-xs rounded-xl ${theme.inputBg} border ${theme.border} focus:outline-none focus:border-emerald-500`}
                   >
-                    <option value="">-- Tự động tối ưu hóa theo Preset (Khuyên dùng) --</option>
-                    {availableVoices.map(v => (
-                      <option key={v.voiceURI} value={v.voiceURI}>
-                        {v.name} ({v.lang}) {v.localService ? '⚡ Offline' : '🌐 Online Natural'} {v.default ? '★ Mặc định' : ''}
-                      </option>
-                    ))}
+                    <option value="">-- Tự động chọn giọng tốt nhất theo Preset (Khuyên dùng) --</option>
+                    {availableVoices.map(v => {
+                      const isMale = isActualMaleVoice(v);
+                      const isFemale = isActualFemaleVoice(v);
+                      const tag = isMale ? '👨 Giọng Nam' : isFemale ? '👩 Giọng Nữ' : '🎙️ Giọng Hệ thống';
+                      return (
+                        <option key={v.voiceURI} value={v.voiceURI}>
+                          [{tag}] {v.name} ({v.lang}) {v.localService ? '⚡ Offline' : '🌐 Online Natural'} {v.default ? '★ Mặc định' : ''}
+                        </option>
+                      );
+                    })}
                   </select>
                   <p className="text-[10px] text-neutral-400">
                     * Mẹo: Các giọng có chữ "Natural", "Neural", "Google", "Siri" hoặc "Online" thường phát âm rất truyền cảm và tự nhiên.
@@ -441,7 +496,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   {
                     id: 'male' as VoiceGenderPreference,
                     label: '👨 Giọng Nam Trầm Ấm (US Male)',
-                    desc: 'Trầm ấm, phát âm rõ từng âm tiết tiếng Anh - Mỹ (Guy / Ryan)',
+                    desc: 'Trầm ấm, phát âm rõ từng âm tiết tiếng Anh - Mỹ (Guy / Ryan / Voice 2)',
                     badge: 'Phổ biến',
                   },
                   {
@@ -453,7 +508,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   {
                     id: 'uk_male' as VoiceGenderPreference,
                     label: '🇬🇧 Giọng Nam Anh - Anh (UK Male)',
-                    desc: 'Giọng chuẩn phong cách Anh - Anh (Oliver / George)',
+                    desc: 'Giọng chuẩn phong cách Anh - Anh (Oliver / George / Daniel)',
                     badge: 'British',
                   },
                   {
@@ -477,7 +532,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       className={`p-2.5 rounded-xl border text-left transition-all relative cursor-pointer ${
                         isSelected
                           ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400 font-semibold ring-1 ring-emerald-500/30'
-                          : `${theme.border} ${theme.highlight} hover:border-emerald-500/40`
+                          : `${theme.border} ${theme.highlight}`
                       }`}
                     >
                       <div className="flex items-center justify-between gap-1 mb-0.5">
@@ -495,6 +550,130 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   );
                 })}
               </div>
+
+              {/* BỘ CHẨN ĐOÁN & HƯỚNG DẪN BẬT GIỌNG NAM TRÊN ĐIỆN THOẠI */}
+              {(() => {
+                const isMalePref = (settings.voiceGender || 'female').includes('male');
+                const maleList = availableVoices.filter(v => isActualMaleVoice(v));
+                const hasMale = maleList.length > 0;
+
+                if (!isMalePref) return null;
+
+                if (hasMale) {
+                  return (
+                    <div className="p-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-xs flex items-center justify-between gap-2 animate-fadeIn">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span className="text-[11px] text-emerald-300 font-medium">
+                          ✓ Đã tìm thấy <strong>{maleList.length} gói giọng Nam</strong> trên máy của bạn ({maleList.map(m => m.name).slice(0, 2).join(', ')})!
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleRefreshVoices}
+                        disabled={isRefreshingVoices}
+                        className="text-[10px] text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer shrink-0"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${isRefreshingVoices ? 'animate-spin' : ''}`} />
+                        <span>Quét lại</span>
+                      </button>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="p-3 rounded-xl border border-amber-500/40 bg-amber-500/10 text-xs space-y-2.5 animate-fadeIn">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+                      <div className="space-y-1">
+                        <strong className="text-amber-300 block font-semibold">
+                          Điện thoại của bạn hiện chỉ có gói giọng Nữ mặc định
+                        </strong>
+                        <p className={`text-[11px] leading-relaxed text-amber-200/90`}>
+                          Hầu hết điện thoại Android & iPhone chỉ cài sẵn 1 file giọng Nữ của Google/Apple để tiết kiệm bộ nhớ. Vì vậy khi chọn giọng Nam, điện thoại vẫn tự động phát ra giọng Nữ.
+                        </p>
+                        <p className="text-[11px] text-amber-100 font-medium">
+                          👉 Bạn chỉ cần tải thêm gói giọng Nam miễn phí của Google / Apple trong Cài đặt máy (khoảng 30 giây):
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setShowMobileTtsGuide(!showMobileTtsGuide)}
+                        className="px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 font-medium text-[11px] flex items-center gap-1.5 cursor-pointer transition-colors"
+                      >
+                        <Smartphone className="w-3.5 h-3.5" />
+                        <span>{showMobileTtsGuide ? 'Ẩn hướng dẫn tải giọng' : 'Xem 4 bước tải giọng Nam trên điện thoại'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleRefreshVoices}
+                        disabled={isRefreshingVoices}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 font-medium text-[11px] flex items-center gap-1.5 cursor-pointer transition-colors"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingVoices ? 'animate-spin' : ''}`} />
+                        <span>Quét lại sau khi tải</span>
+                      </button>
+                    </div>
+
+                    {voiceRefreshMessage && (
+                      <div className={`p-2 rounded-lg text-[11px] ${
+                        hasMale ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-200 border border-amber-500/30'
+                      }`}>
+                        {voiceRefreshMessage}
+                      </div>
+                    )}
+
+                    {showMobileTtsGuide && (
+                      <div className={`p-3 rounded-lg border border-white/10 bg-neutral-900/90 space-y-2 mt-2 text-[11px]`}>
+                        <div className="flex border-b border-neutral-700 gap-2 pb-2">
+                          <button
+                            type="button"
+                            onClick={() => setMobileOsTab('android')}
+                            className={`px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-all ${
+                              mobileOsTab === 'android'
+                                ? 'bg-emerald-600 text-white shadow-sm'
+                                : 'text-neutral-400 hover:text-neutral-200'
+                            }`}
+                          >
+                            📱 Điện thoại Android (Samsung, Xiaomi, Oppo...)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setMobileOsTab('ios')}
+                            className={`px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-all ${
+                              mobileOsTab === 'ios'
+                                ? 'bg-emerald-600 text-white shadow-sm'
+                                : 'text-neutral-400 hover:text-neutral-200'
+                            }`}
+                          >
+                            🍎 iPhone / iPad (iOS)
+                          </button>
+                        </div>
+
+                        {mobileOsTab === 'android' ? (
+                          <ol className="list-decimal pl-4 space-y-1.5 leading-relaxed text-neutral-300">
+                            <li>Mở <strong>Cài đặt</strong> trên điện thoại ➜ gõ tìm kiếm <strong className="text-emerald-400">TTS</strong> (hoặc vào <em>Quản lý chung / Khả năng tiếp cận</em> ➜ chọn <em>Chuyển văn bản thành giọng nói</em>).</li>
+                            <li>Bấm vào biểu tượng <strong>Bánh răng ⚙️</strong> bên cạnh mục <em>Dịch vụ giọng nói của Google (Speech Services by Google)</em> hoặc <em>Samsung TTS</em>.</li>
+                            <li>Chọn <strong>Cài đặt dữ liệu thoại (Install voice data)</strong> ➜ Chọn <strong>Tiếng Anh (Hoa Kỳ - English United States)</strong> hoặc <em>Tiếng Anh (Vương quốc Anh)</em>.</li>
+                            <li>Nghe thử và bấm biểu tượng tải về: <strong className="text-emerald-400">Giọng 2, Giọng 3 hoặc Giọng 4</strong> (đây là các Giọng Nam chuẩn của Google).</li>
+                            <li>Quay lại màn hình này và bấm nút <strong>"Quét lại sau khi tải"</strong> ở trên để nghe giọng Nam ngay lập tức!</li>
+                          </ol>
+                        ) : (
+                          <ol className="list-decimal pl-4 space-y-1.5 leading-relaxed text-neutral-300">
+                            <li>Mở <strong>Cài đặt (Settings)</strong> trên iPhone ➜ <strong>Trợ năng (Accessibility)</strong> ➜ <strong>Nội dung được đọc (Spoken Content)</strong>.</li>
+                            <li>Chọn <strong>Giọng nói (Voices)</strong> ➜ <strong>Tiếng Anh (English)</strong>.</li>
+                            <li>Bấm tải về gói giọng Nam: <strong className="text-emerald-400">Alex, Daniel (Anh - Anh) hoặc Siri Giọng 1</strong>.</li>
+                            <li>Quay lại màn hình này và bấm nút <strong>"Quét lại sau khi tải"</strong> để thưởng thức giọng Nam!</li>
+                          </ol>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Voice Speed */}
