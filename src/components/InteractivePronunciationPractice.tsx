@@ -412,16 +412,15 @@ export const InteractivePronunciationPractice: React.FC<InteractivePronunciation
           {evaluation.feedback && (
             <div className="pt-2 text-xs text-muted-foreground border-t border-inherit/40 flex items-center justify-between">
               <span>💡 {evaluation.feedback}</span>
-              {!evaluation.isPassed && (
-                <button
-                  type="button"
-                  onClick={handleStartRecording}
-                  className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs flex items-center gap-1 shadow-xs cursor-pointer"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                  <span>Đọc lại</span>
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={handleStartRecording}
+                className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs flex items-center gap-1 shadow-xs cursor-pointer ml-auto"
+                title="Đọc lại phát âm"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Đọc lại</span>
+              </button>
             </div>
           )}
         </div>

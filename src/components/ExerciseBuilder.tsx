@@ -49,7 +49,7 @@ import {
   AppSettings
 } from '../types';
 import { useTheme } from '../context/ThemeContext';
-import { loadClassrooms, loadSettings, saveSettings } from '../utils/storage';
+import { loadClassrooms, loadSettings, saveSettings, loadExercises } from '../utils/storage';
 import { MediaLibraryModal } from './MediaLibraryModal';
 import { MemriseGeneratorModal } from './MemriseGeneratorModal';
 import { ReadingGeneratorModal } from './ReadingGeneratorModal';
@@ -556,9 +556,13 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
       return;
     }
 
+    const currentLessonExercises = loadExercises().filter(e => e.lessonId === targetLessonId);
+    const maxOrder = currentLessonExercises.reduce((max, e) => Math.max(max, e.order ?? 0), currentLessonExercises.length);
+
     const newExercise: Exercise = {
       id: 'ex_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
       lessonId: targetLessonId,
+      order: maxOrder + 1,
       type: exType,
       skill: exSkill,
       difficulty: exDifficulty,
@@ -572,7 +576,8 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
       vocabWord: vocabWord.trim() || undefined,
       vocabMeaning: vocabMeaning.trim() || undefined,
       phonetic: phonetic.trim() || undefined,
-      clozeLetters: clozeLetters.trim() || undefined,
+      clozeLetters: clozeLetters.trim() || (exType === 'vocab_cloze' && (vocabWord.trim() || exCorrectText.trim()) ? createClozeLettersPattern(vocabWord.trim() || exCorrectText.trim()).clozeLetters : undefined),
+      clozeTemplate: clozeLetters.trim() || (exType === 'vocab_cloze' && (vocabWord.trim() || exCorrectText.trim()) ? createClozeLettersPattern(vocabWord.trim() || exCorrectText.trim()).clozeLetters : undefined),
       isHidden: exIsHidden,
     };
 
@@ -2287,7 +2292,9 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
         lessons={lessons}
         selectedLessonId={targetLessonId}
         onExercisesCreated={(newExercises) => {
-          newExercises.forEach(ex => onSaveExercise(ex));
+          const currentLessonExercises = loadExercises().filter(e => e.lessonId === targetLessonId);
+          const maxOrder = currentLessonExercises.reduce((max, e) => Math.max(max, e.order ?? 0), currentLessonExercises.length);
+          newExercises.forEach((ex, idx) => onSaveExercise({ ...ex, order: maxOrder + idx + 1 }));
           setStatusBanner({
             type: 'success',
             text: `Đã tạo và thêm thành công ${newExercises.length} bài tập Memrise vào bài học!`
@@ -2303,7 +2310,9 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
         lessons={lessons}
         selectedLessonId={targetLessonId}
         onExercisesCreated={(newExercises) => {
-          newExercises.forEach(ex => onSaveExercise(ex));
+          const currentLessonExercises = loadExercises().filter(e => e.lessonId === targetLessonId);
+          const maxOrder = currentLessonExercises.reduce((max, e) => Math.max(max, e.order ?? 0), currentLessonExercises.length);
+          newExercises.forEach((ex, idx) => onSaveExercise({ ...ex, order: maxOrder + idx + 1 }));
           setStatusBanner({
             type: 'success',
             text: `Đã tạo và lưu thành công bộ bài đọc hiểu (${newExercises.length} bài tập) vào bài học!`
@@ -2319,7 +2328,9 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
         lessons={lessons}
         selectedLessonId={targetLessonId}
         onExercisesCreated={(newExercises) => {
-          newExercises.forEach(ex => onSaveExercise(ex));
+          const currentLessonExercises = loadExercises().filter(e => e.lessonId === targetLessonId);
+          const maxOrder = currentLessonExercises.reduce((max, e) => Math.max(max, e.order ?? 0), currentLessonExercises.length);
+          newExercises.forEach((ex, idx) => onSaveExercise({ ...ex, order: maxOrder + idx + 1 }));
           setStatusBanner({
             type: 'success',
             text: `Đã tạo và thêm thành công ${newExercises.length} bài tập từ vựng đơn lẻ vào bài học!`
@@ -2335,7 +2346,9 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
         lessons={lessons}
         selectedLessonId={targetLessonId}
         onExercisesCreated={(newExercises) => {
-          newExercises.forEach(ex => onSaveExercise(ex));
+          const currentLessonExercises = loadExercises().filter(e => e.lessonId === targetLessonId);
+          const maxOrder = currentLessonExercises.reduce((max, e) => Math.max(max, e.order ?? 0), currentLessonExercises.length);
+          newExercises.forEach((ex, idx) => onSaveExercise({ ...ex, order: maxOrder + idx + 1 }));
           setStatusBanner({
             type: 'success',
             text: `Đã tạo và thêm thành công ${newExercises.length} bài tập ngữ pháp vào bài học!`
@@ -2351,7 +2364,9 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
         lessons={lessons}
         selectedLessonId={targetLessonId}
         onExercisesCreated={(newExercises) => {
-          newExercises.forEach(ex => onSaveExercise(ex));
+          const currentLessonExercises = loadExercises().filter(e => e.lessonId === targetLessonId);
+          const maxOrder = currentLessonExercises.reduce((max, e) => Math.max(max, e.order ?? 0), currentLessonExercises.length);
+          newExercises.forEach((ex, idx) => onSaveExercise({ ...ex, order: maxOrder + idx + 1 }));
           setStatusBanner({
             type: 'success',
             text: `Đã tạo và thêm thành công ${newExercises.length} bài tập luyện phát âm vào bài học!`

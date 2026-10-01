@@ -592,14 +592,64 @@ export function deleteLesson(lessonId: string) {
 }
 
 export function updateExercise(updatedExercise: Exercise): Exercise[] {
-  const withTime: Exercise = { ...updatedExercise, updatedAt: Date.now() };
   const exercises = loadExercises();
-  const exists = exercises.some(e => e.id === withTime.id);
-  const next = exists
-    ? exercises.map(e => e.id === withTime.id ? withTime : e)
-    : [...exercises, withTime];
+  const existingEx = exercises.find(e => e.id === updatedExercise.id);
+  const now = Date.now();
+  let finalExercise: Exercise = { ...updatedExercise, updatedAt: now };
+
+  // If this is a new exercise or moved to another lesson without an assigned order,
+  // ALWAYS place at the very end of the question list of that lesson.
+  const isLessonChanged = existingEx && existingEx.lessonId !== finalExercise.lessonId;
+  if (!existingEx || isLessonChanged || finalExercise.order === undefined) {
+    const lessonExercises = exercises.filter(e => e.lessonId === finalExercise.lessonId && e.id !== finalExercise.id);
+    const maxOrder = lessonExercises.reduce((max, e) => Math.max(max, e.order ?? 0), lessonExercises.length);
+    finalExercise.order = maxOrder + 1;
+  }
+
+  const next = existingEx
+    ? exercises.map(e => e.id === finalExercise.id ? finalExercise : e)
+    : [...exercises, finalExercise];
   saveExercises(next);
-  syncDocToCloud('exercises', withTime.id, withTime);
+  syncDocToCloud('exercises', finalExercise.id, finalExercise);
+  return next;
+}
+
+export function saveExercisesBatch(exercisesToSave: Exercise[]): Exercise[] {
+  if (!exercisesToSave || exercisesToSave.length === 0) return loadExercises();
+  const exercises = loadExercises();
+  const now = Date.now();
+
+  const lessonOrderCounter = new Map<string, number>();
+  const next = [...exercises];
+  const toCloudSync: Exercise[] = [];
+
+  for (const item of exercisesToSave) {
+    const existingIndex = next.findIndex(e => e.id === item.id);
+    let finalItem: Exercise = { ...item, updatedAt: now };
+
+    if (existingIndex === -1) {
+      // New exercise: place at the end of the lesson's question list
+      const lid = finalItem.lessonId;
+      if (!lessonOrderCounter.has(lid)) {
+        const lessonExs = next.filter(e => e.lessonId === lid);
+        const maxOrder = lessonExs.reduce((max, e) => Math.max(max, e.order ?? 0), lessonExs.length);
+        lessonOrderCounter.set(lid, maxOrder);
+      }
+      const nextOrder = lessonOrderCounter.get(lid)! + 1;
+      lessonOrderCounter.set(lid, nextOrder);
+      finalItem.order = nextOrder;
+
+      next.push(finalItem);
+    } else {
+      next[existingIndex] = finalItem;
+    }
+    toCloudSync.push(finalItem);
+  }
+
+  saveExercises(next);
+  if (toCloudSync.length > 0) {
+    syncBatchDocsToCloud('exercises', toCloudSync);
+  }
   return next;
 }
 
@@ -1312,11 +1362,16 @@ export function bulkDeleteExercises(exerciseIds: string[]): {
 
 export function bulkMoveExercises(exerciseIds: string[], targetLessonId: string): Exercise[] {
   const exerciseIdSet = new Set(exerciseIds);
+  const allExercises = loadExercises();
+  const targetExercises = allExercises.filter(e => e.lessonId === targetLessonId && !exerciseIdSet.has(e.id));
+  let maxOrder = targetExercises.reduce((max, e) => Math.max(max, e.order ?? 0), targetExercises.length);
+
   const updatedExercisesList: Exercise[] = [];
   const now = Date.now();
-  const exercises = loadExercises().map(e => {
+  const exercises = allExercises.map(e => {
     if (exerciseIdSet.has(e.id)) {
-      const updated = { ...e, lessonId: targetLessonId, updatedAt: now };
+      maxOrder += 1;
+      const updated = { ...e, lessonId: targetLessonId, order: maxOrder, updatedAt: now };
       updatedExercisesList.push(updated);
       syncDocToCloud('exercises', updated.id, updated);
       return updated;
@@ -1339,13 +1394,18 @@ export function bulkDuplicateExercises(
   const newExercises: Exercise[] = [];
 
   targetLessonIds.forEach(lessonId => {
+    const lessonExercises = allExercises.filter(e => e.lessonId === lessonId);
+    let maxOrder = lessonExercises.reduce((max, e) => Math.max(max, e.order ?? 0), lessonExercises.length);
+
     selectedExercises.forEach(exercise => {
+      maxOrder += 1;
       const isSameLesson = exercise.lessonId === lessonId;
       const newExerciseId = 'ex_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
       const clonedExercise: Exercise = {
         ...exercise,
         id: newExerciseId,
         lessonId,
+        order: maxOrder,
         question: isSameLesson ? `${exercise.question} (Bản sao)` : exercise.question,
       };
       newExercises.push(clonedExercise);

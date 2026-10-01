@@ -115,18 +115,38 @@ export function parseVocabList(rawText: string): { word: string; meaning: string
   return items;
 }
 
+function createSeededRandom(seed: string) {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = ((hash << 5) - hash) + seed.charCodeAt(i);
+    hash |= 0;
+  }
+  return function() {
+    hash = (hash * 9301 + 49297) % 233280;
+    const val = (hash < 0 ? hash + 233280 : hash) / 233280;
+    return val;
+  };
+}
+
 /**
  * Tạo mẫu khuyết chữ cái chuẩn xác cho dạng vocab_cloze với độ ngẫu nhiên cao (random vị trí đầu, giữa, cuối).
  * Các ký tự và dấu gạch dưới "_" được cách nhau bởi khoảng trắng (ví dụ: "_ r _ e n d _ y" hoặc "f _ i e n d _ _").
+ * Hỗ trợ seed để đảm bảo tính bất biến/ổn định tuyệt đối khi gõ phím làm bài tập.
  */
-export function createClozeLettersPattern(word: string, customMaskRatio?: number): { clozeLetters: string; missingLetters: string[] } {
+export function createClozeLettersPattern(
+  word: string, 
+  customMaskRatio?: number,
+  seed?: string
+): { clozeLetters: string; missingLetters: string[] } {
   const chars = word.split('');
   const missing: string[] = [];
   const letterIndices: number[] = [];
 
-  // Tìm tất cả vị trí là chữ cái
+  const rng = seed ? createSeededRandom(seed) : Math.random;
+
+  // Tìm tất cả vị trí là chữ cái (bao gồm chữ cái tiếng Anh, tiếng Việt, số)
   for (let i = 0; i < chars.length; i++) {
-    if (/[a-zA-Z]/.test(chars[i])) {
+    if (/[a-zA-Z0-9À-ỹà-ỹ]/.test(chars[i])) {
       letterIndices.push(i);
     }
   }
@@ -141,19 +161,18 @@ export function createClozeLettersPattern(word: string, customMaskRatio?: number
   if (numLetters === 1) {
     maskIndices.add(letterIndices[0]);
   } else if (numLetters <= 3) {
-    // Với từ ngắn 2-3 chữ cái: chọn ngẫu nhiên 1 hoặc 2 vị trí bất kỳ (có thể ở đầu, giữa hoặc cuối)
-    const countToMask = numLetters === 2 ? 1 : (Math.random() < 0.6 ? 1 : 2);
-    const shuffled = [...letterIndices].sort(() => Math.random() - 0.5);
+    // Với từ ngắn 2-3 chữ cái: chọn 1 hoặc 2 vị trí bất kỳ
+    const countToMask = numLetters === 2 ? 1 : (rng() < 0.6 ? 1 : 2);
+    const shuffled = [...letterIndices].sort(() => rng() - 0.5);
     shuffled.slice(0, countToMask).forEach(idx => maskIndices.add(idx));
   } else {
     // Với từ >= 4 chữ cái:
-    // Tỷ lệ ẩn từ 40% đến 60% ngẫu nhiên hoàn toàn trên mọi vị trí (đầu, giữa, cuối)
-    const ratio = customMaskRatio || (0.4 + Math.random() * 0.25); // 40% - 65%
+    // Tỷ lệ ẩn từ 40% đến 65% trên các vị trí
+    const ratio = customMaskRatio || (0.4 + rng() * 0.25);
     let targetCount = Math.round(numLetters * ratio);
     targetCount = Math.max(1, Math.min(targetCount, numLetters - 1)); // Luôn để lại ít nhất 1 chữ cái gợi ý và ẩn ít nhất 1 chữ
 
-    // Trộn ngẫu nhiên tất cả các vị trí chữ cái (không thiên vị đầu hay cuối)
-    const shuffled = [...letterIndices].sort(() => Math.random() - 0.5);
+    const shuffled = [...letterIndices].sort(() => rng() - 0.5);
     shuffled.slice(0, targetCount).forEach(idx => maskIndices.add(idx));
   }
 

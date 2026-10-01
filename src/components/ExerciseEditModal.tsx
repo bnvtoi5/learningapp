@@ -286,7 +286,8 @@ export const ExerciseEditModal: React.FC<ExerciseEditModalProps> = ({
       vocabWord: vocabWord.trim() || undefined,
       vocabMeaning: vocabMeaning.trim() || undefined,
       phonetic: phonetic.trim() || undefined,
-      clozeLetters: clozeLetters.trim() || undefined,
+      clozeLetters: clozeLetters.trim() || (exType === 'vocab_cloze' && (vocabWord.trim() || exCorrectText.trim()) ? createClozeLettersPattern(vocabWord.trim() || exCorrectText.trim()).clozeLetters : undefined),
+      clozeTemplate: clozeLetters.trim() || (exType === 'vocab_cloze' && (vocabWord.trim() || exCorrectText.trim()) ? createClozeLettersPattern(vocabWord.trim() || exCorrectText.trim()).clozeLetters : undefined),
       isHidden: exIsHidden,
     };
 

@@ -221,9 +221,9 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
 
   const currentEx = availableExercises[currentIndex];
 
-  // Helper to parse cloze text into segments
+  // Helper to parse cloze text into segments (supports [answer], {answer}, and ((answer)))
   const parseClozePassage = (text: string) => {
-    const regex = /\[(.*?)\]/g;
+    const regex = /\[(.*?)\]|\{(.*?)\}/g;
     const parts: { type: 'text' | 'blank'; content: string; blankIdx?: number; answer?: string }[] = [];
     let lastIndex = 0;
     let blankCounter = 0;
@@ -232,11 +232,12 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
       if (match.index > lastIndex) {
         parts.push({ type: 'text', content: text.substring(lastIndex, match.index) });
       }
+      const ans = (match[1] !== undefined ? match[1] : match[2] || '').trim();
       parts.push({
         type: 'blank',
         content: match[0],
         blankIdx: blankCounter,
-        answer: match[1].trim(),
+        answer: ans,
       });
       blankCounter++;
       lastIndex = regex.lastIndex;
@@ -248,26 +249,32 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
   };
 
   // Helper to generate missing letter pattern for vocab_cloze
-  const generateClozePattern = (word: string, customPattern?: string) => {
+  const generateClozePattern = (word: string, customPattern?: string, seedId?: string) => {
     if (customPattern && customPattern.trim()) return customPattern;
     if (!word) return '';
-    const { clozeLetters } = createClozeLettersPattern(word);
+    const { clozeLetters } = createClozeLettersPattern(word, undefined, seedId || word);
     return clozeLetters;
   };
 
   // Structured Cloze Slots parser for interactive slot-by-slot typing
-  const parseVocabClozeSlots = (word: string, customPattern?: string) => {
+  // Safely handles special characters like . ( ) { } [ ] - ' " etc.
+  // Special characters and punctuation are ALWAYS fixed given characters (never blank input boxes).
+  const parseVocabClozeSlots = (word: string, customPattern?: string, seedId?: string) => {
     if (!word) return [];
     const chars = word.split('');
-    let pattern = customPattern && customPattern.trim() ? customPattern.trim() : '';
+    const pattern = (customPattern || '').trim();
 
-    if (pattern) {
-      const tokens = pattern.split(/\s+/);
-      if (tokens.length === chars.length) {
+    // Check if customPattern specifies blanks via brackets like f{rie}ndly or f(rie)ndly
+    const bracketMatch = pattern.match(/[\{\(\[](.*?)[\}\)\]]/);
+    if (bracketMatch && !word.includes('{') && !word.includes('[') && !pattern.includes('_')) {
+      const hiddenText = bracketMatch[1];
+      const startIndex = word.indexOf(hiddenText);
+      if (startIndex !== -1) {
+        const endIndex = startIndex + hiddenText.length;
         return chars.map((ch, idx) => {
-          const tok = tokens[idx];
           const isSpace = ch === ' ';
-          const isBlank = !isSpace && (tok === '_' || tok.includes('_'));
+          const isPunctuation = /[^a-zA-Z0-9À-ỹà-ỹ]/.test(ch);
+          const isBlank = !isSpace && !isPunctuation && idx >= startIndex && idx < endIndex;
           return {
             index: idx,
             expectedChar: ch,
@@ -279,13 +286,109 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
       }
     }
 
-    // Default fallback via createClozeLettersPattern with high randomness
-    const { clozeLetters } = createClozeLettersPattern(word);
-    const tokens = clozeLetters.split(/\s+/);
+    if (pattern) {
+      const tokens = pattern.split(/\s+/).filter(t => t.length > 0);
+
+      // Case 1: Tokens exactly match the number of characters in word
+      if (tokens.length === chars.length) {
+        return chars.map((ch, idx) => {
+          const tok = tokens[idx];
+          const isSpace = ch === ' ';
+          const isPunctuation = /[^a-zA-Z0-9À-ỹà-ỹ]/.test(ch);
+          const isBlank = !isSpace && !isPunctuation && (tok === '_' || tok.includes('_') || tok === '.' || tok === '..');
+          return {
+            index: idx,
+            expectedChar: ch,
+            isBlank,
+            givenChar: isBlank || isSpace ? undefined : ch,
+            isSpace,
+          };
+        });
+      }
+
+      // Case 2: User provided pattern for letters only or without spacing punctuation
+      // Example: word = "(friendly)." (11 chars, 8 letters) and pattern = "f _ _ e n d l y" (8 tokens)
+      const letterIndices = chars.map((c, i) => /[a-zA-Z0-9À-ỹà-ỹ]/.test(c) ? i : -1).filter(i => i !== -1);
+      let letterTokens: string[] = [];
+      if (tokens.length === letterIndices.length) {
+        letterTokens = tokens;
+      } else {
+        const matches = pattern.match(/[a-zA-Z0-9À-ỹà-ỹ_]+|\.{1,3}/g);
+        if (matches && matches.length === letterIndices.length) {
+          letterTokens = matches;
+        } else {
+          const noSpacePattern = pattern.replace(/\s+/g, '');
+          const patternLettersAndBlanks = noSpacePattern.split('').filter(c => /[a-zA-Z0-9À-ỹà-ỹ_.]/.test(c));
+          if (patternLettersAndBlanks.length === letterIndices.length) {
+            letterTokens = patternLettersAndBlanks;
+          }
+        }
+      }
+
+      if (letterTokens.length === letterIndices.length) {
+        const blankIndexSet = new Set<number>();
+        letterIndices.forEach((charIdx, letterIdx) => {
+          const tok = letterTokens[letterIdx];
+          if (tok === '_' || tok.includes('_') || tok === '.' || tok.startsWith('.')) {
+            blankIndexSet.add(charIdx);
+          }
+        });
+
+        return chars.map((ch, idx) => {
+          const isSpace = ch === ' ';
+          const isPunctuation = /[^a-zA-Z0-9À-ỹà-ỹ]/.test(ch);
+          const isBlank = !isSpace && !isPunctuation && blankIndexSet.has(idx);
+          return {
+            index: idx,
+            expectedChar: ch,
+            isBlank,
+            givenChar: isBlank || isSpace ? undefined : ch,
+            isSpace,
+          };
+        });
+      }
+    }
+
+    // Default fallback: DETERMINISTIC pseudo-random pattern seeded by word + seedId.
+    // This ensures slots are 100% STABLE across re-renders and NEVER shuffle/restart when typing!
+    const deterministicSeed = `${seedId || ''}_${word}_vocab_cloze`;
+    const { clozeLetters } = createClozeLettersPattern(word, undefined, deterministicSeed);
+    const fallbackTokens = clozeLetters.split(/\s+/).filter(t => t.length > 0);
+
+    if (fallbackTokens.length === chars.length) {
+      return chars.map((ch, idx) => {
+        const tok = fallbackTokens[idx];
+        const isSpace = ch === ' ';
+        const isPunctuation = /[^a-zA-Z0-9À-ỹà-ỹ]/.test(ch);
+        const isBlank = !isSpace && !isPunctuation && (tok === '_' || tok.includes('_'));
+        return {
+          index: idx,
+          expectedChar: ch,
+          isBlank,
+          givenChar: isBlank || isSpace ? undefined : ch,
+          isSpace,
+        };
+      });
+    }
+
+    // Universal fallback: deterministic letter masking
+    const letterIndices = chars.map((c, i) => /[a-zA-Z0-9À-ỹà-ỹ]/.test(c) ? i : -1).filter(i => i !== -1);
+    const blankSet = new Set<number>();
+    if (letterIndices.length === 1) {
+      blankSet.add(letterIndices[0]);
+    } else if (letterIndices.length > 1) {
+      letterIndices.forEach((idx, i) => {
+        if (i % 2 === 1 || (letterIndices.length >= 4 && i === letterIndices.length - 2)) {
+          blankSet.add(idx);
+        }
+      });
+      if (blankSet.size === 0) blankSet.add(letterIndices[1]);
+    }
+
     return chars.map((ch, idx) => {
-      const tok = tokens[idx] || '_';
       const isSpace = ch === ' ';
-      const isBlank = !isSpace && (tok === '_' || tok.includes('_'));
+      const isPunctuation = /[^a-zA-Z0-9À-ỹà-ỹ]/.test(ch);
+      const isBlank = !isSpace && !isPunctuation && blankSet.has(idx);
       return {
         index: idx,
         expectedChar: ch,
@@ -295,6 +398,22 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
       };
     });
   };
+
+  // Stable memoized cloze slots for vocab_cloze to guarantee zero re-shuffling on keypress
+  const currentExSlots = useMemo(() => {
+    if (!currentEx || currentEx.type !== 'vocab_cloze') return [];
+    const target = (currentEx.correct_answer || currentEx.vocabWord || currentEx.correctText || currentEx.word || '').trim();
+    return parseVocabClozeSlots(target, currentEx.clozeLetters || currentEx.clozeTemplate, currentEx.id);
+  }, [
+    currentEx?.id,
+    currentEx?.type,
+    currentEx?.correct_answer,
+    currentEx?.vocabWord,
+    currentEx?.correctText,
+    currentEx?.word,
+    currentEx?.clozeLetters,
+    currentEx?.clozeTemplate,
+  ]);
 
   // Reset inputs on question change
   useEffect(() => {
@@ -321,9 +440,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
     // Auto-focus first blank slot for vocab_cloze
     if (currentEx.type === 'vocab_cloze') {
       setTimeout(() => {
-        const target = (currentEx.correct_answer || currentEx.vocabWord || currentEx.correctText || currentEx.word || '').trim();
-        const slots = parseVocabClozeSlots(target, currentEx.clozeLetters || currentEx.clozeTemplate);
-        const firstBlank = slots.find(s => s.isBlank);
+        const firstBlank = currentExSlots.find(s => s.isBlank);
         if (firstBlank) {
           document.getElementById(`cloze-slot-${firstBlank.index}`)?.focus();
         }
@@ -418,7 +535,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
         case 'vocab_cloze': {
           const targetWord = (currentEx.correct_answer || currentEx.vocabWord || currentEx.correctText || currentEx.word || '').trim();
           const target = targetWord.toLowerCase();
-          const slots = parseVocabClozeSlots(targetWord, currentEx.clozeLetters || currentEx.clozeTemplate);
+          const slots = currentExSlots;
           
           const assembled = slots.map(s => {
             if (s.isSpace) return ' ';
@@ -426,8 +543,10 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
             return clozeSlotInputs[s.index] || '';
           }).join('').trim().toLowerCase();
 
+          const cleanUser = assembled.replace(/[^a-z0-9à-ỹ]/gi, '');
+          const cleanTarget = target.replace(/[^a-z0-9à-ỹ]/gi, '');
           const user = assembled.length === target.length ? assembled : (textAnswer.trim().toLowerCase() || assembled);
-          correct = user === target;
+          correct = user === target || (cleanUser.length > 0 && cleanUser === cleanTarget);
           userAnsStr = assembled || textAnswer.trim() || 'Chưa điền đủ ký tự';
           correctAnsStr = targetWord;
           break;
@@ -712,11 +831,13 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
     setTextAnswer('');
     setIsCardFlipped(false);
     setClozeSlotInputs({});
+    setMatchedPairs({});
+    setSelectedLeft(null);
+    setMatchingMistakesCount(0);
+    setSpokenTranscript('');
     if (currentEx.type === 'vocab_cloze') {
       setTimeout(() => {
-        const target = (currentEx.correct_answer || currentEx.vocabWord || currentEx.correctText || currentEx.word || '').trim();
-        const slots = parseVocabClozeSlots(target, currentEx.clozeLetters || currentEx.clozeTemplate);
-        const firstBlank = slots.find(s => s.isBlank);
+        const firstBlank = currentExSlots.find(s => s.isBlank);
         if (firstBlank) {
           document.getElementById(`cloze-slot-${firstBlank.index}`)?.focus();
         }
@@ -927,7 +1048,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
         {/* 1. VOCAB CLOZE (Active Recall In-Place Slot Typing) */}
         {currentEx.type === 'vocab_cloze' && (() => {
           const targetWord = (currentEx.correct_answer || currentEx.vocabWord || currentEx.correctText || currentEx.word || '').trim();
-          const slots = parseVocabClozeSlots(targetWord, currentEx.clozeLetters || currentEx.clozeTemplate);
+          const slots = currentExSlots;
           const blankSlots = slots.filter(s => s.isBlank);
 
           const handleSlotChange = (slotIdx: number, val: string) => {
@@ -2060,16 +2181,16 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
                   <span>Câu trước</span>
                 </button>
               )}
-              {!isCorrect && (
-                <button
-                  id="btn-retry-question"
-                  onClick={handleRetryCurrent}
-                  className={`py-2.5 px-3.5 rounded-xl border ${theme.border} ${theme.card} hover:${theme.highlight} text-neutral-900 dark:text-neutral-100 text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer`}
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Thử lại câu này</span>
-                </button>
-              )}
+              <button
+                id="btn-retry-question"
+                type="button"
+                onClick={handleRetryCurrent}
+                className={`py-2.5 px-3.5 rounded-xl border ${theme.border} ${theme.card} hover:${theme.highlight} text-neutral-900 dark:text-neutral-100 text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer transition-all active:scale-95`}
+                title="Làm lại câu này"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Làm lại câu này</span>
+              </button>
               <button
                 id="btn-next-question"
                 onClick={handleNext}

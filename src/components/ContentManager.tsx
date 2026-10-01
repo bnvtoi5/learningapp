@@ -236,7 +236,14 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
     if (!activeLesson) return [];
     return exercises
       .filter(e => e.lessonId === activeLesson.id)
-      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      .sort((a, b) => {
+        if (a.order !== undefined && b.order !== undefined) {
+          return a.order - b.order;
+        }
+        if (a.order !== undefined) return 1;
+        if (b.order !== undefined) return -1;
+        return 0;
+      });
   }, [exercises, activeLesson]);
 
   // Filtered exercises by search
