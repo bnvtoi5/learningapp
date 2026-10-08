@@ -11,6 +11,7 @@ import {
 import { MatchingPair } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import { soundManager, triggerHaptic } from '../utils/audio';
+import { isAnswerMatch } from '../utils/answerUtils';
 
 interface InteractiveMatchingBoardProps {
   pairs: MatchingPair[];
@@ -61,7 +62,7 @@ export const InteractiveMatchingBoard: React.FC<InteractiveMatchingBoardProps> =
 
     // Check if this left-right pair matches
     const targetPair = pairs.find(p => p.left === selectedLeft);
-    const isCorrectMatch = targetPair && targetPair.right.trim().toLowerCase() === rightText.trim().toLowerCase();
+    const isCorrectMatch = targetPair && isAnswerMatch(rightText, targetPair.right);
 
     if (isCorrectMatch) {
       // Correct!

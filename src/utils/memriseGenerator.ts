@@ -1,6 +1,7 @@
 import { Exercise, MemriseExerciseItem, MemriseGenerationResult } from '../types';
 import { loadSettings } from './storage';
 import { createClozeLettersPattern } from './singleVocabGenerator';
+import { createSmartFillInBlank } from './smartContextSentence';
 
 export const MEMRISE_SYSTEM_PROMPT = `Bạn là một AI Backend Module chuyên dụng, có nhiệm vụ chuyển đổi danh sách từ vựng được người dùng cung cấp thành một cấu trúc dữ liệu bài tập (JSON) theo phong cách Memrise hoàn chỉnh.
 
@@ -15,10 +16,14 @@ CHỈ ĐỊNH NGHIÊM NGẶT VỀ DỮ LIỆU:
 
 NHIỆM VỤ CỦA BẠN:
 Với mỗi dòng từ vựng trong danh sách, hãy tạo ra các bài tập theo trình tự logic sư phạm (1 Flashcard + 6 Quiz cho mỗi từ):
-- Bước 0: "flashcard" (Thẻ học từ vựng trước khi vào quiz). Giúp người học nắm vững từ vựng, phiên âm chuẩn quốc tế IPA, giải nghĩa tiếng Việt rõ ràng, câu ví dụ tự nhiên kèm bản dịch tiếng Việt trước khi bắt đầu làm bài tập trắc nghiệm/luyện tập.
+- Bước 0: "flashcard" (Thẻ học từ vựng trước khi vào quiz). Giúp người học nắm vững từ vựng, phiên âm chuẩn quốc tế IPA, giải nghĩa tiếng Việt rõ ràng, câu ví dụ tự nhiên kèm bản dịch tiếng Việt trước khi bắt đầu làm bài tập trắc nghiệm/luyện tập. Mỗi từ phải có câu ví dụ tự nhiên riêng biệt, không lặp lại khuôn mẫu.
 - Bước 1: "multiple_choice" (Trắc nghiệm xuôi: Từ tiếng Anh ➔ Chọn nghĩa tiếng Việt). Hỏi nghĩa của từ tiếng Anh. Tạo ra 3 đáp án nhiễu (distractors) hợp lý từ các từ vựng khác hoặc kho từ vựng cùng trình độ.
 - Bước 2: "multiple_choice" đảo ngược (Trắc nghiệm đảo: Nghĩa tiếng Việt ➔ Chọn từ tiếng Anh đúng). Câu hỏi dạng: "Từ tiếng Anh nào sau đây có nghĩa là '[meaning]'?". 4 options là các từ tiếng Anh (gồm từ đúng và 3 từ tiếng Anh nhiễu hợp lý). Đánh dấu "is_reverse": true.
-- Bước 3: "fill_in_blank" (Điền từ vào câu ví dụ ngữ cảnh). Tạo 1 câu ví dụ tiếng Anh có nghĩa rõ ràng, ẩn từ đó đi bằng ký tự "___". Cung cấp câu dịch nghĩa tiếng Việt làm gợi ý ("hint").
+- Bước 3: "fill_in_blank" (Điền từ vào câu ví dụ ngữ cảnh độc nhất & thông minh).
+  + BẮT BUỘC: Với MỖI từ vựng, phải sáng tạo một câu ví dụ tiếng Anh HOÀN TOÀN MỚI LẠ, tự nhiên, sinh động và đúng văn cảnh thực tế của từ đó.
+  + TUYỆT ĐỐI KHÔNG lặp lại cùng một khuôn mẫu câu cho các từ khác nhau (NGHIÊM CẤM các câu khuôn sáo như "The word '___' is...", "The topic relates to '___'...", "I want to '___'...").
+  + Ẩn từ mục tiêu bằng đúng ký hiệu "___" (3 dấu gạch dưới).
+  + "hint": BẮT BUỘC là bản dịch nghĩa tiếng Việt hoàn chỉnh, tự nhiên của toàn bộ câu ví dụ đó để làm gợi ý ngữ cảnh.
 - Bước 4: "vocab_cloze" (Khuyết ký tự từ vựng ngẫu nhiên). Câu hỏi: "Điền từ tiếng Anh có nghĩa: \\"[meaning]\\"". Tạo mẫu chuỗi ký tự khuyết "clozeLetters" với các chữ cái và dấu gạch dưới "_" cách nhau bởi khoảng trắng (ví dụ: "_ r _ e n d _ y" hoặc "f _ _ e n d l y"), ẩn từ 35%-60% chữ cái ngẫu nhiên trên toàn bộ từ (đầu, giữa, cuối).
 - Bước 5: "spelling" (Sắp xếp ký tự). Câu hỏi: "Sắp xếp các chữ cái sau thành từ tiếng Anh có nghĩa: \\"[meaning]\\"". Tạo một mảng "shuffled_letters" chứa các chữ cái của từ đó đã được tráo đổi ngẫu nhiên vị trí. TUYỆT ĐỐI KHÔNG để lộ từ gốc trong câu hỏi của bài tập spelling.
 - Bước 6: "typing" (Tự gõ từ). Câu hỏi: "Gõ từ tiếng Anh có nghĩa: \\"[meaning]\\"". Cung cấp định nghĩa/gợi ý tiếng Việt và bắt người dùng gõ lại chính xác từ gốc tiếng Anh.
@@ -407,6 +412,7 @@ export function generateOfflineMemriseExercises(
       const baseId = `batch${batchNum}_${globalIndex}_${item.word.replace(/[^a-zA-Z0-9]/g, '')}`;
       const word = item.word;
       const meaning = item.meaning;
+      const smartSent = createSmartFillInBlank(word, meaning, globalIndex);
 
       exercises.push({
         id: `${baseId}_fc`,
@@ -415,8 +421,8 @@ export function generateOfflineMemriseExercises(
         question: `Học từ mới: ${word}`,
         meaning,
         phonetic: `/${word.toLowerCase()}/`,
-        example: `The word "${word}" is frequently used in daily English communication.`,
-        example_translation: `Từ "${word}" thường xuyên xuất hiện trong giao tiếp tiếng Anh hàng ngày.`,
+        example: smartSent.fullSentence,
+        example_translation: smartSent.translation,
         correct_answer: word
       });
     });
@@ -478,13 +484,14 @@ export function generateOfflineMemriseExercises(
       const baseId = `batch${batchNum}_${globalIndex}_${item.word.replace(/[^a-zA-Z0-9]/g, '')}`;
       const word = item.word;
       const meaning = item.meaning;
+      const smartSent = createSmartFillInBlank(word, meaning, globalIndex);
 
       exercises.push({
         id: `${baseId}_fib`,
         word,
         type: 'fill_in_blank',
-        question: `Điền từ thích hợp vào chỗ trống: The word "___" is very important in this context.`,
-        hint: `Từ cần điền mang ý nghĩa: ${meaning}`,
+        question: smartSent.sentenceWithBlank,
+        hint: smartSent.translation,
         correct_answer: word
       });
     });
@@ -516,7 +523,7 @@ export function generateOfflineMemriseExercises(
       const word = item.word;
       const meaning = item.meaning;
 
-      const letters = word.toLowerCase().split('').filter(c => c !== ' ');
+      const letters = word.toLowerCase().split('').filter(c => /[a-zA-Z0-9À-ỹà-ỹ]/.test(c));
       let shuffled = shuffleArray(letters);
       if (shuffled.join('') === letters.join('') && letters.length > 1) {
         shuffled = letters.reverse();
@@ -712,7 +719,7 @@ export function convertMemriseItemToExercise(
     base.explanation = `${item.word}: ${item.meaning || item.hint || ''}`;
   } else if (item.type === 'spelling') {
     base.correctText = item.correct_answer;
-    base.shuffled_letters = item.shuffled_letters || item.word.split('').sort(() => Math.random() - 0.5);
+    base.shuffled_letters = item.shuffled_letters || item.word.split('').filter(c => /[a-zA-Z0-9À-ỹà-ỹ]/.test(c)).sort(() => Math.random() - 0.5);
     base.shuffledLetters = base.shuffled_letters;
     // Đảm bảo tiêu đề câu hỏi không làm lộ từ vựng
     if (item.meaning || item.hint) {

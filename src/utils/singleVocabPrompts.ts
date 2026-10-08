@@ -275,26 +275,29 @@ CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
 
 /**
  * 6. PROMPT CHUYÊN BIỆT: ĐIỀN TỪ VÀO CÂU NGỮ CẢNH (Context Fill in Blank)
+ * Yêu cầu nghiêm ngặt: Mỗi từ một câu ví dụ ngữ cảnh độc nhất, tự nhiên, sinh động, không lặp lại khuôn mẫu.
  */
 export function getFillInBlankPrompt(difficulty: DifficultyLevel = 'guided'): string {
-  return `Bạn là Chuyên gia Sư phạm Ngôn ngữ Tiếng Anh.
+  return `Bạn là Chuyên gia Sư phạm Ngôn ngữ Tiếng Anh hàng đầu (IELTS / Cambridge Assessment expert).
 NHIỆM VỤ:
-Tạo bài tập "Điền từ vào câu ví dụ ngữ cảnh (Fill in blank)" từ danh sách từ vựng được cung cấp.
+Tạo bài tập "Điền từ vào câu ví dụ ngữ cảnh thực tế (Contextual Fill in the Blank)" từ danh sách từ vựng được cung cấp.
 
 QUY TẮC PHÂN TÁCH DÒNG (BẮT BUỘC):
 - MỖI DÒNG tương ứng với ĐÚNG 1 TỪ VỰNG TIẾNG ANH MỤC TIÊU.
-- TUYỆT ĐỐI KHÔNG xem dấu phẩy (,) là dấu ngăn cách giữa các từ vựng khác nhau.
+- TUYỆT ĐỐI KHÔNG xem dấu phẩy (,), dấu chấm phẩy (;), hay dấu gạch nối (-) là dấu ngăn cách giữa các từ vựng khác nhau.
+- Nếu một dòng có dạng "friendly: thân thiện, cởi mở" hoặc "friendly, thân thiện, cởi mở", thì từ tiếng Anh là "friendly", và toàn bộ phần nghĩa tiếng Việt là "thân thiện, cởi mở".
 
-QUY ĐỊNH CẤU TRÚC BÀI TẬP:
-Với MỖI từ vựng:
-1. "word" / "vocabWord": Từ tiếng Anh gốc cần điền.
-2. "vocabMeaning": Nghĩa tiếng Việt của từ.
-3. "phonetic": Phiên âm IPA.
-4. "question": Một câu tiếng Anh tự nhiên, chuẩn bản xứ, trong đó từ mục tiêu được thay bằng ký hiệu "___".
-   (Ví dụ: "She greeted the new neighbors with a warm and ___ smile.")
-5. "hint": Bản dịch nghĩa tiếng Việt của toàn bộ câu ví dụ đó (ví dụ: "Cô ấy chào đón những người hàng xóm mới bằng một nụ cười ấm áp và thân thiện.").
-6. "correctAnswer": Từ tiếng Anh chính xác cần điền vào chỗ trống (ví dụ: "friendly").
-7. "explanation": Giải thích tại sao chọn từ này trong câu và phân tích ngữ pháp liên quan.
+QUY TẮC BẮT BUỘC VỀ TÍNH THÔNG MINH, ĐA DẠNG NGỮ CẢNH & CHỐNG LẶP LẠI (CRITICAL):
+1. TUYỆT ĐỐI KHÔNG LẶP CÂU HOẶC KHUÔN MẪU: Với MỖI từ vựng trong danh sách, bạn PHẢI sáng tạo một câu ví dụ tiếng Anh HOÀN TOÀN RIÊNG BIỆT, độc nhất, phản ánh đúng bản chất ngữ nghĩa, từ loại (noun, verb, adj, adv) và ngữ cảnh thực tế của từ đó.
+2. NGHIÊM CẤM sao chép các câu rập khuôn như:
+   - "The word '___' is very important in this context..."
+   - "The topic relates to '___' in our current situation..."
+   - "I need to '___' because it is necessary..."
+   - "We should always remember '___'..."
+3. CÂU VĂN BẢN XỨ & GIÀU NGỮ CẢNH: Mỗi câu phải có cốt truyện hoặc bối cảnh đời sống/học thuật/công việc phong phú (ví dụ: công sở, môi trường, du lịch, công nghệ, gia đình, tâm lý học...) để người học có thể phân tích ngữ pháp và ngữ cảnh để đoán được từ cần điền.
+4. KÝ TỰ CHỖ TRỐNG: Ẩn từ mục tiêu bằng đúng ba dấu gạch dưới "___" (không thêm dấu ngoặc kép hay ký tự lạ quanh chỗ trống).
+5. GỢI Ý ("hint"): BẮT BUỘC là bản dịch tiếng Việt hoàn chỉnh, trôi chảy và tự nhiên của chính câu ví dụ đó (đáp án từ tiếng Việt được dịch phù hợp trong câu).
+6. "explanation": Phân tích ngữ pháp rõ ràng (tại sao từ này đứng ở vị trí đó, kết hợp với từ nào trước/sau, từ loại gì).
 
 CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
 {
@@ -308,10 +311,11 @@ CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
       "vocabMeaning": "thân thiện, cởi mở",
       "type": "fill_in_blank",
       "phonetic": "/'frend.li/",
-      "question": "She greeted the new neighbors with a warm and ___ smile.",
-      "hint": "Cô ấy chào đón những người hàng xóm mới bằng một nụ cười ấm áp và thân thiện.",
+      "question": "The local residents were exceptionally ___ to all international visitors.",
+      "hint": "Cư dân địa phương đặc biệt thân thiện với tất cả du khách quốc tế.",
       "correctAnswer": "friendly",
-      "explanation": "'friendly' (tính từ) đứng trước danh từ 'smile' để bổ nghĩa cho nụ cười thân thiện."
+      "correct_answer": "friendly",
+      "explanation": "'friendly' (tính từ) đứng sau phó từ 'exceptionally' và trước giới từ 'to' để chỉ tính cách thân thiện, cởi mở."
     }
   ]
 }`;

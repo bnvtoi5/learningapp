@@ -1,6 +1,7 @@
 import { Exercise, ExerciseType, DifficultyLevel } from '../types';
 import { loadSettings } from './storage';
 import { getSingleVocabPromptForType } from './singleVocabPrompts';
+import { createSmartFillInBlank } from './smartContextSentence';
 
 export interface SingleVocabGeneratedItem {
   id: string;
@@ -194,7 +195,7 @@ export function createClozeLettersPattern(
  * Trộn ngẫu nhiên chữ cái cho anagram / spelling
  */
 function shuffleLetters(word: string): string[] {
-  const letters = word.toLowerCase().split('').filter(c => /[a-zA-Z]/.test(c));
+  const letters = word.toLowerCase().split('').filter(c => /[a-zA-Z0-9À-ỹà-ỹ]/.test(c));
   const shuffled = [...letters].sort(() => Math.random() - 0.5);
   if (shuffled.join('') === letters.join('') && letters.length > 1) {
     return letters.reverse();
@@ -274,6 +275,7 @@ export function generateOfflineSingleVocabExercises(params: {
         explanation: `"${word}" có nghĩa chính xác là "${meaning}".`
       });
     } else if (exerciseType === 'flashcard_recall') {
+      const smartSent = createSmartFillInBlank(word, meaning, idx);
       items.push({
         id: baseId,
         word,
@@ -286,8 +288,8 @@ export function generateOfflineSingleVocabExercises(params: {
         correctAnswer: word,
         correct_answer: word,
         correctText: word,
-        exampleSentence: `Practice using "${word}" in daily communication. (${meaning})`,
-        explanation: `${word} (từ vựng) = ${meaning}. Hãy lặp lại để ghi nhớ sâu sắc.`
+        exampleSentence: `${smartSent.fullSentence} (${smartSent.translation})`,
+        explanation: `${word} (từ vựng) = ${meaning}. ${smartSent.translation}`
       });
     } else if (exerciseType === 'listen_spell') {
       items.push({
@@ -322,6 +324,7 @@ export function generateOfflineSingleVocabExercises(params: {
         explanation: `${word} = ${meaning}.`
       });
     } else if (exerciseType === 'fill_in_blank') {
+      const smartSent = createSmartFillInBlank(word, meaning, idx);
       items.push({
         id: baseId,
         word,
@@ -329,12 +332,12 @@ export function generateOfflineSingleVocabExercises(params: {
         vocabMeaning: meaning,
         type: 'fill_in_blank',
         phonetic: `/${word.toLowerCase()}/`,
-        question: `The topic relates to "___" in our current context.`,
-        hint: `Nghĩa của câu ví dụ liên quan đến: ${meaning}`,
+        question: smartSent.sentenceWithBlank,
+        hint: smartSent.translation,
         correctAnswer: word,
         correct_answer: word,
         correctText: word,
-        explanation: `Từ cần điền là "${word}" (${meaning}).`
+        explanation: `'${word}' (${meaning}) là từ chính xác cần điền. Dịch nghĩa: "${smartSent.translation}".`
       });
     } else if (exerciseType === 'typing') {
       items.push({

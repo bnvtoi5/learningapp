@@ -614,7 +614,7 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
       newExercise.word = target;
       newExercise.correct_answer = target;
       newExercise.correctText = target;
-      newExercise.shuffled_letters = target.split('').sort(() => Math.random() - 0.5);
+      newExercise.shuffled_letters = target.split('').filter(c => /[a-zA-Z0-9À-ỹà-ỹ]/.test(c)).sort(() => Math.random() - 0.5);
       newExercise.shuffledLetters = newExercise.shuffled_letters;
     } else if (exType === 'typing') {
       const target = vocabWord.trim() || exCorrectText.trim();

@@ -35,6 +35,7 @@ import { CHUNK_SIZE, QUIZ_TYPES_PER_WORD, orderStandardExercisesInBatches } from
 import { createClozeLettersPattern } from '../utils/singleVocabGenerator';
 import { InteractivePronunciationPractice } from './InteractivePronunciationPractice';
 import { evaluatePronunciation } from '../utils/pronunciationUtils';
+import { isAnswerMatch } from '../utils/answerUtils';
 
 interface PracticeSessionProps {
   exercises: Exercise[];
@@ -223,7 +224,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
 
   // Helper to parse cloze text into segments (supports [answer], {answer}, and ((answer)))
   const parseClozePassage = (text: string) => {
-    const regex = /\[(.*?)\]|\{(.*?)\}/g;
+    const regex = /\[(.*?)\]|\{(.*?)\}|\(\((.*?)\)\)/g;
     const parts: { type: 'text' | 'blank'; content: string; blankIdx?: number; answer?: string }[] = [];
     let lastIndex = 0;
     let blankCounter = 0;
@@ -232,7 +233,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
       if (match.index > lastIndex) {
         parts.push({ type: 'text', content: text.substring(lastIndex, match.index) });
       }
-      const ans = (match[1] !== undefined ? match[1] : match[2] || '').trim();
+      const ans = (match[1] !== undefined ? match[1] : match[2] !== undefined ? match[2] : match[3] || '').trim();
       parts.push({
         type: 'blank',
         content: match[0],
@@ -461,9 +462,11 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
       let letters: { id: string; letter: string }[] = [];
       const shuffled = currentEx.shuffled_letters || currentEx.shuffledLetters;
       if (shuffled && shuffled.length > 0) {
-        letters = shuffled.map((l, i) => ({ id: `${l}_${i}_${Math.random().toString(36).substring(2, 6)}`, letter: l }));
+        letters = shuffled
+          .filter((l: string) => /[a-zA-Z0-9À-ỹà-ỹ]/.test(l))
+          .map((l: string, i: number) => ({ id: `${l}_${i}_${Math.random().toString(36).substring(2, 6)}`, letter: l }));
       } else {
-        const raw = target.split('').filter(c => c !== ' ').map((l, i) => ({ id: `${l}_${i}_${Math.random().toString(36).substring(2, 6)}`, letter: l }));
+        const raw = target.split('').filter(c => /[a-zA-Z0-9À-ỹà-ỹ]/.test(c)).map((l, i) => ({ id: `${l}_${i}_${Math.random().toString(36).substring(2, 6)}`, letter: l }));
         letters = [...raw].sort(() => Math.random() - 0.5);
       }
       setAvailableLetters(letters);
@@ -554,21 +557,20 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
 
         case 'listen_spell':
         case 'typing': {
-          const target = (currentEx.correct_answer || currentEx.vocabWord || currentEx.correctText || currentEx.word || '').trim().toLowerCase();
-          const user = textAnswer.trim().toLowerCase();
-          correct = user === target;
+          const target = (currentEx.correct_answer || currentEx.vocabWord || currentEx.correctText || currentEx.word || '').trim();
+          correct = isAnswerMatch(textAnswer, target);
           userAnsStr = textAnswer.trim() || 'Chưa nhập';
-          correctAnsStr = currentEx.correct_answer || currentEx.vocabWord || currentEx.correctText || currentEx.word || '';
+          correctAnsStr = target;
           break;
         }
 
         case 'anagram':
         case 'spelling': {
-          const target = (currentEx.correct_answer || currentEx.vocabWord || currentEx.correctText || currentEx.word || '').trim().toLowerCase();
-          const user = assembledLetters.join('').trim().toLowerCase();
-          correct = user === target;
+          const target = (currentEx.correct_answer || currentEx.vocabWord || currentEx.correctText || currentEx.word || '').trim();
+          const user = assembledLetters.join('');
+          correct = isAnswerMatch(user, target);
           userAnsStr = assembledLetters.join('');
-          correctAnsStr = currentEx.correct_answer || currentEx.vocabWord || currentEx.correctText || currentEx.word || '';
+          correctAnsStr = target;
           break;
         }
 
@@ -587,9 +589,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
 
             blanks.forEach(b => {
               const rawUser = (clozeAnswers[b.blankIdx!] || '').trim();
-              const userVal = rawUser.toLowerCase().replace(/[.,!?;:]/g, '');
-              const acceptable = (b.answer || '').split(/[/|]/).map(a => a.trim().toLowerCase().replace(/[.,!?;:]/g, ''));
-              const isBlankCorrect = acceptable.includes(userVal);
+              const isBlankCorrect = isAnswerMatch(rawUser, b.answer || '');
               if (!isBlankCorrect) allCorrect = false;
               userResults.push(`[${b.blankIdx! + 1}] ${rawUser || '(trống)'}`);
               correctResults.push(`[${b.blankIdx! + 1}] ${b.answer}`);
@@ -622,9 +622,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
               } else {
                 // fill_blank or info_gap
                 const rawUser = String(subAnswers[sq.id] || '').trim();
-                const userTxt = rawUser.toLowerCase().replace(/[.,!?;:]/g, '');
-                const validAnswers = (sq.correctText || '').split(/[/|]/).map(a => a.trim().toLowerCase().replace(/[.,!?;:]/g, ''));
-                sqCorrect = validAnswers.includes(userTxt);
+                sqCorrect = isAnswerMatch(rawUser, sq.correctText || '');
                 sqUserStr = rawUser || 'Chưa nhập';
                 sqCorrectStr = sq.correctText || '';
               }
@@ -640,9 +638,9 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
           } else {
             let targetOptions = currentEx.correctOptions;
             if (!targetOptions || targetOptions.length === 0) {
-              const targetVal = (currentEx.correct_answer || currentEx.correctText || '').trim().toLowerCase();
+              const targetVal = (currentEx.correct_answer || currentEx.correctText || '').trim();
               if (targetVal && currentEx.options) {
-                const foundIdx = currentEx.options.findIndex(o => o.trim().toLowerCase() === targetVal);
+                const foundIdx = currentEx.options.findIndex(o => isAnswerMatch(o, targetVal));
                 targetOptions = foundIdx >= 0 ? [foundIdx] : [0];
               } else {
                 targetOptions = [0];
@@ -660,18 +658,8 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
         case 'fill_blank':
         case 'fill_in_blank':
         case 'translation': {
-          const cleanedUser = textAnswer.trim().toLowerCase().replace(/[.,!?;:]/g, '');
           const targetAnswer = currentEx.correct_answer || currentEx.correctText || currentEx.word || currentEx.vocabWord || '';
-          const targetAlternatives = targetAnswer.split(/\s*[/|]\s*/).filter(Boolean);
-          if (targetAlternatives.length > 1) {
-            correct = targetAlternatives.some(alt => {
-              const cleanedAlt = alt.trim().toLowerCase().replace(/[.,!?;:]/g, '');
-              return cleanedUser === cleanedAlt;
-            });
-          } else {
-            const cleanedTarget = targetAnswer.trim().toLowerCase().replace(/[.,!?;:]/g, '');
-            correct = cleanedUser === cleanedTarget;
-          }
+          correct = isAnswerMatch(textAnswer, targetAnswer);
           userAnsStr = textAnswer.trim() || 'Chưa nhập';
           correctAnsStr = targetAnswer;
           break;
@@ -687,59 +675,39 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
             correctAnsStr = targetOptions.map(idx => currentEx.options?.[idx] || idx).join(', ');
           } else if (currentEx.matchingPairs && currentEx.matchingPairs.length > 0) {
             const pairs = currentEx.matchingPairs || [];
-            const isAllMatched = pairs.length > 0 && pairs.every(p => matchedPairs[p.left] === p.right);
+            const isAllMatched = pairs.length > 0 && pairs.every(p => matchedPairs[p.left] && isAnswerMatch(matchedPairs[p.left], p.right));
             correct = isAllMatched;
             userAnsStr = Object.entries(matchedPairs).map(([l, r]) => `${l} → ${r}`).join('; ');
             correctAnsStr = pairs.map(p => `${p.left} → ${p.right}`).join('; ');
           } else {
-            const cleanedUser = textAnswer.trim().toLowerCase().replace(/[.,!?;:]/g, '');
             const targetAnswer = currentEx.correctText || '';
-            const targetAlternatives = targetAnswer.split(/\s*[/|]\s*/).filter(Boolean);
-            if (targetAlternatives.length > 1) {
-              correct = targetAlternatives.some(alt => {
-                const cleanedAlt = alt.trim().toLowerCase().replace(/[.,!?;:]/g, '');
-                return cleanedUser === cleanedAlt;
-              });
-            } else {
-              const cleanedTarget = targetAnswer.trim().toLowerCase().replace(/[.,!?;:]/g, '');
-              correct = cleanedUser === cleanedTarget;
-            }
+            correct = isAnswerMatch(textAnswer, targetAnswer);
             userAnsStr = textAnswer.trim() || 'Chưa nhập';
-            correctAnsStr = currentEx.correctText || '';
+            correctAnsStr = targetAnswer;
           }
           break;
         }
 
         case 'sentence_builder': {
-          const userBuilt = assembledWords.join(' ').trim().toLowerCase().replace(/[.,!?;:]/g, '');
+          const userBuilt = assembledWords.join(' ');
           const targetStr = (currentEx.correctText || '').trim();
-          const targetAlternatives = targetStr.split(/\s*[/|]\s*/).filter(Boolean);
-          if (targetAlternatives.length > 1) {
-            correct = targetAlternatives.some(alt => {
-              const cleanedAlt = alt.trim().toLowerCase().replace(/[.,!?;:]/g, '');
-              return userBuilt === cleanedAlt;
-            });
-          } else {
-            const cleanedTarget = targetStr.toLowerCase().replace(/[.,!?;:]/g, '');
-            correct = userBuilt === cleanedTarget;
-          }
+          correct = isAnswerMatch(userBuilt, targetStr);
           userAnsStr = assembledWords.join(' ');
-          correctAnsStr = currentEx.correctText || '';
+          correctAnsStr = targetStr;
           break;
         }
 
         case 'error_correction': {
-          const cleanedUser = textAnswer.trim().toLowerCase().replace(/[.,!?;:]/g, '');
-          const cleanedTarget = (currentEx.correctText || '').trim().toLowerCase().replace(/[.,!?;:]/g, '');
-          correct = cleanedUser === cleanedTarget;
+          const targetStr = (currentEx.correctText || '').trim();
+          correct = isAnswerMatch(textAnswer, targetStr);
           userAnsStr = textAnswer.trim() + (selectedErrorType ? ` [Lỗi: ${selectedErrorType}]` : '');
-          correctAnsStr = (currentEx.correctText || '') + (currentEx.errorType ? ` [Lỗi: ${currentEx.errorType}]` : '');
+          correctAnsStr = targetStr + (currentEx.errorType ? ` [Lỗi: ${currentEx.errorType}]` : '');
           break;
         }
 
         case 'matching': {
           const pairs = currentEx.matchingPairs || [];
-          const isAllMatched = pairs.length > 0 && pairs.every(p => matchedPairs[p.left] === p.right);
+          const isAllMatched = pairs.length > 0 && pairs.every(p => matchedPairs[p.left] && isAnswerMatch(matchedPairs[p.left], p.right));
           correct = isAllMatched && matchingMistakesCount === 0;
           userAnsStr = Object.entries(matchedPairs).map(([l, r]) => `${l} → ${r}`).join('; ') + (matchingMistakesCount > 0 ? ` (${matchingMistakesCount} lần ghép sai)` : '');
           correctAnsStr = pairs.map(p => `${p.left} → ${p.right}`).join('; ');
@@ -853,9 +821,11 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
       const shuffled = (currentEx as any).shuffled_letters || currentEx.shuffledLetters;
       let letters: { id: string; letter: string }[] = [];
       if (shuffled && shuffled.length > 0) {
-        letters = shuffled.map((l: string, i: number) => ({ id: `${l}_${i}_${Math.random().toString(36).substring(2, 6)}`, letter: l }));
+        letters = shuffled
+          .filter((l: string) => /[a-zA-Z0-9À-ỹà-ỹ]/.test(l))
+          .map((l: string, i: number) => ({ id: `${l}_${i}_${Math.random().toString(36).substring(2, 6)}`, letter: l }));
       } else {
-        const raw = target.split('').filter((c: string) => c !== ' ').map((l: string, i: number) => ({ id: `${l}_${i}_${Math.random().toString(36).substring(2, 6)}`, letter: l }));
+        const raw = target.split('').filter((c: string) => /[a-zA-Z0-9À-ỹà-ỹ]/.test(c)).map((l: string, i: number) => ({ id: `${l}_${i}_${Math.random().toString(36).substring(2, 6)}`, letter: l }));
         letters = [...raw].sort(() => Math.random() - 0.5);
       }
       setAvailableLetters(letters);
@@ -1511,8 +1481,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
                 }
                 const bIdx = part.blankIdx!;
                 const userVal = clozeAnswers[bIdx] || '';
-                const acceptable = (part.answer || '').split(/[/|]/).map(a => a.trim().toLowerCase().replace(/[.,!?;:]/g, ''));
-                const isBlankCorrect = acceptable.includes(userVal.trim().toLowerCase().replace(/[.,!?;:]/g, ''));
+                const isBlankCorrect = isAnswerMatch(userVal, part.answer || '');
 
                 return (
                   <span key={pIdx} className="inline-flex items-center mx-1.5 my-1 align-middle">
@@ -1561,9 +1530,8 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
                   } else if (subQ.type === 'true_false') {
                     isSubCorrect = subAnswers[subQ.id] === (subQ.correctTrueFalse ?? true);
                   } else {
-                    const cleanUser = String(subAnswers[subQ.id] || '').trim().toLowerCase().replace(/[.,!?;:]/g, '');
-                    const validAnswers = (subQ.correctText || '').split(/[/|]/).map(a => a.trim().toLowerCase().replace(/[.,!?;:]/g, ''));
-                    isSubCorrect = validAnswers.includes(cleanUser);
+                    const cleanUser = String(subAnswers[subQ.id] || '');
+                    isSubCorrect = isAnswerMatch(cleanUser, subQ.correctText || '');
                   }
                 }
 

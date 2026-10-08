@@ -3,6 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import { createSmartFillInBlank } from "./src/utils/smartContextSentence";
 
 dotenv.config();
 
@@ -223,10 +224,14 @@ CHỈ ĐỊNH NGHIÊM NGẶT VỀ DỮ LIỆU:
 
 NHIỆM VỤ CỦA BẠN:
 Với mỗi từ vựng trong danh sách, hãy tạo ra các bài tập theo trình tự logic sư phạm sau (1 Flashcard + 6 Quiz cho mỗi từ):
-- Bước 0: "flashcard" (Thẻ học từ vựng trước khi vào quiz). Giúp người học nắm vững từ vựng, phiên âm chuẩn quốc tế IPA, giải nghĩa tiếng Việt rõ ràng, câu ví dụ tự nhiên kèm bản dịch tiếng Việt trước khi bắt đầu làm bài tập trắc nghiệm/luyện tập.
+- Bước 0: "flashcard" (Thẻ học từ vựng trước khi vào quiz). Giúp người học nắm vững từ vựng, phiên âm chuẩn quốc tế IPA, giải nghĩa tiếng Việt rõ ràng, câu ví dụ tự nhiên kèm bản dịch tiếng Việt trước khi bắt đầu làm bài tập trắc nghiệm/luyện tập. Mỗi từ phải có câu ví dụ tự nhiên riêng biệt, không lặp lại khuôn mẫu.
 - Bước 1: "multiple_choice" (Trắc nghiệm xuôi: Từ tiếng Anh ➔ Chọn nghĩa tiếng Việt). Hỏi nghĩa của từ tiếng Anh. Tạo ra 3 đáp án nhiễu (distractors) hợp lý từ các từ vựng khác hoặc kho từ vựng cùng trình độ.
 - Bước 2: "multiple_choice" đảo ngược (Trắc nghiệm đảo: Nghĩa tiếng Việt ➔ Chọn từ tiếng Anh đúng). Câu hỏi dạng: "Từ tiếng Anh nào sau đây có nghĩa là '[meaning]'?". 4 options là các từ tiếng Anh (gồm từ đúng và 3 từ tiếng Anh nhiễu hợp lý). Đánh dấu "is_reverse": true.
-- Bước 3: "fill_in_blank" (Điền từ vào câu ví dụ ngữ cảnh). Tạo 1 câu ví dụ tiếng Anh có nghĩa rõ ràng, ẩn từ đó đi bằng ký tự "___". Cung cấp câu dịch nghĩa tiếng Việt làm gợi ý ("hint").
+- Bước 3: "fill_in_blank" (Điền từ vào câu ví dụ ngữ cảnh độc nhất & thông minh).
+  + BẮT BUỘC: Với MỖI từ vựng, phải sáng tạo một câu ví dụ tiếng Anh HOÀN TOÀN MỚI LẠ, tự nhiên, sinh động và đúng văn cảnh thực tế của từ đó.
+  + TUYỆT ĐỐI KHÔNG lặp lại cùng một khuôn mẫu câu cho các từ khác nhau (NGHIÊM CẤM các câu khuôn sáo như "The word '___' is...", "The topic relates to '___'...", "I want to '___'...").
+  + Ẩn từ mục tiêu bằng đúng ký hiệu "___" (3 dấu gạch dưới).
+  + "hint": BẮT BUỘC là bản dịch nghĩa tiếng Việt hoàn chỉnh, tự nhiên của toàn bộ câu ví dụ đó để làm gợi ý ngữ cảnh.
 - Bước 4: "vocab_cloze" (Khuyết ký tự ngẫu nhiên trong từ). Câu hỏi: "Điền từ tiếng Anh có nghĩa: \\"[meaning]\\"". Chuỗi "clozeLetters" gồm các ký tự và dấu gạch dưới "_" cách nhau bởi khoảng trắng (ví dụ: "d _ l _ g _ n t"), ẩn ngẫu nhiên 35%-60% chữ cái ở các vị trí linh hoạt (đầu, giữa, cuối).
 - Bước 5: "spelling" (Sắp xếp ký tự đảo). Câu hỏi: "Sắp xếp các chữ cái sau thành từ tiếng Anh có nghĩa: \\"[meaning]\\"". Mảng "shuffled_letters" chứa các chữ cái bị xáo trộn. TUYỆT ĐỐI KHÔNG để lộ từ gốc hay các chữ cái trong câu hỏi của bài tập spelling để tránh lộ đáp án.
 - Bước 6: "typing" (Tự gõ từ). Câu hỏi: "Gõ từ tiếng Anh có nghĩa: \\"[meaning]\\"". Cung cấp định nghĩa/gợi ý tiếng Việt và bắt người dùng gõ lại chính xác từ gốc tiếng Anh.
@@ -360,6 +365,7 @@ CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
           const cleanWord = item.word;
           const meaning = item.meaning || `Nghĩa của từ '${cleanWord}'`;
           const baseId = `batch${batchNum}_${idx}_${cleanWord.replace(/[^a-zA-Z0-9]/g, '')}`;
+          const smartSent = createSmartFillInBlank(cleanWord, meaning, idx);
 
           bExs.push({
             id: `${baseId}_fc`,
@@ -368,8 +374,8 @@ CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
             question: `Học từ mới: ${cleanWord}`,
             meaning,
             phonetic: `/${cleanWord.toLowerCase()}/`,
-            example: `The word "${cleanWord}" is essential in everyday communication.`,
-            example_translation: `Từ "${cleanWord}" rất quan trọng trong giao tiếp hàng ngày.`,
+            example: smartSent.fullSentence,
+            example_translation: smartSent.translation,
             correct_answer: cleanWord
           });
         });
@@ -426,13 +432,14 @@ CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
           const cleanWord = item.word;
           const meaning = item.meaning || `Nghĩa của từ '${cleanWord}'`;
           const baseId = `batch${batchNum}_${idx}_${cleanWord.replace(/[^a-zA-Z0-9]/g, '')}`;
+          const smartSent = createSmartFillInBlank(cleanWord, meaning, idx);
 
           bExs.push({
             id: `${baseId}_fib`,
             word: cleanWord,
             type: 'fill_in_blank',
-            question: `Điền từ thích hợp vào chỗ trống: The word "___" is very important here.`,
-            hint: `Từ cần điền mang ý nghĩa: ${meaning}`,
+            question: smartSent.sentenceWithBlank,
+            hint: smartSent.translation,
             correct_answer: cleanWord
           });
         });
@@ -516,7 +523,7 @@ CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
               contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
               config: {
                 systemInstruction: systemPrompt,
-                temperature: 0.2,
+                temperature: 0.7,
                 maxOutputTokens: 4000,
                 responseMimeType: "application/json",
               }
@@ -550,9 +557,28 @@ CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
                   orderedBatch.push(...mcRevs);
                 });
 
-                // 4. Quiz 3: Fill in blank
-                batchWords.forEach(w => {
+                // 4. Quiz 3: Fill in blank (Hậu kiểm tra chống câu rập khuôn hoặc trùng lặp)
+                const seenFibQuestions = new Set<string>();
+                batchWords.forEach((w, wIdx) => {
                   const fibs = rawExs.filter((ex: any) => ex.type === 'fill_in_blank' && (ex.word || '').trim().toLowerCase() === w);
+                  fibs.forEach((fib: any) => {
+                    const qText = (fib.question || '').trim();
+                    const isGeneric = !qText || 
+                      qText.includes('The word "___"') || 
+                      qText.includes("The word '___'") || 
+                      qText.includes('Điền từ thích hợp vào chỗ trống: The word "___"') ||
+                      seenFibQuestions.has(qText);
+
+                    if (isGeneric) {
+                      const batchItem = batchItems.find(it => it.word.trim().toLowerCase() === w);
+                      const meaning = batchItem?.meaning || fib.hint || w;
+                      const smart = createSmartFillInBlank(w, meaning, wIdx);
+                      fib.question = smart.sentenceWithBlank;
+                      fib.hint = smart.translation;
+                    } else {
+                      seenFibQuestions.add(qText);
+                    }
+                  });
                   orderedBatch.push(...fibs);
                 });
 
@@ -1702,10 +1728,10 @@ CHỈ ĐỊNH NGHIÊM NGẶT VỀ DỮ LIỆU:
 
 NHIỆM VỤ CỦA BẠN:
 Với mỗi dòng từ vựng trong danh sách, hãy tạo ra các dạng bài tập theo trình tự logic sư phạm (1 Flashcard + 6 Quiz cho mỗi từ):
-- Dạng 0: "flashcard" (Thẻ học từ vựng Active Recall trước khi vào quiz, gồm từ gốc, phiên âm phonetic, nghĩa tiếng Việt meaning, và ví dụ example có bản dịch example_translation).
+- Dạng 0: "flashcard" (Thẻ học từ vựng Active Recall trước khi vào quiz, gồm từ gốc, phiên âm phonetic, nghĩa tiếng Việt meaning, và ví dụ example có bản dịch example_translation riêng biệt tự nhiên, không lặp lại).
 - Dạng 1: "multiple_choice" (Trắc nghiệm xuôi: Từ -> Nghĩa đúng, 4 options gồm 1 đúng và 3 distractors hợp lý).
 - Dạng 2: "multiple_choice" đảo (Trắc nghiệm đảo: Nghĩa -> Chọn từ tiếng Anh đúng, "is_reverse": true, 4 options tiếng Anh).
-- Dạng 3: "fill_in_blank" (Điền từ vào câu ví dụ ngữ cảnh có chứa ___). Câu hỏi là 1 câu tiếng Anh tự nhiên chứa "___", hint là bản dịch tiếng Việt của cả câu.
+- Dạng 3: "fill_in_blank" (Điền từ vào câu ví dụ ngữ cảnh độc nhất & tự nhiên). BẮT BUỘC: Mỗi từ phải có một câu ví dụ ngữ cảnh HOÀN TOÀN KHÁC BIỆT, sinh động, chuẩn bản xứ, không lặp lại khuôn mẫu (cấm các câu rập khuôn như 'The word ___ is...'). Chỗ trống ẩn bằng "___", hint là bản dịch tiếng Việt của cả câu.
 - Dạng 4: "vocab_cloze" (Khuyết ký tự ngẫu nhiên trong từ). Câu hỏi: "Điền từ tiếng Anh có nghĩa: \\"[meaning]\\"". Chuỗi "clozeLetters" gồm các ký tự và dấu gạch dưới "_" cách nhau bởi khoảng trắng, ẩn 35%-60% chữ cái ở các vị trí ngẫu nhiên linh hoạt (đầu, giữa, cuối).
 - Dạng 5: "spelling" (Sắp xếp ký tự đảo). Câu hỏi: "Sắp xếp các chữ cái sau thành từ tiếng Anh có nghĩa: \\"[meaning]\\"". Mảng "shuffled_letters" chứa các chữ cái bị xáo trộn. TUYỆT ĐỐI KHÔNG để lộ từ gốc hay các chữ cái trong câu hỏi của bài tập spelling để tránh lộ đáp án.
 - Dạng 6: "typing" (Tự gõ từ). Câu hỏi: "Gõ từ tiếng Anh có nghĩa: \\"[meaning]\\"". Cung cấp định nghĩa và bắt người dùng gõ chính xác từ tiếng Anh gốc.
@@ -1815,7 +1841,7 @@ CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
         config: {
           systemInstruction,
           responseMimeType: "application/json",
-          temperature: 0.2,
+          temperature: 0.7,
         }
       });
 
@@ -1829,9 +1855,29 @@ CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
       }
 
       // Chuẩn hóa và sửa clozeLetters nếu số token không khớp số ký tự từ vựng
+      // và kiểm tra chống lặp câu hỏi fill_in_blank
       if (parsed && Array.isArray(parsed.exercises)) {
-        parsed.exercises = parsed.exercises.map((item: any) => {
+        const seenFibQuestions = new Set<string>();
+
+        parsed.exercises = parsed.exercises.map((item: any, idx: number) => {
           const rawWord = (item.word || item.correct_answer || "").trim();
+
+          if (item.type === "fill_in_blank") {
+            const q = (item.question || "").trim();
+            const isGeneric = !q ||
+              q.includes('The word "___"') ||
+              q.includes("The word '___'") ||
+              q.includes('The local people are remarkably ___') ||
+              seenFibQuestions.has(q);
+
+            if (isGeneric && rawWord) {
+              const smart = createSmartFillInBlank(rawWord, item.hint || item.meaning || rawWord, idx);
+              item.question = smart.sentenceWithBlank;
+              item.hint = smart.translation;
+            } else if (q) {
+              seenFibQuestions.add(q);
+            }
+          }
           if (item.type === "vocab_cloze" && rawWord) {
             const chars = rawWord.split("");
             const currentCloze = (item.clozeLetters || item.clozeTemplate || "").trim();
@@ -2090,12 +2136,21 @@ CẤU TRÚC JSON ĐẦU RA:
   ]
 }`;
       } else if (targetType === "fill_in_blank") {
-        systemInstruction = `Bạn là Chuyên gia Sư phạm Ngôn ngữ Tiếng Anh.
-NHIỆM VỤ: Tạo bài tập "Điền từ vào câu ví dụ ngữ cảnh (Fill in blank)" từ danh sách từ vựng được cung cấp.
+        systemInstruction = `Bạn là Chuyên gia Sư phạm Ngôn ngữ Tiếng Anh hàng đầu (IELTS / Cambridge Assessment expert).
+NHIỆM VỤ: Tạo bài tập "Điền từ vào câu ví dụ ngữ cảnh thực tế (Contextual Fill in the Blank)" từ danh sách từ vựng được cung cấp.
 
 QUY TẮC PHÂN TÁCH DÒNG (BẮT BUỘC):
 - MỖI DÒNG tương ứng với ĐÚNG 1 TỪ VỰNG TIẾNG ANH MỤC TIÊU.
 - TUYỆT ĐỐI KHÔNG xem dấu phẩy (,) là dấu ngăn cách giữa các từ vựng khác nhau.
+- Nếu một dòng có dạng "friendly: thân thiện, cởi mở", thì từ tiếng Anh là "friendly", nghĩa là "thân thiện, cởi mở".
+
+QUY TẮC BẮT BUỘC VỀ SỰ ĐA DẠNG NGỮ CẢNH & CHỐNG LẶP LẠI (CRITICAL):
+1. TUYỆT ĐỐI KHÔNG LẶP CÂU: MỖI từ vựng BẮT BUỘC phải có một câu ví dụ tiếng Anh HOÀN TOÀN RIÊNG BIỆT, độc nhất, sinh động và phù hợp chính xác với ngữ cảnh, ngữ nghĩa thực tế của từ đó.
+2. NGHIÊM CẤM sao chép các câu rập khuôn (như "The word '___' is very important...", "The topic relates to '___'...", "I need to '___'...", "We should remember '___'...").
+3. CÂU VĂN BẢN XỨ & GIÀU NGỮ CẢNH: Mỗi câu phải có cốt truyện đời sống, học thuật, công việc để học sinh phân tích ngữ pháp/ngữ cảnh và tư duy ra từ cần điền.
+4. KÝ TỰ CHỖ TRỐNG: Ẩn từ mục tiêu bằng đúng ba dấu gạch dưới "___".
+5. GỢI Ý ("hint"): BẮT BUỘC là bản dịch tiếng Việt hoàn chỉnh, trôi chảy và tự nhiên của chính câu ví dụ đó.
+6. "explanation": Phân tích ngữ pháp và kết hợp từ (collocation) của từ trong câu.
 
 CẤU TRÚC JSON ĐẦU RA:
 {
@@ -2109,11 +2164,11 @@ CẤU TRÚC JSON ĐẦU RA:
       "vocabMeaning": "thân thiện, cởi mở",
       "type": "fill_in_blank",
       "phonetic": "/'frend.li/",
-      "question": "She greeted the new neighbors with a warm and ___ smile.",
-      "hint": "Cô ấy chào đón những người hàng xóm mới bằng một nụ cười ấm áp và thân thiện.",
+      "question": "The local residents were exceptionally ___ to all international visitors.",
+      "hint": "Cư dân địa phương đặc biệt thân thiện với tất cả du khách quốc tế.",
       "correctAnswer": "friendly",
       "correct_answer": "friendly",
-      "explanation": "'friendly' (tính từ) đứng trước danh từ 'smile' để bổ nghĩa cho nụ cười thân thiện."
+      "explanation": "'friendly' (tính từ) đứng sau phó từ 'exceptionally' và trước giới từ 'to' để chỉ tính cách thân thiện, cởi mở."
     }
   ]
 }`;
@@ -2233,7 +2288,7 @@ CẤU TRÚC JSON ĐẦU RA:
         config: {
           systemInstruction,
           responseMimeType: "application/json",
-          temperature: 0.2,
+          temperature: targetType === "fill_in_blank" ? 0.7 : 0.2,
         }
       });
 
@@ -2247,8 +2302,11 @@ CẤU TRÚC JSON ĐẦU RA:
       }
 
       // Chuẩn hóa và khắc phục triệt để lỗi thiếu dấu gạch dưới "_" do LLM đếm sai số lượng ký tự
+      // và kiểm tra chống lặp câu hỏi cho fill_in_blank
       if (parsed && Array.isArray(parsed.items)) {
-        parsed.items = parsed.items.map((item: any) => {
+        const seenFibQuestions = new Set<string>();
+
+        parsed.items = parsed.items.map((item: any, idx: number) => {
           const rawWord = (item.vocabWord || item.word || item.correctAnswer || "").trim();
           const isClozeType = item.type === "vocab_cloze" || targetType === "vocab_cloze";
           
@@ -2278,11 +2336,30 @@ CẤU TRÚC JSON ĐẦU RA:
                 shuffled.slice(0, targetCount).forEach(idx => maskIndices.add(idx));
               }
 
-              const repaired = chars.map((ch, idx) => maskIndices.has(idx) ? "_" : ch).join(" ");
+              const repaired = chars.map((ch, cIdx) => maskIndices.has(cIdx) ? "_" : ch).join(" ");
               item.clozeLetters = repaired;
               item.clozeTemplate = repaired;
             }
           }
+
+          // Kiểm tra và khắc phục trùng lặp câu mẫu cho fill_in_blank
+          if (item.type === "fill_in_blank" || targetType === "fill_in_blank") {
+            const q = (item.question || "").trim();
+            const isGeneric = !q ||
+              q.includes('The word "___"') ||
+              q.includes("The word '___'") ||
+              q.includes('The topic relates to "___"') ||
+              seenFibQuestions.has(q);
+
+            if (isGeneric && rawWord) {
+              const smart = createSmartFillInBlank(rawWord, item.vocabMeaning || rawWord, idx);
+              item.question = smart.sentenceWithBlank;
+              item.hint = smart.translation;
+            } else if (q) {
+              seenFibQuestions.add(q);
+            }
+          }
+
           return item;
         });
       }
