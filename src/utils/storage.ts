@@ -26,15 +26,18 @@ import {
 import {
   syncDocToCloud,
   deleteDocFromCloud,
+  deleteBatchDocsFromCloud,
   syncBatchDocsToCloud,
   syncAllToCloud,
   fetchAllFromCloud,
   clearCloudDatabase,
   testFirestoreConnection,
+  isPendingCloudWrite,
+  isPendingCloudDelete,
 } from '../lib/firebase';
 import defaultConfig from '../../firebase-applet-config.json';
 
-export { defaultStudentPermissions, syncDocToCloud, deleteDocFromCloud, syncBatchDocsToCloud };
+export { defaultStudentPermissions, syncDocToCloud, deleteDocFromCloud, deleteBatchDocsFromCloud, syncBatchDocsToCloud };
 
 const STORAGE_KEYS = {
   TOPICS: 'study_app_topics',
@@ -521,13 +524,19 @@ export function bulkResetResolvedErrors(errorIds: string[]): ErrorLog[] {
 
 export function mergeCollectionsWithTimestamp<T extends { id: string; updatedAt?: number }>(
   localItems: T[],
-  cloudItems: T[]
+  cloudItems: T[],
+  collectionName?: string
 ): { merged: T[]; itemsToSyncUp: T[] } {
   const localMap = new Map<string, T>(localItems.map(item => [item.id, item]));
   const mergedMap = new Map<string, T>();
   const itemsToSyncUp: T[] = [];
 
   for (const cloudItem of cloudItems) {
+    // Skip items that were just deleted in this tab while the cloud delete is still propagating
+    if (collectionName && isPendingCloudDelete(collectionName, cloudItem.id)) {
+      continue;
+    }
+
     const localItem = localMap.get(cloudItem.id);
     if (!localItem) {
       mergedMap.set(cloudItem.id, cloudItem);
@@ -545,11 +554,14 @@ export function mergeCollectionsWithTimestamp<T extends { id: string; updatedAt?
     }
   }
 
-  // Any items that exist locally but not in cloud yet
-  for (const [id, localItem] of localMap.entries()) {
-    if (!mergedMap.has(id)) {
-      mergedMap.set(id, localItem);
-      itemsToSyncUp.push(localItem);
+  // Cloud is the source of truth for deletions:
+  // Only keep local-only items if they have an active in-flight write started in this tab.
+  // Otherwise they were deleted on Cloud (e.g. from another browser/device) and must NOT be resurrected.
+  if (collectionName) {
+    for (const [id, localItem] of localMap.entries()) {
+      if (!mergedMap.has(id) && isPendingCloudWrite(collectionName, id)) {
+        mergedMap.set(id, localItem);
+      }
     }
   }
 
@@ -945,7 +957,7 @@ export function deleteClassroomCascade(classroomId: string): {
   const topicIdsToDelete = new Set(topicsToDelete.map(t => t.id));
   const remainingTopics = allTopics.filter(t => t.classroomId !== classroomId);
   saveTopics(remainingTopics);
-  topicsToDelete.forEach(t => deleteDocFromCloud('topics', t.id));
+  deleteBatchDocsFromCloud('topics', topicsToDelete.map(t => t.id));
 
   // 3. Cascade: delete all lessons belonging to those topics
   const allLessons = loadLessons();
@@ -953,7 +965,7 @@ export function deleteClassroomCascade(classroomId: string): {
   const lessonIdsToDelete = new Set(lessonsToDelete.map(l => l.id));
   const remainingLessons = allLessons.filter(l => !topicIdsToDelete.has(l.topicId));
   saveLessons(remainingLessons);
-  lessonsToDelete.forEach(l => deleteDocFromCloud('lessons', l.id));
+  deleteBatchDocsFromCloud('lessons', lessonsToDelete.map(l => l.id));
 
   // 4. Cascade: delete all exercises belonging to those lessons
   const allExercises = loadExercises();
@@ -961,7 +973,7 @@ export function deleteClassroomCascade(classroomId: string): {
   const exerciseIdsToDelete = new Set(exercisesToDelete.map(e => e.id));
   const remainingExercises = allExercises.filter(e => !lessonIdsToDelete.has(e.lessonId));
   saveExercises(remainingExercises);
-  exercisesToDelete.forEach(e => deleteDocFromCloud('exercises', e.id));
+  deleteBatchDocsFromCloud('exercises', exercisesToDelete.map(e => e.id));
 
   // 5. Cascade: delete all student accounts belonging to this class
   const allUsers = loadUsers();
@@ -969,7 +981,7 @@ export function deleteClassroomCascade(classroomId: string): {
   const deletedUserIds = new Set(usersToDelete.map(u => u.id));
   const remainingUsers = allUsers.filter(u => u.classroomId !== classroomId);
   saveUsers(remainingUsers);
-  usersToDelete.forEach(u => deleteDocFromCloud('users', u.id));
+  deleteBatchDocsFromCloud('users', usersToDelete.map(u => u.id));
 
   // 6. Cascade: delete all error logs belonging to: this classroom OR deleted students OR deleted exercises
   const allErrors = loadErrors();
@@ -981,7 +993,7 @@ export function deleteClassroomCascade(classroomId: string): {
   });
   const errorsToDelete = allErrors.filter(err => !remainingErrors.includes(err));
   saveErrors(remainingErrors);
-  errorsToDelete.forEach(e => deleteDocFromCloud('errors', e.id));
+  deleteBatchDocsFromCloud('errors', errorsToDelete.map(e => e.id));
 
   return {
     classrooms,
@@ -1008,19 +1020,19 @@ export function deleteTopicCascade(topicId: string): {
   const childLessonIds = new Set(childLessons.map(l => l.id));
   const remainingLessons = allLessons.filter(l => l.topicId !== topicId);
   saveLessons(remainingLessons);
-  childLessons.forEach(l => deleteDocFromCloud('lessons', l.id));
+  deleteBatchDocsFromCloud('lessons', childLessons.map(l => l.id));
 
   const allExercises = loadExercises();
   const exercisesToDelete = allExercises.filter(e => childLessonIds.has(e.lessonId));
   const exerciseIdsToDelete = new Set(exercisesToDelete.map(e => e.id));
   const remainingExercises = allExercises.filter(e => !childLessonIds.has(e.lessonId));
   saveExercises(remainingExercises);
-  exercisesToDelete.forEach(e => deleteDocFromCloud('exercises', e.id));
+  deleteBatchDocsFromCloud('exercises', exercisesToDelete.map(e => e.id));
 
   const remainingErrors = loadErrors().filter(e => !exerciseIdsToDelete.has(e.exerciseId));
   const errorsToDelete = loadErrors().filter(e => exerciseIdsToDelete.has(e.exerciseId));
   saveErrors(remainingErrors);
-  errorsToDelete.forEach(e => deleteDocFromCloud('errors', e.id));
+  deleteBatchDocsFromCloud('errors', errorsToDelete.map(e => e.id));
 
   return {
     topics,
@@ -1044,12 +1056,12 @@ export function deleteLessonCascade(lessonId: string): {
   const exerciseIdsToDelete = new Set(exercisesToDelete.map(e => e.id));
   const remainingExercises = allExercises.filter(e => e.lessonId !== lessonId);
   saveExercises(remainingExercises);
-  exercisesToDelete.forEach(e => deleteDocFromCloud('exercises', e.id));
+  deleteBatchDocsFromCloud('exercises', exercisesToDelete.map(e => e.id));
 
   const remainingErrors = loadErrors().filter(e => !exerciseIdsToDelete.has(e.exerciseId));
   const errorsToDelete = loadErrors().filter(e => exerciseIdsToDelete.has(e.exerciseId));
   saveErrors(remainingErrors);
-  errorsToDelete.forEach(e => deleteDocFromCloud('errors', e.id));
+  deleteBatchDocsFromCloud('errors', errorsToDelete.map(e => e.id));
 
   return {
     lessons,
@@ -1091,27 +1103,27 @@ export function bulkDeleteTopics(topicIds: string[]): {
   const allTopics = loadTopics();
   const topics = allTopics.filter(t => !topicIdSet.has(t.id));
   saveTopics(topics);
-  topicIds.forEach(id => deleteDocFromCloud('topics', id));
+  deleteBatchDocsFromCloud('topics', topicIds);
 
   const allLessons = loadLessons();
   const lessonsToDelete = allLessons.filter(l => topicIdSet.has(l.topicId));
   const lessonIdsToDelete = new Set(lessonsToDelete.map(l => l.id));
   const remainingLessons = allLessons.filter(l => !topicIdSet.has(l.topicId));
   saveLessons(remainingLessons);
-  lessonsToDelete.forEach(l => deleteDocFromCloud('lessons', l.id));
+  deleteBatchDocsFromCloud('lessons', lessonsToDelete.map(l => l.id));
 
   const allExercises = loadExercises();
   const exercisesToDelete = allExercises.filter(e => lessonIdsToDelete.has(e.lessonId));
   const exerciseIdsToDelete = new Set(exercisesToDelete.map(e => e.id));
   const remainingExercises = allExercises.filter(e => !lessonIdsToDelete.has(e.lessonId));
   saveExercises(remainingExercises);
-  exercisesToDelete.forEach(e => deleteDocFromCloud('exercises', e.id));
+  deleteBatchDocsFromCloud('exercises', exercisesToDelete.map(e => e.id));
 
   const allErrors = loadErrors();
   const remainingErrors = allErrors.filter(e => !exerciseIdsToDelete.has(e.exerciseId));
   const errorsToDelete = allErrors.filter(e => exerciseIdsToDelete.has(e.exerciseId));
   saveErrors(remainingErrors);
-  errorsToDelete.forEach(e => deleteDocFromCloud('errors', e.id));
+  deleteBatchDocsFromCloud('errors', errorsToDelete.map(e => e.id));
 
   return {
     topics,
@@ -1235,20 +1247,20 @@ export function bulkDeleteLessons(lessonIds: string[]): {
   const allLessons = loadLessons();
   const lessons = allLessons.filter(l => !lessonIdSet.has(l.id));
   saveLessons(lessons);
-  lessonIds.forEach(id => deleteDocFromCloud('lessons', id));
+  deleteBatchDocsFromCloud('lessons', lessonIds);
 
   const allExercises = loadExercises();
   const exercisesToDelete = allExercises.filter(e => lessonIdSet.has(e.lessonId));
   const exerciseIdsToDelete = new Set(exercisesToDelete.map(e => e.id));
   const remainingExercises = allExercises.filter(e => !lessonIdSet.has(e.lessonId));
   saveExercises(remainingExercises);
-  exercisesToDelete.forEach(e => deleteDocFromCloud('exercises', e.id));
+  deleteBatchDocsFromCloud('exercises', exercisesToDelete.map(e => e.id));
 
   const allErrors = loadErrors();
   const remainingErrors = allErrors.filter(e => !exerciseIdsToDelete.has(e.exerciseId));
   const errorsToDelete = allErrors.filter(e => exerciseIdsToDelete.has(e.exerciseId));
   saveErrors(remainingErrors);
-  errorsToDelete.forEach(e => deleteDocFromCloud('errors', e.id));
+  deleteBatchDocsFromCloud('errors', errorsToDelete.map(e => e.id));
 
   return {
     lessons,
@@ -1346,13 +1358,13 @@ export function bulkDeleteExercises(exerciseIds: string[]): {
   const allExercises = loadExercises();
   const exercises = allExercises.filter(e => !exerciseIdSet.has(e.id));
   saveExercises(exercises);
-  exerciseIds.forEach(id => deleteDocFromCloud('exercises', id));
+  deleteBatchDocsFromCloud('exercises', exerciseIds);
 
   const allErrors = loadErrors();
   const remainingErrors = allErrors.filter(e => !exerciseIdSet.has(e.exerciseId));
   const errorsToDelete = allErrors.filter(e => exerciseIdSet.has(e.exerciseId));
   saveErrors(remainingErrors);
-  errorsToDelete.forEach(e => deleteDocFromCloud('errors', e.id));
+  deleteBatchDocsFromCloud('errors', errorsToDelete.map(e => e.id));
 
   return {
     exercises,
@@ -1498,13 +1510,28 @@ export function importData(jsonString: string): { success: boolean; message?: st
     if (!data || typeof data !== 'object') {
       return { success: false, message: 'Dữ liệu JSON không đúng định dạng.', error: 'Dữ liệu JSON không đúng định dạng.' };
     }
-    if (Array.isArray(data.topics)) saveTopics(data.topics);
-    if (Array.isArray(data.lessons)) saveLessons(data.lessons);
-    if (Array.isArray(data.exercises)) saveExercises(data.exercises);
+    if (Array.isArray(data.topics)) {
+      saveTopics(data.topics);
+      syncBatchDocsToCloud('topics', data.topics);
+    }
+    if (Array.isArray(data.lessons)) {
+      saveLessons(data.lessons);
+      syncBatchDocsToCloud('lessons', data.lessons);
+    }
+    if (Array.isArray(data.exercises)) {
+      saveExercises(data.exercises);
+      syncBatchDocsToCloud('exercises', data.exercises);
+    }
     if (Array.isArray(data.errors)) saveErrors(data.errors);
     if (data.stats) saveStats(data.stats);
-    if (Array.isArray(data.users)) saveUsers(data.users);
-    if (Array.isArray(data.classrooms)) saveClassrooms(data.classrooms);
+    if (Array.isArray(data.users)) {
+      saveUsers(data.users);
+      syncBatchDocsToCloud('users', data.users);
+    }
+    if (Array.isArray(data.classrooms)) {
+      saveClassrooms(data.classrooms);
+      syncBatchDocsToCloud('classrooms', data.classrooms);
+    }
     if (data.settings) saveSettings(data.settings);
     return { success: true, message: 'Nhập dữ liệu thành công!' };
   } catch (e: any) {
@@ -1544,31 +1571,31 @@ export async function syncDatabaseWithCloud(onDataChanged?: () => void): Promise
     }
 
     if (cloudData.hasData) {
-      // Safely merge cloud with local data, preserving any newer local modifications (e.g. moved exercises)
-      if (cloudData.classrooms && cloudData.classrooms.length > 0) {
+      // Cloud is the source of truth for deletions while preserving newer local edits & in-flight writes
+      if (Array.isArray(cloudData.classrooms)) {
         const localClassrooms = loadClassrooms();
-        const { merged, itemsToSyncUp } = mergeCollectionsWithTimestamp(localClassrooms, cloudData.classrooms);
+        const { merged, itemsToSyncUp } = mergeCollectionsWithTimestamp(localClassrooms, cloudData.classrooms, 'classrooms');
         saveClassrooms(merged);
         if (itemsToSyncUp.length > 0) syncBatchDocsToCloud('classrooms', itemsToSyncUp);
       }
 
-      if (cloudData.topics && cloudData.topics.length > 0) {
+      if (Array.isArray(cloudData.topics)) {
         const localTopics = loadTopics();
-        const { merged, itemsToSyncUp } = mergeCollectionsWithTimestamp(localTopics, cloudData.topics);
+        const { merged, itemsToSyncUp } = mergeCollectionsWithTimestamp(localTopics, cloudData.topics, 'topics');
         saveTopics(merged);
         if (itemsToSyncUp.length > 0) syncBatchDocsToCloud('topics', itemsToSyncUp);
       }
 
-      if (cloudData.lessons && cloudData.lessons.length > 0) {
+      if (Array.isArray(cloudData.lessons)) {
         const localLessons = loadLessons();
-        const { merged, itemsToSyncUp } = mergeCollectionsWithTimestamp(localLessons, cloudData.lessons);
+        const { merged, itemsToSyncUp } = mergeCollectionsWithTimestamp(localLessons, cloudData.lessons, 'lessons');
         saveLessons(merged);
         if (itemsToSyncUp.length > 0) syncBatchDocsToCloud('lessons', itemsToSyncUp);
       }
 
-      if (cloudData.exercises && cloudData.exercises.length > 0) {
+      if (Array.isArray(cloudData.exercises)) {
         const localExercises = loadExercises();
-        const { merged, itemsToSyncUp } = mergeCollectionsWithTimestamp(localExercises, cloudData.exercises);
+        const { merged, itemsToSyncUp } = mergeCollectionsWithTimestamp(localExercises, cloudData.exercises, 'exercises');
         saveExercises(merged);
         if (itemsToSyncUp.length > 0) syncBatchDocsToCloud('exercises', itemsToSyncUp);
       }

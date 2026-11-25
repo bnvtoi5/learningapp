@@ -164,30 +164,30 @@ function MainApp() {
 
     // 4. Real-time live listener from Firestore across all devices and tabs
     const unsubscribe = subscribeToAllCollections((cloudData) => {
-      if (cloudData.classrooms && cloudData.classrooms.length > 0) {
+      if (cloudData.classrooms !== undefined) {
         setClassrooms(prev => {
-          const { merged } = mergeCollectionsWithTimestamp(prev, cloudData.classrooms!);
+          const { merged } = mergeCollectionsWithTimestamp(prev, cloudData.classrooms!, 'classrooms');
           localStorage.setItem('study_app_classrooms', JSON.stringify(merged));
           return merged;
         });
       }
-      if (cloudData.topics && cloudData.topics.length > 0) {
+      if (cloudData.topics !== undefined) {
         setTopics(prev => {
-          const { merged } = mergeCollectionsWithTimestamp(prev, cloudData.topics!);
+          const { merged } = mergeCollectionsWithTimestamp(prev, cloudData.topics!, 'topics');
           localStorage.setItem('study_app_topics', JSON.stringify(merged));
           return merged;
         });
       }
-      if (cloudData.lessons && cloudData.lessons.length > 0) {
+      if (cloudData.lessons !== undefined) {
         setLessons(prev => {
-          const { merged } = mergeCollectionsWithTimestamp(prev, cloudData.lessons!);
+          const { merged } = mergeCollectionsWithTimestamp(prev, cloudData.lessons!, 'lessons');
           localStorage.setItem('study_app_lessons', JSON.stringify(merged));
           return merged;
         });
       }
-      if (cloudData.exercises && cloudData.exercises.length > 0) {
+      if (cloudData.exercises !== undefined) {
         setExercises(prev => {
-          const { merged } = mergeCollectionsWithTimestamp(prev, cloudData.exercises!);
+          const { merged } = mergeCollectionsWithTimestamp(prev, cloudData.exercises!, 'exercises');
           localStorage.setItem('study_app_exercises', JSON.stringify(merged));
           return merged;
         });
