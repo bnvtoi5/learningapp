@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   FolderPlus, 
   Plus, 
@@ -28,7 +28,8 @@ import {
   GripVertical,
   Shuffle,
   Printer,
-  X
+  X,
+  Loader2
 } from 'lucide-react';
 import { 
   Topic, 
@@ -50,6 +51,7 @@ import { BulkContentModal, BulkActionType, BulkContentType } from './BulkContent
 import { loadClassrooms } from '../utils/storage';
 import { ClassroomCascadingFilter } from './ClassroomCascadingFilter';
 import { getClassroomsByName } from '../utils/classroomHelpers';
+import { subscribeToLessonExercises } from '../lib/firebase';
 
 interface ContentManagerProps {
   topics?: Topic[];
@@ -79,6 +81,11 @@ interface ContentManagerProps {
   onBulkDeleteExercises?: (exerciseIds: string[]) => void;
   onBulkMoveExercises?: (exerciseIds: string[], targetLessonId: string) => void;
   onBulkDuplicateExercises?: (exerciseIds: string[], targetLessonIds: string[]) => void;
+  // On-demand lazy loading handlers
+  loadedLessonIds?: Set<string>;
+  loadingLessonId?: string | null;
+  onLoadLessonExercises?: (lessonId: string) => Promise<Exercise[]>;
+  onLessonExercisesRealtime?: (lessonId: string, exercises: Exercise[]) => void;
 }
 
 const TYPE_NAMES: Record<string, string> = {
@@ -129,6 +136,10 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
   onBulkDeleteExercises,
   onBulkMoveExercises,
   onBulkDuplicateExercises,
+  loadedLessonIds,
+  loadingLessonId,
+  onLoadLessonExercises,
+  onLessonExercisesRealtime,
 }) => {
   const { getThemeClasses } = useTheme();
   const theme = getThemeClasses();
@@ -205,11 +216,37 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
     onConfirm: () => {},
   });
 
+  const PAGE_SIZE = 30;
+  const [visibleExerciseCount, setVisibleExerciseCount] = useState<number>(PAGE_SIZE);
+
+  // Precomputed count maps to avoid repeated O(N*M) filters during render
+  const lessonCountByTopic = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const l of lessons) {
+      map.set(l.topicId, (map.get(l.topicId) || 0) + 1);
+    }
+    return map;
+  }, [lessons]);
+
+  const exerciseCountByLesson = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const ex of exercises) {
+      map.set(ex.lessonId, (map.get(ex.lessonId) || 0) + 1);
+    }
+    return map;
+  }, [exercises]);
+
   // Calculate scoped statistics according to current 2-tier filter
   const filteredTopicIds = useMemo(() => new Set(filteredTopics.map(t => t.id)), [filteredTopics]);
   const scopedLessons = useMemo(() => lessons.filter(l => filteredTopicIds.has(l.topicId)), [lessons, filteredTopicIds]);
-  const scopedLessonIds = useMemo(() => new Set(scopedLessons.map(l => l.id)), [scopedLessons]);
-  const scopedExercises = useMemo(() => exercises.filter(e => scopedLessonIds.has(e.lessonId)), [exercises, scopedLessonIds]);
+  const scopedTotalExercises = useMemo(() => {
+    return scopedLessons.reduce((sum, l) => {
+      const loadedCount = exerciseCountByLesson.get(l.id) || 0;
+      if (loadedLessonIds?.has(l.id)) return sum + loadedCount;
+      if (typeof l.exerciseCount === 'number') return sum + l.exerciseCount;
+      return sum + loadedCount;
+    }, 0);
+  }, [scopedLessons, exerciseCountByLesson, loadedLessonIds]);
 
   const scopedClassCount = useMemo(() => {
     if (selectedClassFilter !== 'all') {
@@ -221,8 +258,8 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
     return classrooms.length;
   }, [classrooms, selectedClassName, selectedClassFilter]);
 
-  // Current active topic & its lessons, sorted by order
-  const activeTopic = filteredTopics.find(t => t.id === selectedTopicId) || filteredTopics[0] || null;
+  // Strict click-to-expand: never auto-select Topic #1 or Lesson #1 on open
+  const activeTopic = selectedTopicId ? (filteredTopics.find(t => t.id === selectedTopicId) || null) : null;
   const currentLessons = useMemo(() => {
     if (!activeTopic) return [];
     return lessons
@@ -230,8 +267,23 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   }, [lessons, activeTopic]);
   
-  // Set default active lesson if not set, sorted by order
-  const activeLesson = currentLessons.find(l => l.id === selectedLessonId) || currentLessons[0] || null;
+  const activeLesson = selectedLessonId ? (currentLessons.find(l => l.id === selectedLessonId) || null) : null;
+
+  // On-demand load + scoped real-time listener ONLY for the explicitly clicked lesson
+  useEffect(() => {
+    if (!activeLesson?.id) return;
+    onLoadLessonExercises?.(activeLesson.id);
+    const unsub = subscribeToLessonExercises(activeLesson.id, (cloudItems) => {
+      onLessonExercisesRealtime?.(activeLesson.id, cloudItems);
+    });
+    return () => unsub();
+  }, [activeLesson?.id, onLoadLessonExercises, onLessonExercisesRealtime]);
+
+  // Reset pagination whenever switching lessons or typing a search query
+  useEffect(() => {
+    setVisibleExerciseCount(PAGE_SIZE);
+  }, [activeLesson?.id, searchQuery]);
+
   const currentExercises = useMemo(() => {
     if (!activeLesson) return [];
     return exercises
@@ -247,16 +299,16 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
   }, [exercises, activeLesson]);
 
   // Filtered exercises by search
-  const filteredExercises = currentExercises.filter(ex => {
-    if (!searchQuery.trim()) return true;
+  const filteredExercises = useMemo(() => {
+    if (!searchQuery.trim()) return currentExercises;
     const q = searchQuery.toLowerCase();
-    return (
+    return currentExercises.filter(ex =>
       ex.question.toLowerCase().includes(q) ||
       (ex.vocabWord && ex.vocabWord.toLowerCase().includes(q)) ||
       (ex.vocabMeaning && ex.vocabMeaning.toLowerCase().includes(q)) ||
       (ex.correctText && ex.correctText.toLowerCase().includes(q))
     );
-  });
+  }, [currentExercises, searchQuery]);
 
   // Visibility Toggles
   const handleToggleTopicVisibility = (topic: Topic, e?: React.MouseEvent) => {
@@ -537,7 +589,7 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
         </div>
         <div className={`p-3 rounded-xl ${theme.card} border ${theme.border} text-center`}>
           <span className={`text-[11px] ${theme.textMuted} block`}>Tổng câu hỏi</span>
-          <span className="text-lg font-bold text-amber-500">{scopedExercises.length}</span>
+          <span className="text-lg font-bold text-amber-500">{scopedTotalExercises}</span>
         </div>
       </div>
 
@@ -604,7 +656,7 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                   const isSelected = activeTopic?.id === topic.id;
                   const isChecked = selectedTopicIds.includes(topic.id);
                   const isDragOver = dragOverTopicId === topic.id;
-                  const topicLessons = lessons.filter(l => l.topicId === topic.id);
+                  const topicLessonCount = lessonCountByTopic.get(topic.id) || 0;
                   const topicClass = classrooms.find(c => c.id === topic.classroomId);
                   return (
                     <div
@@ -628,8 +680,9 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                       }`}
                       onClick={() => {
                         setSelectedTopicId(topic.id);
-                        const firstL = lessons.find(l => l.topicId === topic.id);
-                        setSelectedLessonId(firstL?.id || null);
+                        setSelectedLessonId(null);
+                        setSelectedExerciseIds([]);
+                        setVisibleExerciseCount(PAGE_SIZE);
                       }}
                     >
                       {/* Drag Handle & Checkbox */}
@@ -672,7 +725,7 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                           {topic.title}
                         </span>
                         <span className={`text-[10px] ${theme.textMuted} block`}>
-                          {topic.subject} • {topicLessons.length} bài
+                          {topic.subject} • {topicLessonCount} bài
                         </span>
                       </div>
 
@@ -779,18 +832,22 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                 </div>
               </div>
 
-              {currentLessons.length === 0 ? (
+              {!activeTopic ? (
+                <div className="text-center py-5">
+                  <p className={`text-xs ${theme.textMuted}`}>
+                    Bấm chọn một <strong>Chủ đề</strong> ở trên để mở danh sách bài học.
+                  </p>
+                </div>
+              ) : currentLessons.length === 0 ? (
                 <div className="text-center py-4">
                   <p className={`text-xs ${theme.textMuted} mb-2`}>Chủ đề này chưa có bài học.</p>
-                  {activeTopic && (
-                    <button
-                      onClick={() => setIsCreatingLesson(true)}
-                      className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-medium inline-flex items-center gap-1 cursor-pointer"
-                    >
-                      <Plus className="w-3 h-3" />
-                      <span>Tạo bài học ngay</span>
-                    </button>
-                  )}
+                  <button
+                    onClick={() => setIsCreatingLesson(true)}
+                    className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-medium inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>Tạo bài học ngay</span>
+                  </button>
                 </div>
               ) : (
                 <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
@@ -798,7 +855,9 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                     const isSelected = activeLesson?.id === lesson.id;
                     const isChecked = selectedLessonIds.includes(lesson.id);
                     const isDragOver = dragOverLessonId === lesson.id;
-                    const lessonExs = exercises.filter(e => e.lessonId === lesson.id);
+                    const loadedExCount = exerciseCountByLesson.get(lesson.id) || 0;
+                    const isLessonLoaded = loadedLessonIds?.has(lesson.id) ?? false;
+                    const isThisLessonLoading = loadingLessonId === lesson.id;
                     return (
                       <div
                         key={lesson.id}
@@ -819,7 +878,11 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                               ? 'border-sky-500/60 bg-sky-500/5 text-sky-500 font-semibold' 
                               : `${theme.border} ${theme.highlight}`
                         }`}
-                        onClick={() => setSelectedLessonId(lesson.id)}
+                        onClick={() => {
+                          setSelectedLessonId(lesson.id);
+                          setSelectedExerciseIds([]);
+                          setVisibleExerciseCount(PAGE_SIZE);
+                        }}
                       >
                         {/* Drag Handle & Checkbox */}
                         <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
@@ -861,7 +924,15 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                             {lesson.title}
                           </span>
                           <span className={`text-[10px] ${theme.textMuted} block`}>
-                            {lessonExs.length} câu hỏi
+                            {isThisLessonLoading
+                              ? 'Đang tải câu hỏi...'
+                              : isLessonLoaded
+                                ? `${loadedExCount} câu hỏi`
+                                : typeof lesson.exerciseCount === 'number'
+                                  ? `${lesson.exerciseCount} câu hỏi`
+                                  : loadedExCount > 0
+                                    ? `${loadedExCount} câu hỏi`
+                                    : 'Bấm để tải câu hỏi'}
                           </span>
                         </div>
 
@@ -941,7 +1012,9 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                     </h3>
                     {activeLesson && (
                       <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-sky-500/10 text-sky-500 shrink-0">
-                        {currentExercises.length} câu hỏi
+                        {loadingLessonId === activeLesson.id && currentExercises.length === 0
+                          ? 'Đang tải...'
+                          : `${currentExercises.length} câu hỏi`}
                       </span>
                     )}
                   </div>
@@ -1064,8 +1137,20 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
 
               {/* Exercise Items List */}
               {!activeLesson ? (
-                <div className="text-center py-8">
-                  <p className={`text-xs ${theme.textMuted}`}>Vui lòng chọn bài học ở cột bên trái.</p>
+                <div className="text-center py-10 space-y-1.5">
+                  <Layers className="w-8 h-8 mx-auto text-sky-500 opacity-50" />
+                  <p className="text-xs font-semibold">Chưa chọn bài học</p>
+                  <p className={`text-[11px] ${theme.textMuted} max-w-xs mx-auto`}>
+                    Bấm chọn một <strong>Chủ đề</strong> rồi chọn <strong>Bài học</strong> ở cột bên trái để tải và hiển thị câu hỏi.
+                  </p>
+                </div>
+              ) : loadingLessonId === activeLesson.id && currentExercises.length === 0 ? (
+                <div className="text-center py-10 space-y-2.5">
+                  <Loader2 className="w-7 h-7 mx-auto text-sky-500 animate-spin" />
+                  <p className="text-xs font-semibold">Đang tải câu hỏi của bài học...</p>
+                  <p className={`text-[11px] ${theme.textMuted}`}>
+                    Chỉ tải dữ liệu của đúng bài học bạn đang mở để tránh lag.
+                  </p>
                 </div>
               ) : currentExercises.length === 0 ? (
                 <div className="text-center py-8 space-y-3">
@@ -1084,7 +1169,7 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                 </div>
               ) : (
                 <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
-                  {filteredExercises.map((ex, idx) => {
+                  {filteredExercises.slice(0, visibleExerciseCount).map((ex, idx) => {
                     const typeLabel = TYPE_NAMES[ex.type] || ex.type;
                     const isExChecked = selectedExerciseIds.includes(ex.id);
                     const isDragOver = dragOverExerciseId === ex.id;
@@ -1286,6 +1371,30 @@ export const ContentManager: React.FC<ContentManagerProps> = ({
                       </div>
                     );
                   })}
+
+                  {filteredExercises.length > visibleExerciseCount && (
+                    <div className={`p-3 rounded-xl border ${theme.border} ${theme.highlight} flex flex-wrap items-center justify-between gap-2`}>
+                      <span className={`text-[11px] ${theme.textMuted}`}>
+                        Đang hiển thị <strong>{Math.min(visibleExerciseCount, filteredExercises.length)}/{filteredExercises.length}</strong> câu hỏi để tránh lag trình duyệt
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setVisibleExerciseCount(prev => prev + PAGE_SIZE)}
+                          className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold cursor-pointer"
+                        >
+                          Tải thêm {Math.min(PAGE_SIZE, filteredExercises.length - visibleExerciseCount)} câu
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setVisibleExerciseCount(filteredExercises.length)}
+                          className={`px-3 py-1.5 rounded-lg border ${theme.border} text-xs font-semibold hover:border-sky-500 cursor-pointer`}
+                        >
+                          Hiện tất cả
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

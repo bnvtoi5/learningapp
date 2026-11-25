@@ -27,6 +27,7 @@ import {
   syncDocToCloud,
   deleteDocFromCloud,
   deleteBatchDocsFromCloud,
+  deleteExercisesByLessonIdsFromCloud,
   syncBatchDocsToCloud,
   syncAllToCloud,
   fetchAllFromCloud,
@@ -144,22 +145,36 @@ export function saveLessons(lessons: Lesson[]) {
   localStorage.setItem(STORAGE_KEYS.LESSONS, JSON.stringify(lessons || []));
 }
 
+let memoryExercisesCache: Exercise[] | null = null;
+
 export function loadExercises(): Exercise[] {
+  if (memoryExercisesCache !== null) {
+    return memoryExercisesCache;
+  }
   const item = localStorage.getItem(STORAGE_KEYS.EXERCISES);
   if (item === null) {
-    saveExercises(initialExercises);
-    return initialExercises;
+    memoryExercisesCache = [];
+    return [];
   }
   try {
     const parsed = JSON.parse(item);
-    return Array.isArray(parsed) ? parsed : [];
+    memoryExercisesCache = Array.isArray(parsed) ? parsed : [];
+    return memoryExercisesCache;
   } catch {
+    memoryExercisesCache = [];
     return [];
   }
 }
 
 export function saveExercises(exercises: Exercise[]) {
-  localStorage.setItem(STORAGE_KEYS.EXERCISES, JSON.stringify(exercises || []));
+  const safeList = exercises || [];
+  memoryExercisesCache = safeList;
+  try {
+    localStorage.setItem(STORAGE_KEYS.EXERCISES, JSON.stringify(safeList));
+  } catch (err) {
+    // Gracefully handle localStorage 5MB quota exceeded by keeping exercises in RAM
+    console.warn('localStorage quota reached while caching exercises; keeping active data in memory:', err);
+  }
 }
 
 export function loadErrors(): ErrorLog[] {
@@ -571,6 +586,103 @@ export function mergeCollectionsWithTimestamp<T extends { id: string; updatedAt?
   };
 }
 
+/**
+ * Merge on-demand Cloud exercises strictly for a single lesson without touching other lessons.
+ */
+export function mergeLessonExercises(
+  lessonId: string,
+  cloudLessonExercises: Exercise[]
+): { allExercises: Exercise[]; lessonExercises: Exercise[] } {
+  const currentAll = loadExercises();
+  const otherExercises = currentAll.filter(e => e.lessonId !== lessonId);
+  const localForLesson = currentAll.filter(e => e.lessonId === lessonId);
+
+  const { merged, itemsToSyncUp } = mergeCollectionsWithTimestamp(
+    localForLesson,
+    cloudLessonExercises,
+    'exercises'
+  );
+
+  if (itemsToSyncUp.length > 0) {
+    syncBatchDocsToCloud('exercises', itemsToSyncUp);
+  }
+
+  const allExercises = [...otherExercises, ...merged];
+  saveExercises(allExercises);
+  return { allExercises, lessonExercises: merged };
+}
+
+/**
+ * Merge on-demand Cloud exercises for a specific group of lessons (e.g. a topic or a student's class).
+ */
+export function mergeLessonGroupExercises(
+  lessonIds: string[],
+  cloudExercises: Exercise[]
+): Exercise[] {
+  const idSet = new Set(lessonIds);
+  const currentAll = loadExercises();
+  const otherExercises = currentAll.filter(e => !idSet.has(e.lessonId));
+  const localInGroup = currentAll.filter(e => idSet.has(e.lessonId));
+
+  const { merged, itemsToSyncUp } = mergeCollectionsWithTimestamp(
+    localInGroup,
+    cloudExercises,
+    'exercises'
+  );
+
+  if (itemsToSyncUp.length > 0) {
+    syncBatchDocsToCloud('exercises', itemsToSyncUp);
+  }
+
+  const allExercises = [...otherExercises, ...merged];
+  saveExercises(allExercises);
+  return allExercises;
+}
+
+/**
+ * Merge individually fetched exercises (e.g. by skill or error IDs) into cache without removing other lessons.
+ */
+export function mergeFetchedExercises(fetchedExercises: Exercise[]): Exercise[] {
+  if (!fetchedExercises || fetchedExercises.length === 0) return loadExercises();
+  const currentAll = loadExercises();
+  const map = new Map<string, Exercise>(currentAll.map(e => [e.id, e]));
+  for (const ex of fetchedExercises) {
+    if (isPendingCloudDelete('exercises', ex.id)) continue;
+    const existing = map.get(ex.id);
+    if (!existing || (ex.updatedAt || 0) >= (existing.updatedAt || 0)) {
+      map.set(ex.id, ex);
+    }
+  }
+  const combined = Array.from(map.values());
+  saveExercises(combined);
+  return combined;
+}
+
+/**
+ * Update lightweight exerciseCount metadata on a Lesson so counts show immediately
+ * without needing to download all exercises on app startup.
+ */
+export function syncLessonExerciseCount(
+  lessonId: string,
+  count: number,
+  pushToCloud = false
+): Lesson[] | null {
+  const lessons = loadLessons();
+  const target = lessons.find(l => l.id === lessonId);
+  if (!target || target.exerciseCount === count) return null;
+  const updatedLesson: Lesson = {
+    ...target,
+    exerciseCount: count,
+    updatedAt: pushToCloud ? Date.now() : target.updatedAt,
+  };
+  const next = lessons.map(l => (l.id === lessonId ? updatedLesson : l));
+  saveLessons(next);
+  if (pushToCloud) {
+    syncDocToCloud('lessons', updatedLesson.id, updatedLesson);
+  }
+  return next;
+}
+
 export function updateTopic(updatedTopic: Topic): Topic[] {
   const withTime: Topic = { ...updatedTopic, updatedAt: Date.now() };
   const topics = loadTopics();
@@ -774,7 +886,19 @@ export function getClassroomOverviewStats(
   const classTopicIds = new Set(classTopics.map(t => t.id));
   const classLessons = lessons.filter(l => classTopicIds.has(l.topicId));
   const classLessonIds = new Set(classLessons.map(l => l.id));
-  const classExercises = exercises.filter(e => classLessonIds.has(e.lessonId));
+  const loadedCountByLesson = new Map<string, number>();
+  exercises.forEach(e => {
+    if (classLessonIds.has(e.lessonId)) {
+      loadedCountByLesson.set(e.lessonId, (loadedCountByLesson.get(e.lessonId) || 0) + 1);
+    }
+  });
+  const totalClassExercises = classLessons.reduce((sum, l) => {
+    const loadedCount = loadedCountByLesson.get(l.id) || 0;
+    if (typeof l.exerciseCount === 'number') {
+      return sum + Math.max(loadedCount, l.exerciseCount);
+    }
+    return sum + loadedCount;
+  }, 0);
 
   const classErrors = errors.filter(e => {
     if (e.classroomId === classroomId) return true;
@@ -800,7 +924,7 @@ export function getClassroomOverviewStats(
     totalStudents: classStudents.length,
     totalTopics: classTopics.length,
     totalLessons: classLessons.length,
-    totalExercises: classExercises.length,
+    totalExercises: totalClassExercises,
     totalCompleted,
     totalCorrect,
     accuracyRate,
@@ -967,13 +1091,14 @@ export function deleteClassroomCascade(classroomId: string): {
   saveLessons(remainingLessons);
   deleteBatchDocsFromCloud('lessons', lessonsToDelete.map(l => l.id));
 
-  // 4. Cascade: delete all exercises belonging to those lessons
+  // 4. Cascade: delete all exercises belonging to those lessons (both cached and on Cloud)
   const allExercises = loadExercises();
   const exercisesToDelete = allExercises.filter(e => lessonIdsToDelete.has(e.lessonId));
   const exerciseIdsToDelete = new Set(exercisesToDelete.map(e => e.id));
   const remainingExercises = allExercises.filter(e => !lessonIdsToDelete.has(e.lessonId));
   saveExercises(remainingExercises);
   deleteBatchDocsFromCloud('exercises', exercisesToDelete.map(e => e.id));
+  deleteExercisesByLessonIdsFromCloud(Array.from(lessonIdsToDelete));
 
   // 5. Cascade: delete all student accounts belonging to this class
   const allUsers = loadUsers();
@@ -1028,6 +1153,7 @@ export function deleteTopicCascade(topicId: string): {
   const remainingExercises = allExercises.filter(e => !childLessonIds.has(e.lessonId));
   saveExercises(remainingExercises);
   deleteBatchDocsFromCloud('exercises', exercisesToDelete.map(e => e.id));
+  deleteExercisesByLessonIdsFromCloud(Array.from(childLessonIds));
 
   const remainingErrors = loadErrors().filter(e => !exerciseIdsToDelete.has(e.exerciseId));
   const errorsToDelete = loadErrors().filter(e => exerciseIdsToDelete.has(e.exerciseId));
@@ -1057,6 +1183,7 @@ export function deleteLessonCascade(lessonId: string): {
   const remainingExercises = allExercises.filter(e => e.lessonId !== lessonId);
   saveExercises(remainingExercises);
   deleteBatchDocsFromCloud('exercises', exercisesToDelete.map(e => e.id));
+  deleteExercisesByLessonIdsFromCloud([lessonId]);
 
   const remainingErrors = loadErrors().filter(e => !exerciseIdsToDelete.has(e.exerciseId));
   const errorsToDelete = loadErrors().filter(e => exerciseIdsToDelete.has(e.exerciseId));
@@ -1118,6 +1245,7 @@ export function bulkDeleteTopics(topicIds: string[]): {
   const remainingExercises = allExercises.filter(e => !lessonIdsToDelete.has(e.lessonId));
   saveExercises(remainingExercises);
   deleteBatchDocsFromCloud('exercises', exercisesToDelete.map(e => e.id));
+  deleteExercisesByLessonIdsFromCloud(Array.from(lessonIdsToDelete));
 
   const allErrors = loadErrors();
   const remainingErrors = allErrors.filter(e => !exerciseIdsToDelete.has(e.exerciseId));
@@ -1255,6 +1383,7 @@ export function bulkDeleteLessons(lessonIds: string[]): {
   const remainingExercises = allExercises.filter(e => !lessonIdSet.has(e.lessonId));
   saveExercises(remainingExercises);
   deleteBatchDocsFromCloud('exercises', exercisesToDelete.map(e => e.id));
+  deleteExercisesByLessonIdsFromCloud(lessonIds);
 
   const allErrors = loadErrors();
   const remainingErrors = allErrors.filter(e => !exerciseIdsToDelete.has(e.exerciseId));
@@ -1439,6 +1568,7 @@ export function bulkDuplicateExercises(
 
 export async function clearAllDatabase(clearCloud = false) {
   // Clear all structured storage items
+  memoryExercisesCache = null;
   localStorage.removeItem(STORAGE_KEYS.TOPICS);
   localStorage.removeItem(STORAGE_KEYS.LESSONS);
   localStorage.removeItem(STORAGE_KEYS.EXERCISES);

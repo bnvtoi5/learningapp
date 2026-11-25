@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { 
   Topic, 
@@ -39,6 +39,10 @@ import {
   reorderLessons,
   reorderExercises,
   mergeCollectionsWithTimestamp,
+  mergeLessonExercises,
+  mergeLessonGroupExercises,
+  mergeFetchedExercises,
+  syncLessonExerciseCount,
   loadErrors, 
   saveErrors, 
   loadStats, 
@@ -71,7 +75,14 @@ import {
   checkAndMigrateCleanDatabase,
   syncDocToCloud,
 } from './utils/storage';
-import { subscribeToAllCollections } from './lib/firebase';
+import { 
+  subscribeToAllCollections,
+  fetchExercisesByLessonFromCloud,
+  fetchExercisesByLessonIdsFromCloud,
+  fetchExercisesByIdsFromCloud,
+  fetchExercisesBySkillFromCloud,
+  fetchAllExercisesFromCloud,
+} from './lib/firebase';
 
 import { Navbar } from './components/Navbar';
 import { Dashboard } from './components/Dashboard';
@@ -112,6 +123,13 @@ function MainApp() {
   // Active Practice State
   const [activePracticeExercises, setActivePracticeExercises] = useState<Exercise[] | null>(null);
   const [practiceTitle, setPracticeTitle] = useState('Phiên luyện tập');
+  const [isLoadingPractice, setIsLoadingPractice] = useState(false);
+
+  // On-demand per-lesson exercise loading state
+  const [loadedLessonIds, setLoadedLessonIds] = useState<Set<string>>(() => new Set());
+  const loadedLessonIdsRef = useRef<Set<string>>(new Set());
+  const inFlightLessonFetchesRef = useRef<Map<string, Promise<Exercise[]>>>(new Map());
+  const [loadingLessonId, setLoadingLessonId] = useState<string | null>(null);
 
   // Selected Topic for browsing
   const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
@@ -142,6 +160,82 @@ function MainApp() {
     setUsers(loadUsers());
     setClassrooms(loadClassrooms());
   };
+
+  const syncCountForLesson = useCallback((lessonId: string, allExs: Exercise[]) => {
+    if (!lessonId) return;
+    const count = allExs.filter(e => e.lessonId === lessonId).length;
+    const isAdminUser = getCurrentUser()?.role === 'admin';
+    const updatedLessons = syncLessonExerciseCount(lessonId, count, isAdminUser);
+    if (updatedLessons) {
+      setLessons(updatedLessons);
+    }
+  }, []);
+
+  // Load exercises strictly for 1 lesson on-demand from Cloud Firestore
+  const ensureLessonExercisesLoaded = useCallback(async (lessonId: string, forceRefresh = false): Promise<Exercise[]> => {
+    if (!lessonId) return loadExercises();
+    if (!forceRefresh && loadedLessonIdsRef.current.has(lessonId)) {
+      return loadExercises();
+    }
+    const existingPromise = inFlightLessonFetchesRef.current.get(lessonId);
+    if (existingPromise) {
+      return existingPromise;
+    }
+
+    const fetchPromise = (async () => {
+      setLoadingLessonId(lessonId);
+      try {
+        const cloudExs = await fetchExercisesByLessonFromCloud(lessonId);
+        if (cloudExs !== null) {
+          const { allExercises } = mergeLessonExercises(lessonId, cloudExs);
+          setExercises(allExercises);
+          const nextLoaded = new Set(loadedLessonIdsRef.current);
+          nextLoaded.add(lessonId);
+          loadedLessonIdsRef.current = nextLoaded;
+          setLoadedLessonIds(nextLoaded);
+          syncCountForLesson(lessonId, allExercises);
+          return allExercises;
+        }
+        return loadExercises();
+      } finally {
+        inFlightLessonFetchesRef.current.delete(lessonId);
+        setLoadingLessonId(prev => (prev === lessonId ? null : prev));
+      }
+    })();
+
+    inFlightLessonFetchesRef.current.set(lessonId, fetchPromise);
+    return fetchPromise;
+  }, [syncCountForLesson]);
+
+  // Apply scoped real-time snapshot update for a single actively-opened lesson
+  const handleLessonExercisesRealtime = useCallback((lessonId: string, cloudLessonExercises: Exercise[]) => {
+    const { allExercises } = mergeLessonExercises(lessonId, cloudLessonExercises);
+    setExercises(allExercises);
+    if (!loadedLessonIdsRef.current.has(lessonId)) {
+      const nextLoaded = new Set(loadedLessonIdsRef.current);
+      nextLoaded.add(lessonId);
+      loadedLessonIdsRef.current = nextLoaded;
+      setLoadedLessonIds(nextLoaded);
+    }
+    syncCountForLesson(lessonId, allExercises);
+  }, [syncCountForLesson]);
+
+  // Load exercises on-demand for a specific list of lessons (e.g. duplicate topic or student class quick practice)
+  const ensureLessonsExercisesLoaded = useCallback(async (lessonIds: string[]): Promise<Exercise[]> => {
+    const missing = Array.from(new Set(lessonIds.filter(id => id && !loadedLessonIdsRef.current.has(id))));
+    if (missing.length === 0) return loadExercises();
+    const fetched = await fetchExercisesByLessonIdsFromCloud(missing);
+    if (fetched !== null) {
+      const allExercises = mergeLessonGroupExercises(missing, fetched);
+      setExercises(allExercises);
+      const nextLoaded = new Set(loadedLessonIdsRef.current);
+      missing.forEach(id => nextLoaded.add(id));
+      loadedLessonIdsRef.current = nextLoaded;
+      setLoadedLessonIds(nextLoaded);
+      return allExercises;
+    }
+    return loadExercises();
+  }, []);
 
   useEffect(() => {
     setStats(loadStats(currentUser?.id));
@@ -384,8 +478,8 @@ function MainApp() {
   const lastLessonId = getLastActiveLessonId();
   const lastActiveLesson = lessons.find(l => l.id === lastLessonId) || null;
 
-  // Handler: Start practice (supports single question testing)
-  const handleStartPractice = (
+  // Handler: Start practice (supports single question testing & on-demand per-lesson fetching)
+  const handleStartPractice = async (
     lessonId?: string, 
     isQuick?: boolean, 
     isErrorReview?: boolean, 
@@ -393,7 +487,7 @@ function MainApp() {
   ) => {
     // Check student permission
     if (currentUser?.role === 'student' && currentUser.permissions?.canPractice === false) {
-      alert('Giáo viên tạm thời khóa phần luyện tập bài tập của bạn.');
+      showToast('Giáo viên tạm thời khóa phần luyện tập bài tập của bạn.', 'error');
       return;
     }
 
@@ -410,9 +504,58 @@ function MainApp() {
     const studentLessonIds = isStudent && studentTopicIds
       ? new Set(lessons.filter(l => studentTopicIds.has(l.topicId) && !l.isHidden).map(l => l.id))
       : null;
+
+    setIsLoadingPractice(true);
+    let workingExercises = exercises;
+    try {
+      if (lessonId) {
+        // Fetch ONLY this single clicked lesson's exercises from Firestore
+        workingExercises = await ensureLessonExercisesLoaded(lessonId);
+      } else if (isErrorReview) {
+        const studentErrors = isStudent
+          ? errors.filter(e => 
+              !e.resolved && 
+              (e.userId === currentUser?.id || (
+                e.studentName && (
+                  e.studentName.toLowerCase() === currentUser?.fullName.toLowerCase() || 
+                  e.studentName.toLowerCase() === currentUser?.username.toLowerCase()
+                )
+              )) &&
+              (!e.classroomId || e.classroomId === currentUser?.classroomId)
+            )
+          : errors.filter(e => !e.resolved);
+        const neededIds = studentErrors.map(e => e.exerciseId).filter(Boolean);
+        const missingIds = neededIds.filter(id => !workingExercises.some(ex => ex.id === id));
+        if (missingIds.length > 0) {
+          const fetched = await fetchExercisesByIdsFromCloud(missingIds);
+          if (fetched && fetched.length > 0) {
+            workingExercises = mergeFetchedExercises(fetched);
+            setExercises(workingExercises);
+          }
+        }
+      } else {
+        if (isStudent && studentLessonIds) {
+          workingExercises = await ensureLessonsExercisesLoaded(Array.from(studentLessonIds));
+        } else {
+          const allCloud = await fetchAllExercisesFromCloud();
+          if (allCloud !== null) {
+            const allLessonIds = lessons.map(l => l.id);
+            workingExercises = mergeLessonGroupExercises(allLessonIds, allCloud);
+            setExercises(workingExercises);
+            const nextLoaded = new Set(loadedLessonIdsRef.current);
+            allLessonIds.forEach(id => nextLoaded.add(id));
+            loadedLessonIdsRef.current = nextLoaded;
+            setLoadedLessonIds(nextLoaded);
+          }
+        }
+      }
+    } finally {
+      setIsLoadingPractice(false);
+    }
+
     const studentClassExercises = isStudent && studentLessonIds
-      ? exercises.filter(e => studentLessonIds.has(e.lessonId) && !e.isHidden)
-      : isStudent ? exercises.filter(e => !e.isHidden) : exercises;
+      ? workingExercises.filter(e => studentLessonIds.has(e.lessonId) && !e.isHidden)
+      : isStudent ? workingExercises.filter(e => !e.isHidden) : workingExercises;
     const studentExerciseIds = new Set(studentClassExercises.map(e => e.id));
 
     let targetExercises: Exercise[] = [];
@@ -431,10 +574,10 @@ function MainApp() {
           )
         : errors.filter(e => !e.resolved);
       const unresolvedErrorIds = studentErrors.map(e => e.exerciseId);
-      targetExercises = (isStudent ? studentClassExercises : exercises).filter(e => unresolvedErrorIds.includes(e.id));
+      targetExercises = (isStudent ? studentClassExercises : workingExercises).filter(e => unresolvedErrorIds.includes(e.id));
       setPracticeTitle('Ôn tập câu làm sai');
     } else if (lessonId) {
-      targetExercises = exercises.filter(e => e.lessonId === lessonId && (isStudent ? !e.isHidden : true));
+      targetExercises = workingExercises.filter(e => e.lessonId === lessonId && (isStudent ? !e.isHidden : true));
       const targetLesson = lessons.find(l => l.id === lessonId);
       setPracticeTitle(targetLesson ? `Luyện tập: ${targetLesson.title}` : 'Phiên luyện tập');
       setLastActiveLessonId(lessonId);
@@ -472,9 +615,9 @@ function MainApp() {
     }
 
     if (targetExercises.length === 0) {
-      alert(isStudent 
-        ? 'Chưa có câu hỏi nào trong lớp học của bạn. Vui lòng liên hệ Thầy/Cô để được giao bài!' 
-        : 'Chưa có câu hỏi nào trong mục này. Vui lòng thêm câu hỏi mới!');
+      showToast(isStudent 
+        ? 'Chưa có câu hỏi nào trong bài học này. Vui lòng liên hệ Thầy/Cô!' 
+        : 'Chưa có câu hỏi nào trong mục này. Vui lòng thêm câu hỏi mới!', 'info');
       return;
     }
 
@@ -552,17 +695,31 @@ function MainApp() {
   const handleSaveExercise = (exercise: Exercise) => {
     const updated = updateExercise(exercise);
     setExercises(updated);
+    if (loadedLessonIdsRef.current.has(exercise.lessonId)) {
+      syncCountForLesson(exercise.lessonId, updated);
+    }
   };
 
   const handleUpdateExercise = (exercise: Exercise) => {
+    const prevEx = exercises.find(e => e.id === exercise.id);
     const updated = updateExercise(exercise);
     setExercises(updated);
+    if (loadedLessonIdsRef.current.has(exercise.lessonId)) {
+      syncCountForLesson(exercise.lessonId, updated);
+    }
+    if (prevEx && prevEx.lessonId !== exercise.lessonId && loadedLessonIdsRef.current.has(prevEx.lessonId)) {
+      syncCountForLesson(prevEx.lessonId, updated);
+    }
   };
 
   const handleDeleteExercise = (exerciseId: string) => {
+    const prevEx = exercises.find(e => e.id === exerciseId);
     const result = deleteExerciseCascade(exerciseId);
     setExercises(result.exercises);
     setErrors(result.errors);
+    if (prevEx && loadedLessonIdsRef.current.has(prevEx.lessonId)) {
+      syncCountForLesson(prevEx.lessonId, result.exercises);
+    }
   };
 
   // Bulk Content Handlers
@@ -572,7 +729,11 @@ function MainApp() {
     showToast(`Đã chuyển thành công ${topicIds.length} chủ đề sang lớp học mới!`, 'success');
   };
 
-  const handleBulkDuplicateTopics = (topicIds: string[], targetClassroomIds: string[]) => {
+  const handleBulkDuplicateTopics = async (topicIds: string[], targetClassroomIds: string[]) => {
+    // Ensure exercises of all lessons inside duplicated topics are loaded before cloning
+    const topicIdSet = new Set(topicIds);
+    const childLessonIds = lessons.filter(l => topicIdSet.has(l.topicId)).map(l => l.id);
+    await ensureLessonsExercisesLoaded(childLessonIds);
     const result = bulkDuplicateTopics(topicIds, targetClassroomIds);
     setTopics(result.topics);
     setLessons(result.lessons);
@@ -595,7 +756,9 @@ function MainApp() {
     showToast(`Đã chuyển thành công ${lessonIds.length} bài học sang chủ đề mới!`, 'success');
   };
 
-  const handleBulkDuplicateLessons = (lessonIds: string[], targetTopicIds: string[]) => {
+  const handleBulkDuplicateLessons = async (lessonIds: string[], targetTopicIds: string[]) => {
+    // Ensure exercises of all duplicated lessons are loaded before cloning
+    await ensureLessonsExercisesLoaded(lessonIds);
     const result = bulkDuplicateLessons(lessonIds, targetTopicIds);
     setLessons(result.lessons);
     setExercises(result.exercises);
@@ -610,22 +773,47 @@ function MainApp() {
     showToast(`Đã xóa thành công ${lessonIds.length} bài học và câu hỏi liên quan!`, 'info');
   };
 
-  const handleBulkMoveExercises = (exerciseIds: string[], targetLessonId: string) => {
+  const handleBulkMoveExercises = async (exerciseIds: string[], targetLessonId: string) => {
+    const affectedLessonIds = new Set<string>([targetLessonId]);
+    exercises.forEach(e => {
+      if (exerciseIds.includes(e.id)) affectedLessonIds.add(e.lessonId);
+    });
+    await ensureLessonExercisesLoaded(targetLessonId);
     const result = bulkMoveExercises(exerciseIds, targetLessonId);
     setExercises(result);
+    affectedLessonIds.forEach(lid => {
+      if (loadedLessonIdsRef.current.has(lid)) {
+        syncCountForLesson(lid, result);
+      }
+    });
     showToast(`Đã chuyển thành công ${exerciseIds.length} câu hỏi sang bài học mới!`, 'success');
   };
 
-  const handleBulkDuplicateExercises = (exerciseIds: string[], targetLessonIds: string[]) => {
+  const handleBulkDuplicateExercises = async (exerciseIds: string[], targetLessonIds: string[]) => {
+    await ensureLessonsExercisesLoaded(targetLessonIds);
     const result = bulkDuplicateExercises(exerciseIds, targetLessonIds);
     setExercises(result);
+    targetLessonIds.forEach(lid => {
+      if (loadedLessonIdsRef.current.has(lid)) {
+        syncCountForLesson(lid, result);
+      }
+    });
     showToast(`Đã sao chép ${exerciseIds.length} câu hỏi sang ${targetLessonIds.length} bài học!`, 'success');
   };
 
   const handleBulkDeleteExercises = (exerciseIds: string[]) => {
+    const affectedLessonIds = new Set<string>();
+    exercises.forEach(e => {
+      if (exerciseIds.includes(e.id)) affectedLessonIds.add(e.lessonId);
+    });
     const result = bulkDeleteExercises(exerciseIds);
     setExercises(result.exercises);
     setErrors(result.errors);
+    affectedLessonIds.forEach(lid => {
+      if (loadedLessonIdsRef.current.has(lid)) {
+        syncCountForLesson(lid, result.exercises);
+      }
+    });
     showToast(`Đã xóa thành công ${exerciseIds.length} câu hỏi!`, 'info');
   };
 
@@ -677,7 +865,7 @@ function MainApp() {
     setErrors(loadErrors());
   };
 
-  const handleStartReviewSession = (targetIds?: string[]) => {
+  const handleStartReviewSession = async (targetIds?: string[]) => {
     let targetExs: Exercise[] = [];
     const isStudent = currentUser?.role === 'student';
     const studentTopicIds = isStudent 
@@ -686,23 +874,15 @@ function MainApp() {
     const studentLessonIds = isStudent && studentTopicIds
       ? new Set(lessons.filter(l => studentTopicIds.has(l.topicId)).map(l => l.id))
       : null;
-    const studentClassExercises = isStudent && studentLessonIds
-      ? exercises.filter(e => studentLessonIds.has(e.lessonId))
-      : exercises;
-    const studentExerciseIds = new Set(studentClassExercises.map(e => e.id));
 
+    // Resolve exercise IDs we need from errors/targetIds and fetch ONLY those missing ones
+    const neededExerciseIds = new Set<string>();
     if (targetIds && targetIds.length > 0) {
-      const resolvedExerciseIds = new Set<string>();
       targetIds.forEach(id => {
-        if (exercises.some(e => e.id === id)) {
-          resolvedExerciseIds.add(id);
-        }
+        neededExerciseIds.add(id);
         const err = errors.find(e => e.id === id || e.exerciseId === id);
-        if (err) {
-          resolvedExerciseIds.add(err.exerciseId);
-        }
+        if (err) neededExerciseIds.add(err.exerciseId);
       });
-      targetExs = (isStudent ? studentClassExercises : exercises).filter(e => resolvedExerciseIds.has(e.id));
     } else {
       const studentErrors = isStudent
         ? errors.filter(e => 
@@ -713,11 +893,61 @@ function MainApp() {
                 e.studentName.toLowerCase() === currentUser.username.toLowerCase()
               )
             )) &&
-            (e.classroomId ? e.classroomId === currentUser.classroomId : studentExerciseIds.has(e.exerciseId))
+            (!e.classroomId || e.classroomId === currentUser?.classroomId)
+          )
+        : errors.filter(e => !e.resolved);
+      studentErrors.forEach(e => {
+        if (e.exerciseId) neededExerciseIds.add(e.exerciseId);
+      });
+    }
+
+    let workingExercises = exercises;
+    const missingIds = Array.from(neededExerciseIds).filter(id => !workingExercises.some(ex => ex.id === id));
+    if (missingIds.length > 0) {
+      setIsLoadingPractice(true);
+      try {
+        const fetched = await fetchExercisesByIdsFromCloud(missingIds);
+        if (fetched && fetched.length > 0) {
+          workingExercises = mergeFetchedExercises(fetched);
+          setExercises(workingExercises);
+        }
+      } finally {
+        setIsLoadingPractice(false);
+      }
+    }
+
+    const studentClassExercises = isStudent && studentLessonIds
+      ? workingExercises.filter(e => studentLessonIds.has(e.lessonId))
+      : workingExercises;
+    const studentExerciseIds = new Set(studentClassExercises.map(e => e.id));
+
+    if (targetIds && targetIds.length > 0) {
+      const resolvedExerciseIds = new Set<string>();
+      targetIds.forEach(id => {
+        if (workingExercises.some(e => e.id === id)) {
+          resolvedExerciseIds.add(id);
+        }
+        const err = errors.find(e => e.id === id || e.exerciseId === id);
+        if (err) {
+          resolvedExerciseIds.add(err.exerciseId);
+        }
+      });
+      targetExs = (isStudent ? studentClassExercises : workingExercises).filter(e => resolvedExerciseIds.has(e.id));
+    } else {
+      const studentErrors = isStudent
+        ? errors.filter(e => 
+            !e.resolved && 
+            (e.userId === currentUser.id || (
+              e.studentName && (
+                e.studentName.toLowerCase() === currentUser.fullName.toLowerCase() || 
+                e.studentName.toLowerCase() === currentUser.username.toLowerCase()
+              )
+            )) &&
+            (e.classroomId ? e.classroomId === currentUser?.classroomId : studentExerciseIds.has(e.exerciseId))
           )
         : errors.filter(e => !e.resolved);
       const activeIds = studentErrors.map(e => e.exerciseId);
-      targetExs = (isStudent ? studentClassExercises : exercises).filter(e => activeIds.includes(e.id));
+      targetExs = (isStudent ? studentClassExercises : workingExercises).filter(e => activeIds.includes(e.id));
     }
 
     // Fallback: If exercises were not in catalog, reconstruct cleanly from error log
@@ -738,7 +968,7 @@ function MainApp() {
     }
 
     if (targetExs.length === 0) {
-      alert('Không tìm thấy bài tập tương ứng trong kho dữ liệu.');
+      showToast('Không tìm thấy bài tập tương ứng trong kho dữ liệu.', 'info');
       return;
     }
 
@@ -746,20 +976,32 @@ function MainApp() {
     setPracticeTitle('Luyện tập sửa lỗi sai');
   };
 
-  const handleStartSkillPractice = (skill: SkillCategory, targetClassroomId?: string) => {
+  const handleStartSkillPractice = async (skill: SkillCategory, targetClassroomId?: string) => {
     const classId = currentUser?.role === 'student' ? currentUser?.classroomId : targetClassroomId;
+    setIsLoadingPractice(true);
+    let workingExercises = exercises;
+    try {
+      const fetched = await fetchExercisesBySkillFromCloud(skill);
+      if (fetched && fetched.length > 0) {
+        workingExercises = mergeFetchedExercises(fetched);
+        setExercises(workingExercises);
+      }
+    } finally {
+      setIsLoadingPractice(false);
+    }
+
     let skillExs: Exercise[] = [];
 
     if (classId) {
       const classTopicIds = new Set(topics.filter(t => t.classroomId === classId).map(t => t.id));
       const classLessonIds = new Set(lessons.filter(l => classTopicIds.has(l.topicId)).map(l => l.id));
-      skillExs = exercises.filter(e => e.skill === skill && classLessonIds.has(e.lessonId));
+      skillExs = workingExercises.filter(e => e.skill === skill && classLessonIds.has(e.lessonId));
     } else {
-      skillExs = exercises.filter(e => e.skill === skill);
+      skillExs = workingExercises.filter(e => e.skill === skill);
     }
 
     if (skillExs.length === 0) {
-      alert(`Chưa có câu hỏi nào thuộc kỹ năng ${skill} trong lớp học này. Bạn có thể tạo thêm ở mục Soạn bài!`);
+      showToast(`Chưa có câu hỏi nào thuộc kỹ năng ${skill} trong lớp học này. Bạn có thể tạo thêm ở mục Soạn bài!`, 'info');
       return;
     }
     setActivePracticeExercises(skillExs);
@@ -872,6 +1114,8 @@ function MainApp() {
                 topics={topics}
                 lessons={lessons}
                 exercises={exercises}
+                loadedLessonIds={loadedLessonIds}
+                onLoadLessonExercises={ensureLessonExercisesLoaded}
                 selectedTopicId={selectedTopicId}
                 onSelectTopic={setSelectedTopicId}
                 onStartPractice={handleStartPractice}
@@ -915,6 +1159,10 @@ function MainApp() {
                 topics={topics}
                 lessons={lessons}
                 exercises={exercises}
+                loadedLessonIds={loadedLessonIds}
+                loadingLessonId={loadingLessonId}
+                onLoadLessonExercises={ensureLessonExercisesLoaded}
+                onLessonExercisesRealtime={handleLessonExercisesRealtime}
                 classrooms={classrooms}
                 onNavigateToClassManager={() => setCurrentTab('admin')}
                 onStartPractice={handleStartPractice}
@@ -1012,6 +1260,7 @@ function MainApp() {
                 classrooms={classrooms}
                 onNavigateToClassManager={() => setCurrentTab('admin')}
                 initialContext={builderContext}
+                onLoadLessonExercises={ensureLessonExercisesLoaded}
                 onSaveTopic={handleSaveTopic}
                 onSaveLesson={handleSaveLesson}
                 onSaveExercise={handleSaveExercise}
@@ -1019,6 +1268,16 @@ function MainApp() {
               />
             )}
           </main>
+
+          {/* Subtle On-Demand Practice Loader Overlay */}
+          {isLoadingPractice && (
+            <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center">
+              <div className={`${theme.card} border ${theme.border} px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3`}>
+                <div className="w-5 h-5 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin" />
+                <span className="text-sm font-semibold">Đang tải câu hỏi bài học...</span>
+              </div>
+            </div>
+          )}
 
           {/* Floating Study Mascot Companion (powered by page-mascot with AI Chatbot) */}
           <FloatingMascot 

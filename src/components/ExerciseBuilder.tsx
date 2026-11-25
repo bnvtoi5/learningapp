@@ -76,6 +76,7 @@ interface ExerciseBuilderProps {
   onSaveLesson: (lesson: Lesson) => void;
   onSaveExercise: (exercise: Exercise) => void;
   onFinished: () => void;
+  onLoadLessonExercises?: (lessonId: string) => Promise<Exercise[]>;
 }
 
 const EXERCISE_TYPES: { type: ExerciseType; label: string; desc: string }[] = [
@@ -109,6 +110,7 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
   onSaveLesson,
   onSaveExercise,
   onFinished,
+  onLoadLessonExercises,
 }) => {
   const { getThemeClasses, getTypographyClasses } = useTheme();
   const theme = getThemeClasses();
@@ -347,6 +349,13 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
       }
     }
   }, [initialContext]);
+
+  // On-demand load exercises for ONLY the selected target lesson so order numbers stay accurate
+  useEffect(() => {
+    if (targetLessonId) {
+      onLoadLessonExercises?.(targetLessonId);
+    }
+  }, [targetLessonId, onLoadLessonExercises]);
 
   // Reset exercise state when switching types
   const handleTypeChange = (newType: ExerciseType) => {

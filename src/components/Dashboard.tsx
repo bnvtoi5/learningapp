@@ -134,7 +134,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         e.studentName.toLowerCase() === currentUser?.username.toLowerCase()
       ))
     ) && (
-      e.classroomId ? e.classroomId === currentUser?.classroomId : studentExerciseIds.has(e.exerciseId)
+      e.classroomId ? e.classroomId === currentUser?.classroomId : (exercises.length === 0 || studentExerciseIds.has(e.exerciseId))
     )
   );
 
@@ -433,7 +433,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {adminClassTopics.map(topic => {
                       const topicLessons = lessons.filter(l => l.topicId === topic.id);
-                      const topicExercises = exercises.filter(e => topicLessons.some(l => l.id === e.lessonId));
+                      const knownExCount = topicLessons.reduce((sum, l) => {
+                        const loaded = exercises.filter(e => e.lessonId === l.id).length;
+                        if (loaded > 0) return sum + loaded;
+                        return sum + (typeof l.exerciseCount === 'number' ? l.exerciseCount : 0);
+                      }, 0);
 
                       return (
                         <div
@@ -453,7 +457,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             </div>
                             <h4 className="font-semibold text-sm line-clamp-1">{topic.title}</h4>
                             <p className={`text-[11px] ${theme.textMuted}`}>
-                              {topicLessons.length} bài • {topicExercises.length} câu hỏi
+                              {topicLessons.length} bài{knownExCount > 0 ? ` • ${knownExCount} câu hỏi` : ''}
                             </p>
                           </div>
                           <ChevronRight className={`w-4 h-4 ${theme.textMuted}`} />
@@ -520,7 +524,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 {canPractice ? (
                   <button
                     id="btn-quick-practice"
-                    disabled={studentExercises.length === 0}
+                    disabled={studentLessons.length === 0}
                     onClick={() => onStartPractice(undefined, true)}
                     className={`px-4 py-2.5 rounded-xl font-medium text-sm flex items-center justify-center gap-2 border ${theme.border} ${theme.highlight} transition-transform active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer`}
                   >
@@ -633,7 +637,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {studentTopics.slice(0, 6).map(topic => {
                   const topicLessons = lessons.filter(l => l.topicId === topic.id && !l.isHidden);
-                  const topicExercises = exercises.filter(e => !e.isHidden && topicLessons.some(l => l.id === e.lessonId));
+                  const knownExCount = topicLessons.reduce((sum, l) => {
+                    const loaded = exercises.filter(e => !e.isHidden && e.lessonId === l.id).length;
+                    if (loaded > 0) return sum + loaded;
+                    return sum + (typeof l.exerciseCount === 'number' ? l.exerciseCount : 0);
+                  }, 0);
 
                   return (
                     <div
@@ -651,7 +659,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         </span>
                         <h4 className="font-semibold text-sm line-clamp-1">{topic.title}</h4>
                         <p className={`text-[11px] ${theme.textMuted}`}>
-                          {topicLessons.length} bài • {topicExercises.length} câu hỏi
+                          {topicLessons.length} bài{knownExCount > 0 ? ` • ${knownExCount} câu hỏi` : ''}
                         </p>
                       </div>
                       <ChevronRight className={`w-4 h-4 ${theme.textMuted}`} />

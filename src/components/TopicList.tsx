@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   BookOpen, 
   Plus, 
@@ -48,6 +48,8 @@ interface TopicListProps {
   currentUser?: User | null;
   classrooms?: Classroom[];
   onNavigateToClassManager?: () => void;
+  loadedLessonIds?: Set<string>;
+  onLoadLessonExercises?: (lessonId: string) => Promise<Exercise[]>;
 }
 
 const LESSON_STAGES = [
@@ -74,6 +76,8 @@ export const TopicList: React.FC<TopicListProps> = ({
   currentUser,
   classrooms = [],
   onNavigateToClassManager,
+  loadedLessonIds,
+  onLoadLessonExercises: _onLoadLessonExercises,
 }) => {
   const { getThemeClasses, getTypographyClasses } = useTheme();
   const theme = getThemeClasses();
@@ -146,6 +150,26 @@ export const TopicList: React.FC<TopicListProps> = ({
     : [];
 
   const studentClass = classrooms.find(c => c.id === currentUser?.classroomId);
+
+  const lessonsByTopic = useMemo(() => {
+    const map = new Map<string, Lesson[]>();
+    for (const l of lessons) {
+      if (!isAdmin && l.isHidden) continue;
+      const list = map.get(l.topicId);
+      if (list) list.push(l);
+      else map.set(l.topicId, [l]);
+    }
+    return map;
+  }, [lessons, isAdmin]);
+
+  const exerciseCountByLesson = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const e of exercises) {
+      if (!isAdmin && e.isHidden) continue;
+      map.set(e.lessonId, (map.get(e.lessonId) || 0) + 1);
+    }
+    return map;
+  }, [exercises, isAdmin]);
 
   return (
     <div className="space-y-5 pb-20 md:pb-8">
@@ -344,8 +368,13 @@ export const TopicList: React.FC<TopicListProps> = ({
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {filteredTopics.map(topic => {
-                const topicLessons = lessons.filter(l => l.topicId === topic.id);
-                const topicExercises = exercises.filter(e => topicLessons.some(l => l.id === e.lessonId));
+                const topicLessons = lessonsByTopic.get(topic.id) || [];
+                const knownTopicExCount = topicLessons.reduce((sum, l) => {
+                  const loaded = exerciseCountByLesson.get(l.id) || 0;
+                  if (loadedLessonIds?.has(l.id)) return sum + loaded;
+                  if (typeof l.exerciseCount === 'number') return sum + l.exerciseCount;
+                  return sum + loaded;
+                }, 0);
                 const topicClass = classrooms.find(c => c.id === topic.classroomId);
 
                 return (
@@ -425,7 +454,7 @@ export const TopicList: React.FC<TopicListProps> = ({
 
                     <div className="mt-4 pt-3 border-t border-inherit flex items-center justify-between">
                       <span className={`text-xs ${theme.textMuted}`}>
-                        {topicLessons.length} bài học • {topicExercises.length} câu hỏi
+                        {topicLessons.length} bài học{knownTopicExCount > 0 ? ` • ${knownTopicExCount} câu hỏi` : ''}
                       </span>
                       <button
                         id={`btn-open-topic-${topic.id}`}
@@ -533,7 +562,15 @@ export const TopicList: React.FC<TopicListProps> = ({
           ) : (
             <div className="space-y-2.5">
               {currentLessons.map((lesson, idx) => {
-                const lessonExercises = exercises.filter(e => e.lessonId === lesson.id && (isAdmin ? true : !e.isHidden));
+                const loadedCount = exerciseCountByLesson.get(lesson.id) || 0;
+                const isLessonLoaded = loadedLessonIds?.has(lesson.id) ?? false;
+                const knownCount = isLessonLoaded
+                  ? loadedCount
+                  : typeof lesson.exerciseCount === 'number'
+                    ? lesson.exerciseCount
+                    : loadedCount > 0
+                      ? loadedCount
+                      : null;
                 const canPractice = isAdmin || (perms?.canPractice !== false);
                 const canViewTheory = isAdmin || (perms?.canViewTheory !== false);
 
@@ -565,7 +602,7 @@ export const TopicList: React.FC<TopicListProps> = ({
                           )}
                         </div>
                         <span className={`text-[11px] ${theme.textMuted} block`}>
-                          {lessonExercises.length} câu hỏi luyện tập
+                          {knownCount !== null ? `${knownCount} câu hỏi luyện tập` : 'Bấm "Luyện bài" để tải câu hỏi'}
                         </span>
                       </div>
                     </div>
@@ -677,7 +714,7 @@ export const TopicList: React.FC<TopicListProps> = ({
                       {canPractice ? (
                         <button
                           id={`btn-start-practice-lesson-${lesson.id}`}
-                          disabled={lessonExercises.length === 0}
+                          disabled={knownCount === 0}
                           onClick={() => onStartPractice(lesson.id)}
                           className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs flex items-center gap-1 disabled:opacity-40 cursor-pointer shrink-0"
                           title="Bắt đầu luyện tập bài này"

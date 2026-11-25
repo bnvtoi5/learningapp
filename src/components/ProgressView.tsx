@@ -153,7 +153,7 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
       );
       if (!isThisUser) return false;
       if (e.classroomId) return e.classroomId === effectiveClassId;
-      return scopedExerciseIds.has(e.exerciseId);
+      return exercises.length === 0 || scopedExerciseIds.has(e.exerciseId);
     }
   });
 
@@ -500,14 +500,14 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
                   </span>
                   <button
                     id={`btn-practice-skill-${item.key}`}
-                    disabled={skillExercises.length === 0}
+                    disabled={scopedLessons.length === 0}
                     onClick={() => onStartSkillPractice(item.key, effectiveClassId)}
                     className={`px-2.5 py-1 rounded-lg text-xs font-medium text-white disabled:opacity-40 flex items-center gap-1 cursor-pointer ${
                       item.key === 'mixed' ? 'bg-amber-600 hover:bg-amber-500' : 'bg-emerald-600 hover:bg-emerald-500'
                     }`}
                   >
                     <RotateCcw className="w-3 h-3" />
-                    <span>Luyện {item.key === 'mixed' ? 'Mixed' : 'kỹ năng'} ({skillExercises.length})</span>
+                    <span>Luyện {item.key === 'mixed' ? 'Mixed' : 'kỹ năng'}{skillExercises.length > 0 ? ` (${skillExercises.length})` : ''}</span>
                   </button>
                 </div>
               </div>

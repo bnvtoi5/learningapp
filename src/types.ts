@@ -245,6 +245,7 @@ export interface Lesson {
   order: number;
   isHidden?: boolean; // Trạng thái ẩn đối với học sinh
   shuffleExercises?: boolean; // Xáo trộn ngẫu nhiên thứ tự câu hỏi khi phát cho học sinh (Mặc định: false - giữ nguyên thứ tự thiết kế)
+  exerciseCount?: number; // Số câu hỏi được lưu nhẹ trên metadata bài học để hiển thị không cần tải toàn bộ câu hỏi
   updatedAt?: number;
 }
 

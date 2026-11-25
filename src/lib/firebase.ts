@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, doc, getDocFromServer, collection, getDocs, setDoc, deleteDoc, writeBatch, onSnapshot } from 'firebase/firestore';
+import { getFirestore, doc, getDocFromServer, collection, getDocs, setDoc, deleteDoc, writeBatch, onSnapshot, query, where, documentId } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import defaultConfig from '../../firebase-applet-config.json';
 import { 
@@ -87,13 +87,13 @@ export async function testFirestoreConnection(): Promise<boolean> {
 
 export async function fetchAllFromCloud() {
   try {
+    // Only load lightweight metadata collections on boot (NO full exercises download!)
+    // Exercises are fetched strictly on-demand per lesson when clicked.
     const [
       classroomsSnap, 
       topicsSnap, 
       lessonsSnap, 
-      exercisesSnap, 
       usersSnap, 
-      errorsSnap, 
       mediaSnap,
       mediaFoldersSnap,
       userSettingsSnap,
@@ -101,9 +101,7 @@ export async function fetchAllFromCloud() {
       getDocs(collection(db, 'classrooms')),
       getDocs(collection(db, 'topics')),
       getDocs(collection(db, 'lessons')),
-      getDocs(collection(db, 'exercises')),
       getDocs(collection(db, 'users')),
-      getDocs(collection(db, 'errors')),
       getDocs(collection(db, 'media')),
       getDocs(collection(db, 'media_folders')),
       getDocs(collection(db, 'user_settings')),
@@ -112,9 +110,7 @@ export async function fetchAllFromCloud() {
     const classrooms = classroomsSnap.docs.map(d => d.data() as Classroom);
     const topics = topicsSnap.docs.map(d => d.data() as Topic);
     const lessons = lessonsSnap.docs.map(d => d.data() as Lesson);
-    const exercises = exercisesSnap.docs.map(d => d.data() as Exercise);
     let users = usersSnap.docs.map(d => d.data() as User);
-    const errors = errorsSnap.docs.map(d => d.data() as ErrorLog);
     const media = mediaSnap.docs.map(d => d.data() as MediaAsset);
     const mediaFolders = mediaFoldersSnap.docs.map(d => d.data());
     
@@ -144,13 +140,13 @@ export async function fetchAllFromCloud() {
     }
 
     return {
-      hasData: classrooms.length > 0 || topics.length > 0 || lessons.length > 0 || exercises.length > 0 || users.length > 0 || media.length > 0,
+      hasData: classrooms.length > 0 || topics.length > 0 || lessons.length > 0 || users.length > 0 || media.length > 0,
       classrooms,
       topics,
       lessons,
-      exercises,
+      exercises: undefined as Exercise[] | undefined,
       users,
-      errors,
+      errors: [] as ErrorLog[],
       media,
       mediaFolders,
       userSettingsMap,
@@ -159,6 +155,120 @@ export async function fetchAllFromCloud() {
     handleFirestoreError(err, OperationType.GET, 'all_collections');
     return null;
   }
+}
+
+// -------------------------------------------------------------
+// On-Demand Exercise Queries (Load strictly what the user clicks)
+// -------------------------------------------------------------
+
+export async function fetchExercisesByLessonFromCloud(lessonId: string): Promise<Exercise[] | null> {
+  if (!lessonId) return [];
+  try {
+    const q = query(collection(db, 'exercises'), where('lessonId', '==', lessonId));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => d.data() as Exercise);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.LIST, `exercises?lessonId=${lessonId}`);
+    return null;
+  }
+}
+
+export async function fetchExercisesByLessonIdsFromCloud(lessonIds: string[]): Promise<Exercise[] | null> {
+  const uniqueIds = Array.from(new Set(lessonIds.filter(Boolean)));
+  if (uniqueIds.length === 0) return [];
+  try {
+    const results: Exercise[] = [];
+    // Firestore 'in' queries support up to 30 items per batch
+    const CHUNK_SIZE = 30;
+    for (let i = 0; i < uniqueIds.length; i += CHUNK_SIZE) {
+      const chunk = uniqueIds.slice(i, i + CHUNK_SIZE);
+      const q = query(collection(db, 'exercises'), where('lessonId', 'in', chunk));
+      const snap = await getDocs(q);
+      snap.docs.forEach(d => results.push(d.data() as Exercise));
+    }
+    return results;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.LIST, 'exercises_by_lessons');
+    return null;
+  }
+}
+
+export async function fetchExercisesByIdsFromCloud(exerciseIds: string[]): Promise<Exercise[] | null> {
+  const uniqueIds = Array.from(new Set(exerciseIds.filter(Boolean)));
+  if (uniqueIds.length === 0) return [];
+  try {
+    const results: Exercise[] = [];
+    const CHUNK_SIZE = 30;
+    for (let i = 0; i < uniqueIds.length; i += CHUNK_SIZE) {
+      const chunk = uniqueIds.slice(i, i + CHUNK_SIZE);
+      const q = query(collection(db, 'exercises'), where(documentId(), 'in', chunk));
+      const snap = await getDocs(q);
+      snap.docs.forEach(d => results.push(d.data() as Exercise));
+    }
+    return results;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.LIST, 'exercises_by_ids');
+    return null;
+  }
+}
+
+export async function fetchExercisesBySkillFromCloud(skill: string): Promise<Exercise[] | null> {
+  if (!skill) return [];
+  try {
+    const q = query(collection(db, 'exercises'), where('skill', '==', skill));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => d.data() as Exercise);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.LIST, `exercises?skill=${skill}`);
+    return null;
+  }
+}
+
+export async function fetchAllExercisesFromCloud(): Promise<Exercise[] | null> {
+  try {
+    const snap = await getDocs(collection(db, 'exercises'));
+    return snap.docs.map(d => d.data() as Exercise);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.LIST, 'exercises');
+    return null;
+  }
+}
+
+export async function deleteExercisesByLessonIdsFromCloud(lessonIds: string[]): Promise<void> {
+  const uniqueIds = Array.from(new Set(lessonIds.filter(Boolean)));
+  if (uniqueIds.length === 0) return;
+  try {
+    const idsToDelete: string[] = [];
+    const CHUNK_SIZE = 30;
+    for (let i = 0; i < uniqueIds.length; i += CHUNK_SIZE) {
+      const chunk = uniqueIds.slice(i, i + CHUNK_SIZE);
+      const q = query(collection(db, 'exercises'), where('lessonId', 'in', chunk));
+      const snap = await getDocs(q);
+      snap.docs.forEach(d => idsToDelete.push(d.id));
+    }
+    if (idsToDelete.length > 0) {
+      await deleteBatchDocsFromCloud('exercises', idsToDelete);
+    }
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, 'exercises_by_lessons');
+  }
+}
+
+export function subscribeToLessonExercises(
+  lessonId: string,
+  onUpdate: (exercises: Exercise[]) => void
+): () => void {
+  if (!lessonId) return () => {};
+  const q = query(collection(db, 'exercises'), where('lessonId', '==', lessonId));
+  return onSnapshot(
+    q,
+    snap => {
+      if (snap.empty && snap.metadata.fromCache) return;
+      const items = snap.docs.map(d => d.data() as Exercise);
+      onUpdate(items);
+    },
+    err => console.warn(`Lesson exercises real-time listener error (${lessonId}):`, err)
+  );
 }
 
 // In-memory trackers for in-flight writes & deletes in the current browser session.
@@ -406,7 +516,7 @@ export function subscribeToAllCollections(onUpdate: (data: {
         classrooms: loaded.classrooms ? state.classrooms : undefined,
         topics: loaded.topics ? state.topics : undefined,
         lessons: loaded.lessons ? state.lessons : undefined,
-        exercises: loaded.exercises ? state.exercises : undefined,
+        exercises: undefined,
         users: loaded.users ? mergedUsers : undefined,
         errors: state.errors,
         media: loaded.media ? state.media : undefined,
@@ -436,12 +546,9 @@ export function subscribeToAllCollections(onUpdate: (data: {
     notify();
   }, err => console.warn('Lessons real-time listener error:', err));
 
-  const unsubExercises = onSnapshot(collection(db, 'exercises'), snap => {
-    if (snap.empty && snap.metadata.fromCache) return;
-    state.exercises = snap.docs.map(d => d.data() as Exercise);
-    loaded.exercises = true;
-    notify();
-  }, err => console.warn('Exercises real-time listener error:', err));
+  // Exercises are NO LONGER subscribed globally to prevent downloading thousands of docs at boot.
+  // Use subscribeToLessonExercises(lessonId) when the user explicitly opens a lesson.
+  const unsubExercises = () => {};
 
   const unsubUsers = onSnapshot(collection(db, 'users'), snap => {
     if (snap.empty && snap.metadata.fromCache) return;

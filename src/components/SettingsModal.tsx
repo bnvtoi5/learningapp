@@ -30,8 +30,8 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { ThemeMode, FontSize, LineSpacing, VoiceGenderPreference, User, MascotType } from '../types';
-import { exportAllData, importData, clearAllDatabase, syncDatabaseWithCloud, loadUsers, loadClassrooms, loadTopics, loadLessons, loadExercises, loadErrors, loadMediaAssets } from '../utils/storage';
-import { syncAllToCloud } from '../lib/firebase';
+import { exportAllData, importData, clearAllDatabase, syncDatabaseWithCloud, loadUsers, loadClassrooms, loadTopics, loadLessons, loadExercises, loadErrors, loadMediaAssets, mergeFetchedExercises } from '../utils/storage';
+import { syncAllToCloud, fetchAllExercisesFromCloud } from '../lib/firebase';
 import { speakText, getAvailableSpeechVoices, isActualMaleVoice, isActualFemaleVoice } from '../utils/audio';
 import { ConfirmModal } from './ConfirmModal';
 import { MASCOT_LIST } from '../utils/mascotSprites';
@@ -191,15 +191,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  const handleExport = () => {
-    const dataStr = exportAllData();
-    const blob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `so-tay-hoc-tap-backup-${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const handleExport = async () => {
+    setIsSyncingCloud(true);
+    try {
+      const cloudExercises = await fetchAllExercisesFromCloud();
+      if (cloudExercises) {
+        mergeFetchedExercises(cloudExercises);
+      }
+      const dataStr = exportAllData();
+      const blob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `so-tay-hoc-tap-backup-${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setIsSyncingCloud(false);
+    }
   };
 
   const handleImport = () => {
