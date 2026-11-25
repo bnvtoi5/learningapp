@@ -226,13 +226,21 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
   }, [classrooms, targetClassName, targetClassroomId]);
 
   // Lesson Form
-  const [targetTopicId, setTargetTopicId] = useState<string>(topics?.[0]?.id || '');
+  const [targetTopicId, setTargetTopicId] = useState<string>(
+    initialContext?.type === 'lesson' && initialContext.targetId
+      ? initialContext.targetId
+      : topics?.[0]?.id || ''
+  );
   const [lessonTitle, setLessonTitle] = useState('');
   const [lessonDesc, setLessonDesc] = useState('');
   const [lessonKnowledge, setLessonKnowledge] = useState('');
 
   // Exercise Form
-  const [targetLessonId, setTargetLessonId] = useState<string>(lessons?.[0]?.id || '');
+  const [targetLessonId, setTargetLessonId] = useState<string>(
+    initialContext?.type === 'exercise' && initialContext.targetId
+      ? initialContext.targetId
+      : lessons?.[0]?.id || ''
+  );
   const [exType, setExType] = useState<ExerciseType>('vocab_cloze');
   const [exSkill, setExSkill] = useState<SkillCategory>('vocabulary');
   const [exDifficulty, setExDifficulty] = useState<DifficultyLevel>('guided');
@@ -2292,7 +2300,8 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
         lessons={lessons}
         selectedLessonId={targetLessonId}
         onExercisesCreated={(newExercises) => {
-          const currentLessonExercises = loadExercises().filter(e => e.lessonId === targetLessonId);
+          const destLessonId = newExercises[0]?.lessonId || targetLessonId;
+          const currentLessonExercises = loadExercises().filter(e => e.lessonId === destLessonId);
           const maxOrder = currentLessonExercises.reduce((max, e) => Math.max(max, e.order ?? 0), currentLessonExercises.length);
           newExercises.forEach((ex, idx) => onSaveExercise({ ...ex, order: maxOrder + idx + 1 }));
           setStatusBanner({
@@ -2310,7 +2319,8 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
         lessons={lessons}
         selectedLessonId={targetLessonId}
         onExercisesCreated={(newExercises) => {
-          const currentLessonExercises = loadExercises().filter(e => e.lessonId === targetLessonId);
+          const destLessonId = newExercises[0]?.lessonId || targetLessonId;
+          const currentLessonExercises = loadExercises().filter(e => e.lessonId === destLessonId);
           const maxOrder = currentLessonExercises.reduce((max, e) => Math.max(max, e.order ?? 0), currentLessonExercises.length);
           newExercises.forEach((ex, idx) => onSaveExercise({ ...ex, order: maxOrder + idx + 1 }));
           setStatusBanner({
@@ -2328,7 +2338,8 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
         lessons={lessons}
         selectedLessonId={targetLessonId}
         onExercisesCreated={(newExercises) => {
-          const currentLessonExercises = loadExercises().filter(e => e.lessonId === targetLessonId);
+          const destLessonId = newExercises[0]?.lessonId || targetLessonId;
+          const currentLessonExercises = loadExercises().filter(e => e.lessonId === destLessonId);
           const maxOrder = currentLessonExercises.reduce((max, e) => Math.max(max, e.order ?? 0), currentLessonExercises.length);
           newExercises.forEach((ex, idx) => onSaveExercise({ ...ex, order: maxOrder + idx + 1 }));
           setStatusBanner({
@@ -2346,7 +2357,8 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
         lessons={lessons}
         selectedLessonId={targetLessonId}
         onExercisesCreated={(newExercises) => {
-          const currentLessonExercises = loadExercises().filter(e => e.lessonId === targetLessonId);
+          const destLessonId = newExercises[0]?.lessonId || targetLessonId;
+          const currentLessonExercises = loadExercises().filter(e => e.lessonId === destLessonId);
           const maxOrder = currentLessonExercises.reduce((max, e) => Math.max(max, e.order ?? 0), currentLessonExercises.length);
           newExercises.forEach((ex, idx) => onSaveExercise({ ...ex, order: maxOrder + idx + 1 }));
           setStatusBanner({
@@ -2364,7 +2376,8 @@ export const ExerciseBuilder: React.FC<ExerciseBuilderProps> = ({
         lessons={lessons}
         selectedLessonId={targetLessonId}
         onExercisesCreated={(newExercises) => {
-          const currentLessonExercises = loadExercises().filter(e => e.lessonId === targetLessonId);
+          const destLessonId = newExercises[0]?.lessonId || targetLessonId;
+          const currentLessonExercises = loadExercises().filter(e => e.lessonId === destLessonId);
           const maxOrder = currentLessonExercises.reduce((max, e) => Math.max(max, e.order ?? 0), currentLessonExercises.length);
           newExercises.forEach((ex, idx) => onSaveExercise({ ...ex, order: maxOrder + idx + 1 }));
           setStatusBanner({

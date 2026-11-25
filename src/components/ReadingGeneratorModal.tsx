@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { 
   X, 
   Sparkles, 
@@ -65,6 +65,16 @@ export const ReadingGeneratorModal: React.FC<ReadingGeneratorModalProps> = ({
   const [targetLessonId, setTargetLessonId] = useState<string>(
     selectedLessonId || lessons[0]?.id || ''
   );
+
+  useEffect(() => {
+    if (isOpen) {
+      if (selectedLessonId) {
+        setTargetLessonId(selectedLessonId);
+      } else if (!targetLessonId && lessons[0]?.id) {
+        setTargetLessonId(lessons[0].id);
+      }
+    }
+  }, [isOpen, selectedLessonId, lessons]);
   const [saveFormat, setSaveFormat] = useState<'comprehensive' | 'individual'>('comprehensive');
 
   const [loading, setLoading] = useState(false);

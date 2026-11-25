@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   X, 
   Sparkles, 
@@ -78,6 +78,16 @@ export const GrammarGeneratorModal: React.FC<GrammarGeneratorModalProps> = ({
   const [targetLessonId, setTargetLessonId] = useState<string>(
     selectedLessonId || lessons[0]?.id || ''
   );
+
+  useEffect(() => {
+    if (isOpen) {
+      if (selectedLessonId) {
+        setTargetLessonId(selectedLessonId);
+      } else if (!targetLessonId && lessons[0]?.id) {
+        setTargetLessonId(lessons[0].id);
+      }
+    }
+  }, [isOpen, selectedLessonId, lessons]);
 
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);

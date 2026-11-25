@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Volume2, 
   Mic, 
@@ -56,6 +56,16 @@ export const PronunciationGeneratorModal: React.FC<PronunciationGeneratorModalPr
   const [targetLessonId, setTargetLessonId] = useState<string>(
     selectedLessonId || lessons[0]?.id || ''
   );
+
+  useEffect(() => {
+    if (isOpen) {
+      if (selectedLessonId) {
+        setTargetLessonId(selectedLessonId);
+      } else if (!targetLessonId && lessons[0]?.id) {
+        setTargetLessonId(lessons[0].id);
+      }
+    }
+  }, [isOpen, selectedLessonId, lessons]);
   const [difficulty, setDifficulty] = useState<DifficultyLevel>('guided');
   const [defaultThreshold, setDefaultThreshold] = useState<number>(70);
   const [isEnrichingAI, setIsEnrichingAI] = useState(false);
