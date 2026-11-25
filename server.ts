@@ -1,11 +1,48 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import dotenv from "dotenv";
 import { createSmartFillInBlank } from "./src/utils/smartContextSentence";
 
 dotenv.config();
+
+const isGemini4Model = (modelName?: string): boolean => {
+  const m = (modelName || "").trim().toLowerCase();
+  return m.startsWith("gemini-4-") || m === "gemini-4";
+};
+
+function buildGeminiConfig(
+  modelName: string,
+  options: {
+    systemInstruction?: string;
+    responseMimeType?: string;
+    temperature?: number;
+    maxOutputTokens?: number;
+    fastThinking?: boolean;
+  }
+): Record<string, any> {
+  const config: Record<string, any> = {};
+  if (options.systemInstruction !== undefined) {
+    config.systemInstruction = options.systemInstruction;
+  }
+  if (options.responseMimeType !== undefined) {
+    config.responseMimeType = options.responseMimeType;
+  }
+  if (isGemini4Model(modelName)) {
+    if (options.fastThinking) {
+      config.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+    }
+  } else {
+    if (options.temperature !== undefined) {
+      config.temperature = options.temperature;
+    }
+    if (options.maxOutputTokens !== undefined) {
+      config.maxOutputTokens = options.maxOutputTokens;
+    }
+  }
+  return config;
+}
 
 /**
  * Trích xuất và phân tích cú pháp JSON an toàn từ phản hồi của AI.
@@ -521,12 +558,12 @@ CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
             const resGen = await ai.models.generateContent({
               model: candModel,
               contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-              config: {
+              config: buildGeminiConfig(candModel, {
                 systemInstruction: systemPrompt,
                 temperature: 0.7,
                 maxOutputTokens: 4000,
                 responseMimeType: "application/json",
-              }
+              })
             });
 
             let rawText = resGen?.text || '';
@@ -1014,12 +1051,12 @@ ${targetDifficulty && targetDifficulty !== 'auto' ? `- Mức độ ưu tiên đ�
             const resGen = await aiClient.models.generateContent({
               model: candModel,
               contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-              config: {
+              config: buildGeminiConfig(candModel, {
                 systemInstruction: READING_SYSTEM_PROMPT,
                 temperature: 0.25,
                 maxOutputTokens: 6000,
                 responseMimeType: "application/json",
-              }
+              })
             });
 
             let rawText = resGen?.text || '';
@@ -1109,14 +1146,15 @@ ${targetDifficulty ? `- Độ khó: "${targetDifficulty}"` : ''}
 }`;
 
         try {
+          const singleReadingModel = model || "gemini-3.1-flash-lite";
           const resGen = await aiClient.models.generateContent({
-            model: model || "gemini-3.1-flash-lite",
+            model: singleReadingModel,
             contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-            config: {
+            config: buildGeminiConfig(singleReadingModel, {
               systemInstruction: READING_SYSTEM_PROMPT,
               temperature: 0.35,
               responseMimeType: "application/json",
-            }
+            })
           });
 
           let rawText = resGen?.text || '';
@@ -1266,18 +1304,20 @@ ${targetDifficulty ? `- Độ khó: "${targetDifficulty}"` : ''}
 
         for (const candidateModel of fallbackCandidates) {
           try {
+            const timeoutMs = isGemini4Model(candidateModel) ? 20000 : 12000;
             const timeoutPromise = new Promise<never>((_, reject) => {
-              setTimeout(() => reject(new Error(`Timeout on ${candidateModel}`)), 12000);
+              setTimeout(() => reject(new Error(`Timeout on ${candidateModel}`)), timeoutMs);
             });
 
             const callPromise = ai.models.generateContent({
               model: candidateModel,
               contents,
-              config: {
+              config: buildGeminiConfig(candidateModel, {
                 systemInstruction: resolvedSystemPrompt,
                 temperature: 0.7,
                 maxOutputTokens: 1500,
-              },
+                fastThinking: true,
+              }),
             });
 
             const response = await Promise.race([callPromise, timeoutPromise]);
@@ -1546,10 +1586,11 @@ ${targetDifficulty ? `- Độ khó: "${targetDifficulty}"` : ''}
         const response = await ai.models.generateContent({
           model: targetModel,
           contents: [{ role: "user", parts: [{ text: "Trả lời đúng 1 từ tiếng Việt: Sẵn sàng" }] }],
-          config: {
+          config: buildGeminiConfig(targetModel, {
             temperature: 0.1,
             maxOutputTokens: 20,
-          }
+            fastThinking: true,
+          })
         });
 
         const latencyMs = Date.now() - startTime;
@@ -1838,11 +1879,11 @@ CẤU TRÚC JSON ĐẦU RA YÊU CẦU:
             parts: [{ text: vocabList.trim() }]
           }
         ],
-        config: {
+        config: buildGeminiConfig(targetModel, {
           systemInstruction,
           responseMimeType: "application/json",
           temperature: 0.7,
-        }
+        })
       });
 
       const replyText = response.text?.trim() || "{}";
@@ -2285,11 +2326,11 @@ CẤU TRÚC JSON ĐẦU RA:
       const response = await ai.models.generateContent({
         model: targetModel,
         contents: [{ role: "user", parts: [{ text: vocabList.trim() }] }],
-        config: {
+        config: buildGeminiConfig(targetModel, {
           systemInstruction,
           responseMimeType: "application/json",
           temperature: targetType === "fill_in_blank" ? 0.7 : 0.2,
-        }
+        })
       });
 
       const replyText = response.text?.trim() || "{}";
@@ -2417,10 +2458,10 @@ Trả về DUY NHẤT một JSON hợp lệ với cấu trúc sau:
         const response = await ai.models.generateContent({
           model: effectiveModel,
           contents: prompt,
-          config: {
+          config: buildGeminiConfig(effectiveModel, {
             responseMimeType: "application/json",
             temperature: 0.2,
-          }
+          })
         });
 
         const replyText = response.text || "{}";
@@ -2458,10 +2499,10 @@ Trả về DUY NHẤT JSON hợp lệ:
         const response = await ai.models.generateContent({
           model: effectiveModel,
           contents: prompt,
-          config: {
+          config: buildGeminiConfig(effectiveModel, {
             responseMimeType: "application/json",
             temperature: 0.2,
-          }
+          })
         });
 
         const replyText = response.text || "{}";
@@ -2711,11 +2752,11 @@ HƯỚNG DẪN CÁC DẠNG BÀI:
                 text: `YÊU CẦU SOẠN BÀI TẬP:\n${effectiveInput}\n\n${ruleNote ? `GHI CHÚ / BỔ SUNG: ${ruleNote.trim()}` : ""}\n\nHãy phân tích kỹ nội dung trên và tạo đúng ${count} câu bài tập chất lượng cao theo đúng định dạng JSON.` 
               }] 
             }],
-            config: {
+            config: buildGeminiConfig(m, {
               systemInstruction,
               responseMimeType: "application/json",
               temperature: 0.2,
-            }
+            })
           });
 
           if (response?.text?.trim()) {
@@ -2919,11 +2960,11 @@ ${currentContent}
       const response = await ai.models.generateContent({
         model: targetModel,
         contents: [{ role: "user", parts: [{ text: userContextMessage }] }],
-        config: {
+        config: buildGeminiConfig(targetModel, {
           systemInstruction,
           responseMimeType: "application/json",
           temperature: 0.3,
-        }
+        })
       });
 
       const replyText = response.text?.trim() || "{}";

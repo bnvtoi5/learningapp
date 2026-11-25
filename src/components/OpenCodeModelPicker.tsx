@@ -520,7 +520,7 @@ export const OpenCodeModelPicker: React.FC<OpenCodeModelPickerProps> = ({
                       className={`w-full px-3 py-2 text-xs rounded-xl ${theme.inputBg} border ${theme.border} ${theme.text} font-mono focus:outline-hidden focus:border-emerald-500 placeholder:text-neutral-400 dark:placeholder:text-neutral-500`}
                     />
                     <p className={`text-[11px] ${theme.textMuted}`}>
-                      Ví dụ: <code>gemini-3.8-flash</code>, <code>claude-opus-4-8</code>, <code>deepseek-chat</code>...
+                      Ví dụ: <code>gemini-4-hydrogen</code>, <code>gemini-3.1-flash-lite</code>, <code>claude-opus-4-8</code>, <code>deepseek-chat</code>...
                     </p>
                   </div>
                 ) : (
