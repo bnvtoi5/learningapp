@@ -249,6 +249,19 @@ export interface Lesson {
   updatedAt?: number;
 }
 
+export interface LessonProgressCheckpoint {
+  id: string; // `${userId}_${lessonId}`
+  userId: string;
+  lessonId: string;
+  currentIndex: number; // Vị trí câu đang làm dở (0-based)
+  currentExerciseId: string; // ID câu hỏi đang làm dở để định vị chính xác ngay cả khi thứ tự thay đổi nhẹ
+  furthestIndex: number; // Vị trí câu xa nhất học sinh đã đi tới
+  totalExercises: number;
+  exerciseOrderIds?: string[]; // Lưu thứ tự câu hỏi của phiên (hữu ích khi bài bật chế độ xáo trộn)
+  answeredResults?: Record<string, boolean>; // Map exerciseId -> true (đúng) / false (sai)
+  updatedAt: number;
+}
+
 export interface Topic {
   id: string;
   classroomId: string; // BẮT BUỘC: Mỗi chủ đề phải thuộc về một lớp học cụ thể

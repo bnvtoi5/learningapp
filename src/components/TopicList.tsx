@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   BookOpen, 
   Plus, 
@@ -32,6 +32,7 @@ import { TopicEditModal } from './TopicEditModal';
 import { LessonLectureModal } from './LessonLectureModal';
 import { LessonContentEditorModal } from './LessonContentEditorModal';
 import { LessonPrintModal } from './LessonPrintModal';
+import { loadAllLocalLessonCheckpoints } from '../utils/storage';
 
 interface TopicListProps {
   topics: Topic[];
@@ -103,8 +104,19 @@ export const TopicList: React.FC<TopicListProps> = ({
 
   const [selectedClassFilter, setSelectedClassFilter] = useState<string>('all');
   const [visibilityFilter, setVisibilityFilter] = useState<'all' | 'visible' | 'hidden'>('all');
+  const [checkpointVersion, setCheckpointVersion] = useState(0);
   const isAdmin = currentUser?.role === 'admin';
   const perms = currentUser?.permissions;
+
+  useEffect(() => {
+    const handleCheckpointChange = () => setCheckpointVersion(v => v + 1);
+    window.addEventListener('app_checkpoints_changed', handleCheckpointChange);
+    return () => window.removeEventListener('app_checkpoints_changed', handleCheckpointChange);
+  }, []);
+
+  const localCheckpoints = useMemo(() => {
+    return loadAllLocalLessonCheckpoints(currentUser?.id);
+  }, [currentUser?.id, checkpointVersion]);
 
   const handleOpenCreateTopic = () => {
     if (onSaveTopic) {
@@ -573,6 +585,13 @@ export const TopicList: React.FC<TopicListProps> = ({
                       : null;
                 const canPractice = isAdmin || (perms?.canPractice !== false);
                 const canViewTheory = isAdmin || (perms?.canViewTheory !== false);
+                const lessonCheckpoint = localCheckpoints[lesson.id];
+                const hasResumeCheckpoint = Boolean(
+                  lessonCheckpoint &&
+                  lessonCheckpoint.totalExercises > 1 &&
+                  (lessonCheckpoint.currentIndex > 0 ||
+                    Object.keys(lessonCheckpoint.answeredResults || {}).length > 0)
+                );
 
                 return (
                   <div
@@ -598,6 +617,15 @@ export const TopicList: React.FC<TopicListProps> = ({
                           {lesson.shuffleExercises && (
                             <span className="p-1 rounded bg-indigo-500/15 text-indigo-400 border border-indigo-500/30 flex items-center justify-center" title="Câu hỏi được xáo trộn ngẫu nhiên khi phát cho học sinh">
                               <Shuffle className="w-3 h-3" />
+                            </span>
+                          )}
+                          {hasResumeCheckpoint && lessonCheckpoint && (
+                            <span
+                              className="text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-500/15 text-sky-500 dark:text-sky-400 border border-sky-500/30 flex items-center gap-1"
+                              title="Tiến độ đã lưu tự động — bấm để học tiếp"
+                            >
+                              <Clock className="w-3 h-3" />
+                              <span>Đang học dở: Câu {Math.min(lessonCheckpoint.currentIndex + 1, lessonCheckpoint.totalExercises)}/{lessonCheckpoint.totalExercises}</span>
                             </span>
                           )}
                         </div>
@@ -716,11 +744,15 @@ export const TopicList: React.FC<TopicListProps> = ({
                           id={`btn-start-practice-lesson-${lesson.id}`}
                           disabled={knownCount === 0}
                           onClick={() => onStartPractice(lesson.id)}
-                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs flex items-center gap-1 disabled:opacity-40 cursor-pointer shrink-0"
-                          title="Bắt đầu luyện tập bài này"
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold text-white shadow-xs flex items-center gap-1 disabled:opacity-40 cursor-pointer shrink-0 ${
+                            hasResumeCheckpoint
+                              ? 'bg-sky-600 hover:bg-sky-500'
+                              : 'bg-emerald-600 hover:bg-emerald-500'
+                          }`}
+                          title={hasResumeCheckpoint ? 'Học tiếp từ vị trí đã lưu' : 'Bắt đầu luyện tập bài này'}
                         >
                           <Play className="w-3.5 h-3.5 fill-current" />
-                          <span>Luyện bài</span>
+                          <span>{hasResumeCheckpoint ? 'Học tiếp' : 'Luyện bài'}</span>
                         </button>
                       ) : (
                         <div className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-neutral-500/10 text-neutral-400 border border-neutral-500/20 flex items-center gap-1 shrink-0">

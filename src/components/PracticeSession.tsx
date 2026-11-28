@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { 
   X, 
   Volume2, 
@@ -24,9 +24,11 @@ import {
   LayoutGrid,
   List,
   Settings2,
-  Info
+  Info,
+  Navigation,
+  Flag
 } from 'lucide-react';
-import { Exercise, DifficultyLevel, ErrorLog, User } from '../types';
+import { Exercise, DifficultyLevel, ErrorLog, User, LessonProgressCheckpoint } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import { soundManager, triggerHaptic, speakText } from '../utils/audio';
 import { ListeningAudioPlayer } from './ListeningAudioPlayer';
@@ -36,6 +38,7 @@ import { createClozeLettersPattern } from '../utils/singleVocabGenerator';
 import { InteractivePronunciationPractice } from './InteractivePronunciationPractice';
 import { evaluatePronunciation } from '../utils/pronunciationUtils';
 import { isAnswerMatch } from '../utils/answerUtils';
+import { saveLessonCheckpoint } from '../utils/storage';
 
 interface PracticeSessionProps {
   exercises: Exercise[];
@@ -47,6 +50,8 @@ interface PracticeSessionProps {
   title?: string;
   canViewExplanations?: boolean;
   currentUser?: User | null;
+  lessonId?: string | null;
+  initialCheckpoint?: LessonProgressCheckpoint | null;
 }
 
 export const PracticeSession: React.FC<PracticeSessionProps> = ({
@@ -59,6 +64,8 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
   title = 'Phiên luyện tập',
   canViewExplanations = true,
   currentUser,
+  lessonId,
+  initialCheckpoint,
 }) => {
   const { settings, getThemeClasses, getTypographyClasses } = useTheme();
   const theme = getThemeClasses();
@@ -75,10 +82,61 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
     });
   };
 
-  const [currentIndex, setCurrentIndex] = useState(0);
+  // Filter and order exercises according to round-based learning flow
+  const availableExercises = useMemo(() => {
+    let filtered = exercises;
+    if (currentUser?.role === 'student') {
+      filtered = exercises.filter(ex => !ex.isHidden);
+    }
+    // Check if exercises contains vocabulary / memrise drills to order in rounds
+    const hasVocabOrMemrise = filtered.some(ex => 
+      ex.type === 'flashcard_recall' || 
+      ex.type === 'typing' || 
+      ex.type === 'spelling' || 
+      ex.memriseStage || 
+      ex.vocabWord ||
+      ex.word
+    );
+    if (hasVocabOrMemrise) {
+      return orderStandardExercisesInBatches(filtered, CHUNK_SIZE);
+    }
+    return filtered;
+  }, [exercises, currentUser?.role]);
+
+  // Resolve starting position from checkpoint (prefer matching exerciseId, fallback to clamped index)
+  const initialStartIndex = useMemo(() => {
+    if (!initialCheckpoint || availableExercises.length === 0) return 0;
+    if (initialCheckpoint.currentExerciseId) {
+      const idxById = availableExercises.findIndex(e => e.id === initialCheckpoint.currentExerciseId);
+      if (idxById >= 0) return idxById;
+    }
+    return Math.max(0, Math.min(initialCheckpoint.currentIndex || 0, availableExercises.length - 1));
+  }, []);
+
+  const [currentIndex, setCurrentIndex] = useState<number>(initialStartIndex);
+  const [furthestIndex, setFurthestIndex] = useState<number>(() => {
+    const savedFurthest = initialCheckpoint?.furthestIndex ?? 0;
+    return Math.max(initialStartIndex, Math.min(savedFurthest, Math.max(0, availableExercises.length - 1)));
+  });
+  const [answeredMap, setAnsweredMap] = useState<Record<string, boolean>>(() => ({
+    ...(initialCheckpoint?.answeredResults || {}),
+  }));
   const [isChecked, setIsChecked] = useState(false);
   const [isCorrect, setIsCorrect] = useState(false);
-  const [results, setResults] = useState<{ exerciseId: string; isCorrect: boolean }[]>([]);
+  const [results, setResults] = useState<{ exerciseId: string; isCorrect: boolean }[]>(() => {
+    if (!initialCheckpoint?.answeredResults) return [];
+    return Object.entries(initialCheckpoint.answeredResults).map(([exerciseId, ok]) => ({
+      exerciseId,
+      isCorrect: ok,
+    }));
+  });
+
+  // Quick Question Navigator modal state
+  const [showNavigatorModal, setShowNavigatorModal] = useState<boolean>(false);
+  const [jumpInput, setJumpInput] = useState<string>('');
+  const [jumpError, setJumpError] = useState<string>('');
+  const [navigatorFilter, setNavigatorFilter] = useState<'all' | 'unanswered' | 'wrong'>('all');
+  const [navigatorPage, setNavigatorPage] = useState<number>(0);
 
   // User input states:
   const [selectedOptions, setSelectedOptions] = useState<number[]>([]);
@@ -131,27 +189,6 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
   });
   const [showMcSettingsModal, setShowMcSettingsModal] = useState<boolean>(false);
   const [showRoundCompleteModal, setShowRoundCompleteModal] = useState<boolean>(false);
-
-  // Filter and order exercises according to round-based learning flow:
-  const availableExercises = useMemo(() => {
-    let filtered = exercises;
-    if (currentUser?.role === 'student') {
-      filtered = exercises.filter(ex => !ex.isHidden);
-    }
-    // Check if exercises contains vocabulary / memrise drills to order in rounds
-    const hasVocabOrMemrise = filtered.some(ex => 
-      ex.type === 'flashcard_recall' || 
-      ex.type === 'typing' || 
-      ex.type === 'spelling' || 
-      ex.memriseStage || 
-      ex.vocabWord ||
-      ex.word
-    );
-    if (hasVocabOrMemrise) {
-      return orderStandardExercisesInBatches(filtered, CHUNK_SIZE);
-    }
-    return filtered;
-  }, [exercises, currentUser?.role]);
 
   // Calculate round segments
   const roundData = useMemo(() => {
@@ -221,6 +258,145 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
   }, [availableExercises, currentIndex]);
 
   const currentEx = availableExercises[currentIndex];
+
+  // Track furthest question reached
+  useEffect(() => {
+    setFurthestIndex(prev => (currentIndex > prev ? currentIndex : prev));
+  }, [currentIndex]);
+
+  // Keep latest checkpoint snapshot in ref for flush on exit / tab hide / disconnect
+  const checkpointStateRef = useRef({
+    currentIndex,
+    furthestIndex,
+    answeredMap,
+    availableExercises,
+  });
+  checkpointStateRef.current = {
+    currentIndex,
+    furthestIndex,
+    answeredMap,
+    availableExercises,
+  };
+
+  const flushCheckpoint = useCallback(
+    (immediateCloud = false) => {
+      if (!lessonId || !currentUser?.id) return;
+      const {
+        currentIndex: idx,
+        furthestIndex: maxIdx,
+        answeredMap: ansMap,
+        availableExercises: list,
+      } = checkpointStateRef.current;
+      if (list.length <= 1) return;
+      const answeredCount = Object.keys(ansMap).length;
+      if (idx === 0 && maxIdx === 0 && answeredCount === 0) return;
+
+      const activeEx = list[idx];
+      if (!activeEx) return;
+
+      saveLessonCheckpoint(
+        {
+          id: '',
+          userId: currentUser.id,
+          lessonId,
+          currentIndex: idx,
+          currentExerciseId: activeEx.id,
+          furthestIndex: Math.max(maxIdx, idx),
+          totalExercises: list.length,
+          exerciseOrderIds: list.map(e => e.id),
+          answeredResults: ansMap,
+          updatedAt: Date.now(),
+        },
+        { syncCloud: true, immediateCloud }
+      );
+    },
+    [lessonId, currentUser?.id]
+  );
+
+  // Auto-save checkpoint whenever student navigates or answers a question
+  useEffect(() => {
+    flushCheckpoint(false);
+  }, [currentIndex, furthestIndex, answeredMap, flushCheckpoint]);
+
+  // Flush checkpoint immediately when switching tabs / closing browser / losing focus
+  useEffect(() => {
+    if (!lessonId || !currentUser?.id) return;
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        flushCheckpoint(true);
+      }
+    };
+    const handlePageHide = () => flushCheckpoint(true);
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('pagehide', handlePageHide);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('pagehide', handlePageHide);
+    };
+  }, [lessonId, currentUser?.id, flushCheckpoint]);
+
+  const handleExitWithSave = () => {
+    flushCheckpoint(true);
+    onExit();
+  };
+
+  // Navigator computed metrics (memoized so 200+ questions stay fast)
+  const NAV_CHUNK_SIZE = 50;
+  const navigatorStats = useMemo(() => {
+    let answered = 0;
+    let correct = 0;
+    let wrong = 0;
+    let firstUnansweredIdx = -1;
+    availableExercises.forEach((ex, i) => {
+      const status = answeredMap[ex.id];
+      if (status === undefined) {
+        if (firstUnansweredIdx === -1) firstUnansweredIdx = i;
+      } else {
+        answered++;
+        if (status) correct++;
+        else wrong++;
+      }
+    });
+    return {
+      total: availableExercises.length,
+      answered,
+      correct,
+      wrong,
+      unanswered: availableExercises.length - answered,
+      firstUnansweredIdx,
+    };
+  }, [availableExercises, answeredMap]);
+
+  const openNavigatorModal = () => {
+    setNavigatorFilter('all');
+    setJumpInput('');
+    setJumpError('');
+    if (roundData.totalRounds > 1 && roundData.allRounds.length > 1) {
+      setNavigatorPage(Math.max(0, roundData.currentRound - 1));
+    } else {
+      setNavigatorPage(Math.floor(currentIndex / NAV_CHUNK_SIZE));
+    }
+    setShowNavigatorModal(true);
+  };
+
+  const handleJumpToIndex = (targetIdx: number) => {
+    if (availableExercises.length === 0) return;
+    const clamped = Math.max(0, Math.min(targetIdx, availableExercises.length - 1));
+    setShowRoundCompleteModal(false);
+    setCurrentIndex(clamped);
+    setShowNavigatorModal(false);
+  };
+
+  const handleJumpSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const num = parseInt(jumpInput.trim(), 10);
+    if (Number.isNaN(num) || num < 1 || num > availableExercises.length) {
+      setJumpError(`Vui lòng nhập số từ 1 đến ${availableExercises.length}`);
+      return;
+    }
+    setJumpError('');
+    handleJumpToIndex(num - 1);
+  };
 
   // Helper to parse cloze text into segments (supports [answer], {answer}, and ((answer)))
   const parseClozePassage = (text: string) => {
@@ -759,6 +935,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
     }
 
     setResults(prev => [...prev, { exerciseId: currentEx.id, isCorrect: correct }]);
+    setAnsweredMap(prev => ({ ...prev, [currentEx.id]: correct }));
   };
 
   // Previous question (allow students to easily review the previous question)
@@ -847,13 +1024,13 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
   return (
     <div className={`w-full max-w-2xl mx-auto space-y-4 pb-20 ${typo.fontSize} ${typo.lineHeight} animate-in fade-in duration-150`}>
       {/* Top Header Bar */}
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center justify-between gap-2 sm:gap-3">
         <div className="flex items-center gap-1.5">
           <button
             id="btn-exit-practice"
-            onClick={onExit}
+            onClick={handleExitWithSave}
             className={`p-2 rounded-xl border ${theme.border} ${theme.badgeBg} hover:opacity-80 transition-opacity cursor-pointer`}
-            title="Thoát phiên học"
+            title="Lưu tiến độ và thoát phiên học"
           >
             <X className="w-4 h-4" />
           </button>
@@ -871,20 +1048,28 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
           )}
         </div>
 
-        {/* Progress Bar */}
-        <div className="flex-1">
-          <div className="flex items-center justify-between text-xs mb-1 font-medium">
-            <div className="flex items-center gap-1.5 flex-wrap">
+        {/* Progress Bar (click to open Quick Question Navigator) */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between text-xs mb-1 font-medium gap-1">
+            <button
+              id="btn-progress-open-navigator"
+              type="button"
+              onClick={() => availableExercises.length > 1 && openNavigatorModal()}
+              className={`flex items-center gap-1.5 flex-wrap text-left min-w-0 ${
+                availableExercises.length > 1 ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''
+              }`}
+              title={availableExercises.length > 1 ? 'Bấm để nhảy nhanh tới bất kỳ câu nào' : undefined}
+            >
               {roundData.totalRounds > 1 && (
                 <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold text-[11px] border border-emerald-500/20">
                   Đợt {roundData.currentRound}/{roundData.totalRounds}
                 </span>
               )}
-              <span className={theme.textMuted}>
+              <span className={`${theme.textMuted} truncate`}>
                 {title} • {roundData.totalRounds > 1 ? `Câu ${roundData.roundItemIndex + 1}/${roundData.roundTotalItems}` : `Câu ${currentIndex + 1}/${availableExercises.length}`}
               </span>
-            </div>
-            <span className="text-emerald-500 font-semibold">
+            </button>
+            <span className="text-emerald-500 font-semibold shrink-0">
               {Math.round(((currentIndex + 1) / availableExercises.length) * 100)}%
             </span>
           </div>
@@ -896,15 +1081,31 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
           </div>
         </div>
 
-        {/* Audio TTS Button */}
-        <button
-          id="btn-speak-question"
-          onClick={() => speakText(currentEx.vocabWord || currentEx.correctText || currentEx.question)}
-          className={`p-2 rounded-xl border ${theme.border} ${theme.badgeBg} hover:opacity-80 text-emerald-500`}
-          title="Nghe phát âm chuẩn"
-        >
-          <Volume2 className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Quick Question Navigator Button */}
+          {availableExercises.length > 1 && (
+            <button
+              id="btn-open-question-navigator"
+              type="button"
+              onClick={openNavigatorModal}
+              className={`py-2 px-2.5 rounded-xl border ${theme.border} ${theme.badgeBg} hover:border-sky-500/50 hover:text-sky-500 transition-all text-xs font-semibold flex items-center gap-1.5 cursor-pointer`}
+              title="Mở bảng chọn nhanh & nhảy tới câu hỏi bất kỳ"
+            >
+              <LayoutGrid className="w-4 h-4 text-sky-500" />
+              <span className="hidden sm:inline">Câu {currentIndex + 1}/{availableExercises.length}</span>
+            </button>
+          )}
+
+          {/* Audio TTS Button */}
+          <button
+            id="btn-speak-question"
+            onClick={() => speakText(currentEx.vocabWord || currentEx.correctText || currentEx.question)}
+            className={`p-2 rounded-xl border ${theme.border} ${theme.badgeBg} hover:opacity-80 text-emerald-500 cursor-pointer`}
+            title="Nghe phát âm chuẩn"
+          >
+            <Volume2 className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* Main Question Card */}
@@ -2397,6 +2598,275 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal Điều hướng nhanh & Nhảy tới câu hỏi (Quick Question Navigator) */}
+      {showNavigatorModal && (() => {
+        const useRoundTabs =
+          navigatorFilter === 'all' &&
+          roundData.totalRounds > 1 &&
+          roundData.allRounds.length > 1;
+
+        const filteredEntries = availableExercises
+          .map((ex, idx) => ({ ex, idx }))
+          .filter(({ ex }) => {
+            if (navigatorFilter === 'unanswered') return answeredMap[ex.id] === undefined;
+            if (navigatorFilter === 'wrong') return answeredMap[ex.id] === false;
+            return true;
+          });
+
+        const totalPages = useRoundTabs
+          ? roundData.allRounds.length
+          : Math.max(1, Math.ceil(filteredEntries.length / NAV_CHUNK_SIZE));
+        const safePage = Math.max(0, Math.min(navigatorPage, totalPages - 1));
+
+        let visibleEntries: { ex: Exercise; idx: number }[] = [];
+        if (useRoundTabs) {
+          const r = roundData.allRounds[safePage];
+          if (r) {
+            visibleEntries = availableExercises
+              .slice(r.startIdx, r.endIdx + 1)
+              .map((ex, offset) => ({ ex, idx: r.startIdx + offset }));
+          }
+        } else {
+          const start = safePage * NAV_CHUNK_SIZE;
+          visibleEntries = filteredEntries.slice(start, start + NAV_CHUNK_SIZE);
+        }
+
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150"
+            onClick={() => setShowNavigatorModal(false)}
+          >
+            <div
+              className={`${theme.card} w-full max-w-lg max-h-[88vh] flex flex-col rounded-2xl border ${theme.border} shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150`}
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div className="p-4 border-b border-inherit flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-9 h-9 rounded-xl bg-sky-500/15 text-sky-500 flex items-center justify-center shrink-0">
+                    <Navigation className="w-4.5 h-4.5" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-sm sm:text-base font-bold truncate">
+                      Nhảy nhanh tới câu hỏi
+                    </h3>
+                    <p className={`text-[11px] ${theme.textMuted}`}>
+                      Đã làm {navigatorStats.answered}/{navigatorStats.total} • Đúng {navigatorStats.correct} • Sai {navigatorStats.wrong}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  id="btn-close-question-navigator"
+                  type="button"
+                  onClick={() => setShowNavigatorModal(false)}
+                  className={`p-1.5 rounded-lg border ${theme.border} hover:opacity-75 cursor-pointer shrink-0`}
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Quick Jump Controls */}
+              <div className="p-4 border-b border-inherit space-y-2.5">
+                <form onSubmit={handleJumpSubmit} className="flex items-center gap-2">
+                  <input
+                    id="input-jump-question-number"
+                    type="number"
+                    min={1}
+                    max={availableExercises.length}
+                    value={jumpInput}
+                    onChange={e => {
+                      setJumpInput(e.target.value);
+                      if (jumpError) setJumpError('');
+                    }}
+                    placeholder={`Nhập số câu (1 - ${availableExercises.length})...`}
+                    className={`flex-1 px-3 py-2 rounded-xl border ${theme.border} ${theme.inputBg} text-xs font-medium focus:outline-none focus:ring-1 focus:ring-sky-500`}
+                  />
+                  <button
+                    id="btn-submit-jump-question"
+                    type="submit"
+                    className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs transition-colors cursor-pointer shrink-0"
+                  >
+                    Đi tới
+                  </button>
+                </form>
+
+                {jumpError && (
+                  <p className="text-[11px] text-rose-500 font-medium">{jumpError}</p>
+                )}
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    id="btn-jump-first-unanswered"
+                    type="button"
+                    disabled={navigatorStats.firstUnansweredIdx === -1}
+                    onClick={() => handleJumpToIndex(navigatorStats.firstUnansweredIdx)}
+                    className="flex-1 min-w-[140px] py-1.5 px-2.5 rounded-lg text-[11px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 hover:bg-emerald-500/20 disabled:opacity-40 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <ArrowRight className="w-3.5 h-3.5" />
+                    <span>
+                      {navigatorStats.firstUnansweredIdx >= 0
+                        ? `Câu chưa làm (#${navigatorStats.firstUnansweredIdx + 1})`
+                        : 'Đã làm hết câu hỏi'}
+                    </span>
+                  </button>
+
+                  {furthestIndex > 0 && (
+                    <button
+                      id="btn-jump-furthest"
+                      type="button"
+                      onClick={() => handleJumpToIndex(furthestIndex)}
+                      className="flex-1 min-w-[140px] py-1.5 px-2.5 rounded-lg text-[11px] font-semibold bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/25 hover:bg-sky-500/20 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <Flag className="w-3.5 h-3.5" />
+                      <span>Xa nhất đã tới (#{furthestIndex + 1})</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Filter Tabs */}
+                <div className="flex items-center gap-1.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNavigatorFilter('all');
+                      setNavigatorPage(0);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
+                      navigatorFilter === 'all'
+                        ? 'bg-sky-600 text-white'
+                        : `${theme.highlight} ${theme.textMuted} hover:opacity-80`
+                    }`}
+                  >
+                    Tất cả ({navigatorStats.total})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNavigatorFilter('unanswered');
+                      setNavigatorPage(0);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
+                      navigatorFilter === 'unanswered'
+                        ? 'bg-amber-600 text-white'
+                        : `${theme.highlight} ${theme.textMuted} hover:opacity-80`
+                    }`}
+                  >
+                    Chưa làm ({navigatorStats.unanswered})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNavigatorFilter('wrong');
+                      setNavigatorPage(0);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer ${
+                      navigatorFilter === 'wrong'
+                        ? 'bg-rose-600 text-white'
+                        : `${theme.highlight} ${theme.textMuted} hover:opacity-80`
+                    }`}
+                  >
+                    Làm sai ({navigatorStats.wrong})
+                  </button>
+                </div>
+              </div>
+
+              {/* Chunk / Round Pagination Bar (renders max 50 cells at once for zero lag) */}
+              {totalPages > 1 && (
+                <div className="px-4 pt-3 pb-1 flex items-center gap-1.5 overflow-x-auto shrink-0">
+                  {Array.from({ length: totalPages }).map((_, pageIdx) => {
+                    const isActive = pageIdx === safePage;
+                    let label = '';
+                    if (useRoundTabs) {
+                      const r = roundData.allRounds[pageIdx];
+                      label = `Đợt ${r.roundNumber} (${r.startIdx + 1}-${r.endIdx + 1})`;
+                    } else {
+                      const from = pageIdx * NAV_CHUNK_SIZE + 1;
+                      const to = Math.min((pageIdx + 1) * NAV_CHUNK_SIZE, filteredEntries.length);
+                      label = `${from}-${to}`;
+                    }
+                    return (
+                      <button
+                        key={pageIdx}
+                        type="button"
+                        onClick={() => setNavigatorPage(pageIdx)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
+                          isActive
+                            ? 'bg-emerald-600 text-white shadow-xs'
+                            : `${theme.badgeBg} border ${theme.border} ${theme.textMuted} hover:border-emerald-500/40`
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Question Grid */}
+              <div className="p-4 overflow-y-auto flex-1">
+                {visibleEntries.length === 0 ? (
+                  <div className={`text-center py-8 text-xs ${theme.textMuted}`}>
+                    Không có câu hỏi nào trong mục lọc này.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-5 sm:grid-cols-8 gap-2">
+                    {visibleEntries.map(({ ex, idx }) => {
+                      const isCurrent = idx === currentIndex;
+                      const status = answeredMap[ex.id];
+                      let cellStyle = `${theme.badgeBg} border ${theme.border} ${theme.textMuted} hover:border-sky-500/60`;
+                      if (isCurrent) {
+                        cellStyle = 'bg-sky-600 text-white border-sky-500 ring-2 ring-sky-400/50 shadow-sm';
+                      } else if (status === true) {
+                        cellStyle = 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/25';
+                      } else if (status === false) {
+                        cellStyle = 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/40 hover:bg-rose-500/25';
+                      }
+
+                      return (
+                        <button
+                          key={`${ex.id}_${idx}`}
+                          type="button"
+                          onClick={() => handleJumpToIndex(idx)}
+                          className={`h-9 rounded-lg text-xs font-bold flex items-center justify-center transition-all cursor-pointer ${cellStyle}`}
+                          title={`Câu ${idx + 1}${isCurrent ? ' (Đang làm)' : status === true ? ' (Đã đúng)' : status === false ? ' (Làm sai)' : ' (Chưa làm)'}`}
+                        >
+                          {idx + 1}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Legend Footer */}
+              <div className="px-4 py-2.5 border-t border-inherit flex flex-wrap items-center justify-between gap-2 text-[10px]">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="flex items-center gap-1">
+                    <span className="w-2.5 h-2.5 rounded-xs bg-sky-600 inline-block" />
+                    <span className={theme.textMuted}>Đang đứng</span>
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500/50 border border-emerald-500 inline-block" />
+                    <span className={theme.textMuted}>Làm đúng</span>
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-2.5 h-2.5 rounded-xs bg-rose-500/50 border border-rose-500 inline-block" />
+                    <span className={theme.textMuted}>Làm sai</span>
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className={`w-2.5 h-2.5 rounded-xs border ${theme.border} ${theme.badgeBg} inline-block`} />
+                    <span className={theme.textMuted}>Chưa làm</span>
+                  </span>
+                </div>
+                {lessonId && currentUser && (
+                  <span className="text-emerald-500 font-medium">Tự động lưu vị trí</span>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

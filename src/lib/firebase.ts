@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, doc, getDocFromServer, collection, getDocs, setDoc, deleteDoc, writeBatch, onSnapshot, query, where, documentId } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, getDocFromServer, collection, getDocs, setDoc, deleteDoc, writeBatch, onSnapshot, query, where, documentId } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import defaultConfig from '../../firebase-applet-config.json';
 import { 
@@ -9,7 +9,8 @@ import {
   Classroom, 
   User, 
   ErrorLog, 
-  MediaAsset 
+  MediaAsset,
+  LessonProgressCheckpoint
 } from '../types';
 
 export enum OperationType {
@@ -350,6 +351,62 @@ export async function deleteDocFromCloud(collectionName: string, id: string) {
     handleFirestoreError(err, OperationType.DELETE, `${collectionName}/${id}`);
   } finally {
     settlePendingDelete(collectionName, id);
+  }
+}
+
+// -------------------------------------------------------------
+// On-Demand Per-Lesson Checkpoint Sync (1 tiny doc per user+lesson)
+// Stored in system_settings with 'cp_' prefix (already permitted in live rules
+// and never loaded at boot — strictly fetched on-demand when opening a lesson).
+// -------------------------------------------------------------
+export function getLessonCheckpointDocId(userId: string, lessonId: string): string {
+  const safeUser = userId.replace(/[^a-zA-Z0-9_\-.:]/g, '_').slice(0, 56);
+  const safeLesson = lessonId.replace(/[^a-zA-Z0-9_\-.:]/g, '_').slice(0, 56);
+  return `cp_${safeUser}_${safeLesson}`;
+}
+
+export async function fetchLessonCheckpointFromCloud(
+  userId: string,
+  lessonId: string
+): Promise<LessonProgressCheckpoint | null> {
+  if (!userId || !lessonId) return null;
+  const docId = getLessonCheckpointDocId(userId, lessonId);
+  try {
+    const snap = await getDoc(doc(db, 'system_settings', docId));
+    if (!snap.exists()) return null;
+    const data = snap.data() as Partial<LessonProgressCheckpoint> | undefined;
+    if (!data || data.lessonId !== lessonId || data.userId !== userId) return null;
+    return data as LessonProgressCheckpoint;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.GET, `system_settings/${docId}`);
+    return null;
+  }
+}
+
+export async function saveLessonCheckpointToCloud(checkpoint: LessonProgressCheckpoint): Promise<void> {
+  if (!checkpoint?.userId || !checkpoint?.lessonId) return;
+  const docId = getLessonCheckpointDocId(checkpoint.userId, checkpoint.lessonId);
+  try {
+    const payload: LessonProgressCheckpoint = {
+      ...checkpoint,
+      id: docId,
+      // Guard payload size for Firestore limits (keep at most 1000 exercise order IDs)
+      exerciseOrderIds: checkpoint.exerciseOrderIds?.slice(0, 1000),
+    };
+    const cleanData = JSON.parse(JSON.stringify(payload));
+    await setDoc(doc(db, 'system_settings', docId), cleanData, { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `system_settings/${docId}`);
+  }
+}
+
+export async function deleteLessonCheckpointFromCloud(userId: string, lessonId: string): Promise<void> {
+  if (!userId || !lessonId) return;
+  const docId = getLessonCheckpointDocId(userId, lessonId);
+  try {
+    await deleteDoc(doc(db, 'system_settings', docId));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `system_settings/${docId}`);
   }
 }
 

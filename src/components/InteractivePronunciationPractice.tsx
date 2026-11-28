@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { Exercise } from '../types';
 import { useTheme } from '../context/ThemeContext';
-import { speakText, startSpeechRecognition } from '../utils/audio';
+import { speakText, startSpeechRecognition, isIOSChrome } from '../utils/audio';
 import { 
   evaluatePronunciation, 
   PronunciationEvaluationResult 
@@ -53,40 +53,67 @@ export const InteractivePronunciationPractice: React.FC<InteractivePronunciation
   const [speechSupported, setSpeechSupported] = useState(true);
 
   const activeRecognitionRef = useRef<{ stop: () => void } | null>(null);
+  const latestInterimRef = useRef<string>('');
+  const hasFinalEvaluatedRef = useRef<boolean>(false);
+  const playResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onIOSChrome = isIOSChrome();
 
   // Check Web Speech API support
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const hasSpeech = !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+      const hasSpeech = !onIOSChrome && !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
       setSpeechSupported(hasSpeech);
       if (!hasSpeech) {
         setManualInputMode(true);
       }
     }
-  }, []);
+  }, [onIOSChrome]);
 
-  // Clean up recording on unmount or question change
+  // Clean up recording and audio timers on unmount or question change
   useEffect(() => {
     setSpokenTranscript('');
     setInterimText('');
     setEvaluation(null);
     setMicErrorMessage(null);
     setManualText('');
+    latestInterimRef.current = '';
+    hasFinalEvaluatedRef.current = false;
+    if (playResetTimerRef.current) {
+      clearTimeout(playResetTimerRef.current);
+      playResetTimerRef.current = null;
+    }
+    setIsPlayingAudio(false);
     if (activeRecognitionRef.current) {
       activeRecognitionRef.current.stop();
       activeRecognitionRef.current = null;
     }
     setIsRecording(false);
+    return () => {
+      if (playResetTimerRef.current) {
+        clearTimeout(playResetTimerRef.current);
+      }
+    };
   }, [exercise.id]);
 
-  // Handle Play Sample Audio
+  // Handle Play Sample Audio (never lock button permanently if mobile Chrome drops onend)
   const handlePlaySample = (rate: number = 0.9) => {
     if (!targetText) return;
+    if (playResetTimerRef.current) {
+      clearTimeout(playResetTimerRef.current);
+    }
     setIsPlayingAudio(true);
+    const finish = () => {
+      if (playResetTimerRef.current) {
+        clearTimeout(playResetTimerRef.current);
+        playResetTimerRef.current = null;
+      }
+      setIsPlayingAudio(false);
+    };
+    playResetTimerRef.current = setTimeout(finish, Math.max(4000, targetText.length * 140));
     speakText(targetText, {
       rate,
-      onEnd: () => setIsPlayingAudio(false),
-      onError: () => setIsPlayingAudio(false),
+      onEnd: finish,
+      onError: finish,
     });
   };
 
@@ -96,6 +123,8 @@ export const InteractivePronunciationPractice: React.FC<InteractivePronunciation
     setMicErrorMessage(null);
     setEvaluation(null);
     setInterimText('');
+    latestInterimRef.current = '';
+    hasFinalEvaluatedRef.current = false;
 
     if (activeRecognitionRef.current) {
       activeRecognitionRef.current.stop();
@@ -108,11 +137,14 @@ export const InteractivePronunciationPractice: React.FC<InteractivePronunciation
       },
       onResult: (transcript, isFinal) => {
         if (isFinal) {
+          hasFinalEvaluatedRef.current = true;
+          latestInterimRef.current = '';
           setSpokenTranscript(transcript);
           setInterimText('');
           // Automatically evaluate when final result arrives
           runEvaluation(transcript);
         } else {
+          latestInterimRef.current = transcript;
           setInterimText(transcript);
         }
       },
@@ -123,6 +155,15 @@ export const InteractivePronunciationPractice: React.FC<InteractivePronunciation
       onEnd: () => {
         setIsRecording(false);
         activeRecognitionRef.current = null;
+        // Android Chrome often fires onend after interim results without emitting isFinal=true
+        if (!hasFinalEvaluatedRef.current && latestInterimRef.current.trim()) {
+          const fallbackText = latestInterimRef.current.trim();
+          hasFinalEvaluatedRef.current = true;
+          latestInterimRef.current = '';
+          setSpokenTranscript(fallbackText);
+          setInterimText('');
+          runEvaluation(fallbackText);
+        }
       },
     }, 'en-US');
 
@@ -142,10 +183,13 @@ export const InteractivePronunciationPractice: React.FC<InteractivePronunciation
     setIsRecording(false);
 
     // If we have an interim text that wasn't finalized, evaluate with it
-    const textToEvaluate = spokenTranscript || interimText;
-    if (textToEvaluate.trim()) {
-      setSpokenTranscript(textToEvaluate);
-      runEvaluation(textToEvaluate);
+    const textToEvaluate = spokenTranscript || latestInterimRef.current || interimText;
+    if (!hasFinalEvaluatedRef.current && textToEvaluate.trim()) {
+      hasFinalEvaluatedRef.current = true;
+      latestInterimRef.current = '';
+      setSpokenTranscript(textToEvaluate.trim());
+      setInterimText('');
+      runEvaluation(textToEvaluate.trim());
     }
   };
 
@@ -190,7 +234,6 @@ export const InteractivePronunciationPractice: React.FC<InteractivePronunciation
             <button
               type="button"
               onClick={() => handlePlaySample(0.9)}
-              disabled={isPlayingAudio}
               className="px-3 py-1.5 rounded-xl border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold text-xs flex items-center gap-1.5 transition-all shadow-xs cursor-pointer active:scale-95"
               title="Lắng nghe người bản xứ phát âm mẫu"
             >
@@ -200,7 +243,6 @@ export const InteractivePronunciationPractice: React.FC<InteractivePronunciation
             <button
               type="button"
               onClick={() => handlePlaySample(0.7)}
-              disabled={isPlayingAudio}
               className="px-2.5 py-1.5 rounded-xl border border-border/50 hover:bg-muted text-muted-foreground hover:text-foreground font-semibold text-xs flex items-center gap-1 transition-all cursor-pointer"
               title="Nghe tốc độ chậm để nhận rõ từng âm tiết"
             >
@@ -300,6 +342,16 @@ export const InteractivePronunciationPractice: React.FC<InteractivePronunciation
       ) : (
         /* CHẾ ĐỘ GÕ TAY NẾU KHÔNG CÓ MICRO */
         <div className={`p-4 rounded-2xl border ${theme.border} ${theme.highlight} space-y-3`}>
+          {!speechSupported && (
+            <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-300 text-[11px] flex items-start gap-2">
+              <Info className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>
+                {onIOSChrome
+                  ? 'Trình duyệt Chrome trên iPhone/iPad không hỗ trợ nhận diện giọng nói (giới hạn của iOS). Bạn có thể mở link này bằng Safari để dùng Micro, hoặc gõ tay bên dưới.'
+                  : 'Trình duyệt hiện tại không hỗ trợ Micro nhận diện giọng nói. Hãy mở bằng Chrome (Android/PC) hoặc Safari (iPhone), hoặc gõ tay bên dưới.'}
+              </span>
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
               <Keyboard className="w-4 h-4 text-emerald-500" />

@@ -69,6 +69,19 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Per-user per-lesson progress checkpoints (Auto-Resume)
+    match /lesson_progress/{progressId} {
+      allow get, delete: if isValidId(progressId);
+      allow create, update: if isValidId(progressId)
+        && request.resource.data.keys().hasAll(['id', 'userId', 'lessonId', 'currentIndex', 'currentExerciseId', 'totalExercises', 'updatedAt'])
+        && request.resource.data.id is string && request.resource.data.id == progressId
+        && request.resource.data.userId is string && request.resource.data.userId.size() <= 128
+        && request.resource.data.lessonId is string && request.resource.data.lessonId.size() <= 128
+        && request.resource.data.currentIndex is number && request.resource.data.currentIndex >= 0
+        && request.resource.data.totalExercises is number && request.resource.data.totalExercises >= 0
+        && request.resource.data.updatedAt is number;
+    }
+
     // System settings
     match /system_settings/{docId} {
       allow read, write: if true;

@@ -10,7 +10,8 @@ import {
   Classroom,
   StudentPermissions,
   MediaAsset,
-  MediaFolder
+  MediaFolder,
+  LessonProgressCheckpoint
 } from '../types';
 
 import {
@@ -35,6 +36,9 @@ import {
   testFirestoreConnection,
   isPendingCloudWrite,
   isPendingCloudDelete,
+  getLessonCheckpointDocId,
+  saveLessonCheckpointToCloud,
+  deleteLessonCheckpointFromCloud,
 } from '../lib/firebase';
 import defaultConfig from '../../firebase-applet-config.json';
 
@@ -55,6 +59,7 @@ const STORAGE_KEYS = {
   MEDIA_FOLDERS: 'study_app_media_folders',
   CLEAN_TAG: 'study_app_clean_tag',
   SESSION_ID: 'study_app_local_session_id',
+  LESSON_CHECKPOINTS: 'study_app_lesson_checkpoints_v1',
 };
 
 export const defaultSettings: AppSettings = {
@@ -1579,6 +1584,7 @@ export async function clearAllDatabase(clearCloud = false) {
   localStorage.removeItem(STORAGE_KEYS.CLASSROOMS);
   localStorage.removeItem(STORAGE_KEYS.MEDIA);
   localStorage.removeItem(STORAGE_KEYS.MEDIA_FOLDERS);
+  localStorage.removeItem(STORAGE_KEYS.LESSON_CHECKPOINTS);
 
   // Clear all user-specific settings and chat history keys
   if (typeof window !== 'undefined' && window.localStorage) {
@@ -1921,4 +1927,123 @@ export function deleteMediaFolder(folderId: string, deleteFiles = false): {
     assets: remainingAssets,
   };
 }
+
+// -------------------------------------------------------------
+// Per-User Per-Lesson Progress Checkpoints (Auto-Resume)
+// -------------------------------------------------------------
+const checkpointSyncTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function readCheckpointStore(): Record<string, LessonProgressCheckpoint> {
+  return safeParse<Record<string, LessonProgressCheckpoint>>(STORAGE_KEYS.LESSON_CHECKPOINTS, {});
+}
+
+function writeCheckpointStore(store: Record<string, LessonProgressCheckpoint>): void {
+  try {
+    localStorage.setItem(STORAGE_KEYS.LESSON_CHECKPOINTS, JSON.stringify(store));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('app_checkpoints_changed'));
+    }
+  } catch (err) {
+    console.warn('LocalStorage writeCheckpointStore error:', err);
+  }
+}
+
+export function loadAllLocalLessonCheckpoints(userId?: string | null): Record<string, LessonProgressCheckpoint> {
+  if (!userId) return {};
+  const store = readCheckpointStore();
+  const byLesson: Record<string, LessonProgressCheckpoint> = {};
+  for (const cp of Object.values(store)) {
+    if (cp && cp.userId === userId && cp.lessonId) {
+      byLesson[cp.lessonId] = cp;
+    }
+  }
+  return byLesson;
+}
+
+export function loadLocalLessonCheckpoint(userId?: string | null, lessonId?: string | null): LessonProgressCheckpoint | null {
+  if (!userId || !lessonId) return null;
+  const docId = getLessonCheckpointDocId(userId, lessonId);
+  const store = readCheckpointStore();
+  const direct = store[docId];
+  if (direct && direct.userId === userId && direct.lessonId === lessonId) {
+    return direct;
+  }
+  // Fallback scan by userId + lessonId
+  for (const cp of Object.values(store)) {
+    if (cp && cp.userId === userId && cp.lessonId === lessonId) {
+      return cp;
+    }
+  }
+  return null;
+}
+
+export function saveLessonCheckpoint(
+  checkpoint: LessonProgressCheckpoint,
+  options?: { syncCloud?: boolean; immediateCloud?: boolean }
+): void {
+  if (!checkpoint?.userId || !checkpoint?.lessonId) return;
+  const docId = getLessonCheckpointDocId(checkpoint.userId, checkpoint.lessonId);
+  const normalized: LessonProgressCheckpoint = {
+    ...checkpoint,
+    id: docId,
+    updatedAt: checkpoint.updatedAt || Date.now(),
+  };
+
+  // 1. Instant local write so browser crash / disconnect never loses progress
+  const store = readCheckpointStore();
+  store[docId] = normalized;
+  writeCheckpointStore(store);
+
+  // 2. Light debounced Cloud sync (1 tiny doc per user+lesson)
+  const shouldSync = options?.syncCloud !== false;
+  if (!shouldSync) return;
+
+  const existingTimer = checkpointSyncTimers.get(docId);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+    checkpointSyncTimers.delete(docId);
+  }
+
+  if (options?.immediateCloud) {
+    saveLessonCheckpointToCloud(normalized);
+  } else {
+    const timer = setTimeout(() => {
+      checkpointSyncTimers.delete(docId);
+      saveLessonCheckpointToCloud(normalized);
+    }, 1200);
+    checkpointSyncTimers.set(docId, timer);
+  }
+}
+
+export function clearLessonCheckpoint(userId?: string | null, lessonId?: string | null, syncCloud = true): void {
+  if (!userId || !lessonId) return;
+  const docId = getLessonCheckpointDocId(userId, lessonId);
+
+  const existingTimer = checkpointSyncTimers.get(docId);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+    checkpointSyncTimers.delete(docId);
+  }
+
+  const store = readCheckpointStore();
+  let changed = false;
+  if (store[docId]) {
+    delete store[docId];
+    changed = true;
+  }
+  for (const [k, v] of Object.entries(store)) {
+    if (v && v.userId === userId && v.lessonId === lessonId) {
+      delete store[k];
+      changed = true;
+    }
+  }
+  if (changed) {
+    writeCheckpointStore(store);
+  }
+
+  if (syncCloud) {
+    deleteLessonCheckpointFromCloud(userId, lessonId);
+  }
+}
+
 

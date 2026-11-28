@@ -132,6 +132,24 @@
         "updatedAt": { "type": "number" }
       },
       "required": ["id", "userId", "studentName", "dateStr", "unresolvedCount", "updatedAt"]
+    },
+    "lessonProgress": {
+      "title": "LessonProgressCheckpoint",
+      "description": "Per-user per-lesson checkpoint for auto-resuming long exercise sessions after disconnect",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "lessonId": { "type": "string", "maxLength": 128 },
+        "currentIndex": { "type": "number" },
+        "currentExerciseId": { "type": "string", "maxLength": 128 },
+        "furthestIndex": { "type": "number" },
+        "totalExercises": { "type": "number" },
+        "exerciseOrderIds": { "type": "array" },
+        "answeredResults": { "type": "object" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "userId", "lessonId", "currentIndex", "currentExerciseId", "totalExercises", "updatedAt"]
     }
   },
   "firestore": {
@@ -166,6 +184,10 @@
     "/media/{mediaId}": {
       "schema": { "$ref": "#/entities/mediaAsset" },
       "description": "Media library assets collection"
+    },
+    "/lesson_progress/{progressId}": {
+      "schema": { "$ref": "#/entities/lessonProgress" },
+      "description": "Student in-progress lesson checkpoints for resume after disconnect"
     }
   }
 }

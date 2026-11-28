@@ -8,8 +8,10 @@ import {
   UserStats, 
   SkillCategory,
   User,
-  Classroom
+  Classroom,
+  LessonProgressCheckpoint
 } from './types';
+import { Play, RotateCcw, Clock, X } from 'lucide-react';
 import { 
   loadTopics, 
   saveTopics, 
@@ -74,6 +76,9 @@ import {
   syncDatabaseWithCloud,
   checkAndMigrateCleanDatabase,
   syncDocToCloud,
+  loadLocalLessonCheckpoint,
+  saveLessonCheckpoint,
+  clearLessonCheckpoint,
 } from './utils/storage';
 import { 
   subscribeToAllCollections,
@@ -82,6 +87,7 @@ import {
   fetchExercisesByIdsFromCloud,
   fetchExercisesBySkillFromCloud,
   fetchAllExercisesFromCloud,
+  fetchLessonCheckpointFromCloud,
 } from './lib/firebase';
 
 import { Navbar } from './components/Navbar';
@@ -122,8 +128,17 @@ function MainApp() {
 
   // Active Practice State
   const [activePracticeExercises, setActivePracticeExercises] = useState<Exercise[] | null>(null);
+  const [activePracticeLessonId, setActivePracticeLessonId] = useState<string | null>(null);
+  const [activePracticeCheckpoint, setActivePracticeCheckpoint] = useState<LessonProgressCheckpoint | null>(null);
   const [practiceTitle, setPracticeTitle] = useState('Phiên luyện tập');
   const [isLoadingPractice, setIsLoadingPractice] = useState(false);
+  const [resumePrompt, setResumePrompt] = useState<{
+    lessonId: string;
+    title: string;
+    rawExercises: Exercise[];
+    shuffleExercises: boolean;
+    checkpoint: LessonProgressCheckpoint;
+  } | null>(null);
 
   // On-demand per-lesson exercise loading state
   const [loadedLessonIds, setLoadedLessonIds] = useState<Set<string>>(() => new Set());
@@ -478,6 +493,49 @@ function MainApp() {
   const lastLessonId = getLastActiveLessonId();
   const lastActiveLesson = lessons.find(l => l.id === lastLessonId) || null;
 
+  // Order helper for normal vs shuffled lessons and checkpoint order restoration
+  const orderLessonExercises = (
+    rawExercises: Exercise[],
+    shuffle: boolean,
+    savedOrderIds?: string[]
+  ): Exercise[] => {
+    if (savedOrderIds && savedOrderIds.length > 0 && shuffle) {
+      const byId = new Map(rawExercises.map(e => [e.id, e]));
+      const restored: Exercise[] = [];
+      const seen = new Set<string>();
+      for (const id of savedOrderIds) {
+        const match = byId.get(id);
+        if (match && !seen.has(id)) {
+          restored.push(match);
+          seen.add(id);
+        }
+      }
+      // Append any newly added exercises at the end
+      for (const ex of rawExercises) {
+        if (!seen.has(ex.id)) restored.push(ex);
+      }
+      return restored;
+    }
+
+    if (shuffle) {
+      const shuffled = [...rawExercises];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      return shuffled;
+    }
+
+    return [...rawExercises].sort((a, b) => {
+      if (a.order !== undefined && b.order !== undefined) {
+        return a.order - b.order;
+      }
+      if (a.order !== undefined) return 1;
+      if (b.order !== undefined) return -1;
+      return 0;
+    });
+  };
+
   // Handler: Start practice (supports single question testing & on-demand per-lesson fetching)
   const handleStartPractice = async (
     lessonId?: string, 
@@ -492,6 +550,8 @@ function MainApp() {
     }
 
     if (singleExercise) {
+      setActivePracticeLessonId(null);
+      setActivePracticeCheckpoint(null);
       setActivePracticeExercises([singleExercise]);
       setPracticeTitle('Kiểm thử câu hỏi');
       return;
@@ -507,10 +567,16 @@ function MainApp() {
 
     setIsLoadingPractice(true);
     let workingExercises = exercises;
+    let cloudCheckpoint: LessonProgressCheckpoint | null = null;
     try {
       if (lessonId) {
-        // Fetch ONLY this single clicked lesson's exercises from Firestore
-        workingExercises = await ensureLessonExercisesLoaded(lessonId);
+        // Fetch ONLY this single clicked lesson's exercises + optional checkpoint in parallel
+        const [loadedExs, fetchedCp] = await Promise.all([
+          ensureLessonExercisesLoaded(lessonId),
+          currentUser?.id ? fetchLessonCheckpointFromCloud(currentUser.id, lessonId) : Promise.resolve(null),
+        ]);
+        workingExercises = loadedExs;
+        cloudCheckpoint = fetchedCp;
       } else if (isErrorReview) {
         const studentErrors = isStudent
           ? errors.filter(e => 
@@ -559,6 +625,7 @@ function MainApp() {
     const studentExerciseIds = new Set(studentClassExercises.map(e => e.id));
 
     let targetExercises: Exercise[] = [];
+    let resolvedTitle = 'Phiên luyện tập';
 
     if (isErrorReview) {
       const studentErrors = isStudent
@@ -575,43 +642,19 @@ function MainApp() {
         : errors.filter(e => !e.resolved);
       const unresolvedErrorIds = studentErrors.map(e => e.exerciseId);
       targetExercises = (isStudent ? studentClassExercises : workingExercises).filter(e => unresolvedErrorIds.includes(e.id));
-      setPracticeTitle('Ôn tập câu làm sai');
+      resolvedTitle = 'Ôn tập câu làm sai';
     } else if (lessonId) {
       targetExercises = workingExercises.filter(e => e.lessonId === lessonId && (isStudent ? !e.isHidden : true));
       const targetLesson = lessons.find(l => l.id === lessonId);
-      setPracticeTitle(targetLesson ? `Luyện tập: ${targetLesson.title}` : 'Phiên luyện tập');
+      resolvedTitle = targetLesson ? `Luyện tập: ${targetLesson.title}` : 'Phiên luyện tập';
       setLastActiveLessonId(lessonId);
     } else if (isQuick) {
       // Quick mixed practice strictly from student's own class pool
       targetExercises = [...studentClassExercises].sort(() => Math.random() - 0.5).slice(0, 10);
-      setPracticeTitle('Luyện tập ngẫu nhiên nhanh');
+      resolvedTitle = 'Luyện tập ngẫu nhiên nhanh';
     } else {
       targetExercises = studentClassExercises.slice(0, 10);
-      setPracticeTitle('Phiên luyện tập');
-    }
-
-    // Order when practice is in a specific lesson
-    if (lessonId) {
-      const targetLesson = lessons.find(l => l.id === lessonId);
-      if (targetLesson?.shuffleExercises) {
-        // Teacher configured shuffle: randomize question order uniformly using Fisher-Yates
-        const shuffled = [...targetExercises];
-        for (let i = shuffled.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-        }
-        targetExercises = shuffled;
-      } else {
-        // Default: strictly maintain designed order
-        targetExercises.sort((a, b) => {
-          if (a.order !== undefined && b.order !== undefined) {
-            return a.order - b.order;
-          }
-          if (a.order !== undefined) return 1;
-          if (b.order !== undefined) return -1;
-          return 0;
-        });
-      }
+      resolvedTitle = 'Phiên luyện tập';
     }
 
     if (targetExercises.length === 0) {
@@ -621,7 +664,78 @@ function MainApp() {
       return;
     }
 
+    // Specific lesson: check for saved checkpoint (merge local + cloud by latest updatedAt)
+    if (lessonId) {
+      const targetLesson = lessons.find(l => l.id === lessonId);
+      const shuffleFlag = Boolean(targetLesson?.shuffleExercises);
+
+      if (currentUser?.id && targetExercises.length > 1) {
+        const localCp = loadLocalLessonCheckpoint(currentUser.id, lessonId);
+        let bestCp: LessonProgressCheckpoint | null = null;
+        if (localCp && cloudCheckpoint) {
+          bestCp = cloudCheckpoint.updatedAt > localCp.updatedAt ? cloudCheckpoint : localCp;
+        } else {
+          bestCp = cloudCheckpoint || localCp;
+        }
+
+        if (bestCp && cloudCheckpoint && (!localCp || cloudCheckpoint.updatedAt > localCp.updatedAt)) {
+          saveLessonCheckpoint(cloudCheckpoint, { syncCloud: false });
+        }
+
+        const hasMeaningfulProgress = Boolean(
+          bestCp &&
+          (bestCp.currentIndex > 0 || Object.keys(bestCp.answeredResults || {}).length > 0)
+        );
+
+        if (bestCp && hasMeaningfulProgress) {
+          setResumePrompt({
+            lessonId,
+            title: targetLesson?.title || 'Bài học',
+            rawExercises: targetExercises,
+            shuffleExercises: shuffleFlag,
+            checkpoint: bestCp,
+          });
+          return;
+        }
+      }
+
+      const ordered = orderLessonExercises(targetExercises, shuffleFlag);
+      setPracticeTitle(resolvedTitle);
+      setActivePracticeLessonId(lessonId);
+      setActivePracticeCheckpoint(null);
+      setActivePracticeExercises(ordered);
+      return;
+    }
+
+    setPracticeTitle(resolvedTitle);
+    setActivePracticeLessonId(null);
+    setActivePracticeCheckpoint(null);
     setActivePracticeExercises(targetExercises);
+  };
+
+  const handleConfirmResumePractice = () => {
+    if (!resumePrompt) return;
+    const { lessonId, title, rawExercises, shuffleExercises, checkpoint } = resumePrompt;
+    const ordered = orderLessonExercises(rawExercises, shuffleExercises, checkpoint.exerciseOrderIds);
+    setPracticeTitle(`Luyện tập: ${title}`);
+    setActivePracticeLessonId(lessonId);
+    setActivePracticeCheckpoint(checkpoint);
+    setActivePracticeExercises(ordered);
+    setResumePrompt(null);
+  };
+
+  const handleRestartFromBeginning = () => {
+    if (!resumePrompt) return;
+    const { lessonId, title, rawExercises, shuffleExercises } = resumePrompt;
+    if (currentUser?.id) {
+      clearLessonCheckpoint(currentUser.id, lessonId, true);
+    }
+    const ordered = orderLessonExercises(rawExercises, shuffleExercises);
+    setPracticeTitle(`Luyện tập: ${title}`);
+    setActivePracticeLessonId(lessonId);
+    setActivePracticeCheckpoint(null);
+    setActivePracticeExercises(ordered);
+    setResumePrompt(null);
   };
 
   const handleErrorOccurred = (exercise: Exercise, userAnswer: string, correctAnswer: string) => {
@@ -972,6 +1086,8 @@ function MainApp() {
       return;
     }
 
+    setActivePracticeLessonId(null);
+    setActivePracticeCheckpoint(null);
     setActivePracticeExercises(targetExs);
     setPracticeTitle('Luyện tập sửa lỗi sai');
   };
@@ -1004,6 +1120,8 @@ function MainApp() {
       showToast(`Chưa có câu hỏi nào thuộc kỹ năng ${skill} trong lớp học này. Bạn có thể tạo thêm ở mục Soạn bài!`, 'info');
       return;
     }
+    setActivePracticeLessonId(null);
+    setActivePracticeCheckpoint(null);
     setActivePracticeExercises(skillExs);
     setPracticeTitle(`Luyện tập kỹ năng: ${skill}`);
   };
@@ -1052,13 +1170,24 @@ function MainApp() {
             errors={errors}
             currentUser={currentUser}
             title={practiceTitle}
+            lessonId={activePracticeLessonId}
+            initialCheckpoint={activePracticeCheckpoint}
             canViewExplanations={
               currentUser.role === 'admin' || 
               currentUser.permissions?.canViewExplanations !== false
             }
-            onExit={() => setActivePracticeExercises(null)}
-            onComplete={() => {
+            onExit={() => {
               setActivePracticeExercises(null);
+              setActivePracticeLessonId(null);
+              setActivePracticeCheckpoint(null);
+            }}
+            onComplete={() => {
+              if (currentUser?.id && activePracticeLessonId) {
+                clearLessonCheckpoint(currentUser.id, activePracticeLessonId, true);
+              }
+              setActivePracticeExercises(null);
+              setActivePracticeLessonId(null);
+              setActivePracticeCheckpoint(null);
               const freshErrors = loadErrors();
               setErrors(freshErrors);
               if (currentUser && currentUser.role === 'student') {
@@ -1278,6 +1407,83 @@ function MainApp() {
               </div>
             </div>
           )}
+
+          {/* Auto-Resume Lesson Checkpoint Modal */}
+          {resumePrompt && (() => {
+            const total = resumePrompt.rawExercises.length;
+            const resumeNum = Math.min(resumePrompt.checkpoint.currentIndex + 1, total);
+            const exIdSet = new Set(resumePrompt.rawExercises.map(e => e.id));
+            const answeredCount = Object.keys(resumePrompt.checkpoint.answeredResults || {}).filter(id => exIdSet.has(id)).length;
+            const pct = Math.max(1, Math.min(100, Math.round((resumeNum / Math.max(1, total)) * 100)));
+
+            return (
+              <div
+                className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+                onClick={() => setResumePrompt(null)}
+              >
+                <div
+                  className={`${theme.card} w-full max-w-md rounded-2xl border ${theme.border} p-5 shadow-2xl space-y-4 animate-in zoom-in-95 duration-150`}
+                  onClick={e => e.stopPropagation()}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-10 h-10 rounded-xl bg-sky-500/15 text-sky-500 flex items-center justify-center shrink-0">
+                        <Clock className="w-5 h-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="text-base font-bold truncate">Tiếp tục bài học đang dở?</h3>
+                        <p className={`text-xs ${theme.textMuted} truncate`}>{resumePrompt.title}</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setResumePrompt(null)}
+                      className={`p-1.5 rounded-lg border ${theme.border} hover:opacity-75 cursor-pointer shrink-0`}
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className={`p-3.5 rounded-xl border ${theme.border} ${theme.badgeBg} space-y-2`}>
+                    <div className="flex items-center justify-between text-xs font-semibold">
+                      <span>Vị trí đã lưu: <strong className="text-sky-500">Câu {resumeNum}/{total}</strong></span>
+                      <span className="text-emerald-500">{pct}%</span>
+                    </div>
+                    <div className={`w-full h-2 rounded-full overflow-hidden ${theme.highlight}`}>
+                      <div
+                        className="h-full bg-sky-500 rounded-full transition-all"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <p className={`text-[11px] ${theme.textMuted}`}>
+                      Đã trả lời {answeredCount}/{total} câu hỏi. Bạn có thể tiếp tục ngay chỗ cũ hoặc làm lại từ đầu.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                    <button
+                      id="btn-resume-lesson-confirm"
+                      type="button"
+                      onClick={handleConfirmResumePractice}
+                      className="flex-1 py-2.5 px-4 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-sm flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                    >
+                      <Play className="w-4 h-4 fill-current" />
+                      <span>Học tiếp từ câu {resumeNum}</span>
+                    </button>
+                    <button
+                      id="btn-restart-lesson-confirm"
+                      type="button"
+                      onClick={handleRestartFromBeginning}
+                      className={`py-2.5 px-4 rounded-xl border ${theme.border} ${theme.badgeBg} hover:border-amber-500/50 hover:text-amber-500 font-semibold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors`}
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Làm lại từ câu 1</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Floating Study Mascot Companion (powered by page-mascot with AI Chatbot) */}
           <FloatingMascot 

@@ -100,47 +100,82 @@ export const ListeningAudioPlayer: React.FC<ListeningAudioPlayerProps> = ({
     };
   }, [resolvedSrc, audioText, isTtsMode]);
 
+  const activeTtsUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const ttsStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const playTTS = () => {
     if (!window.speechSynthesis || !audioText) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(audioText);
-    utterance.lang = 'en-US';
-    utterance.rate = playbackRate;
-    utterance.volume = isMuted ? 0 : volume;
+    const synth = window.speechSynthesis;
+    if (ttsStartTimerRef.current) {
+      clearTimeout(ttsStartTimerRef.current);
+      ttsStartTimerRef.current = null;
+    }
 
     const bestVoice = getBestVoiceForPreference(settings?.voiceGender, settings?.selectedVoiceURI);
-    if (bestVoice) {
-      utterance.voice = bestVoice;
+
+    const startUtterance = (useCustomVoice: boolean) => {
+      const utterance = new SpeechSynthesisUtterance(audioText);
+      utterance.lang = 'en-US';
+      utterance.rate = playbackRate;
+      utterance.volume = isMuted ? 0 : volume;
+
+      if (useCustomVoice && bestVoice) {
+        utterance.voice = bestVoice;
+        utterance.pitch = getPitchForPreference(settings?.voiceGender, bestVoice);
+      } else {
+        utterance.pitch = 1.0;
+      }
+
+      activeTtsUtteranceRef.current = utterance;
+
+      utterance.onstart = () => {
+        setIsPlaying(true);
+        if (ttsIntervalRef.current) clearInterval(ttsIntervalRef.current);
+        ttsIntervalRef.current = setInterval(() => {
+          setCurrentTime(prev => {
+            const next = prev + 0.25;
+            if (next >= ttsEstimatedDuration.current) {
+              clearInterval(ttsIntervalRef.current);
+              return ttsEstimatedDuration.current;
+            }
+            return next;
+          });
+        }, 250);
+      };
+
+      utterance.onend = () => {
+        activeTtsUtteranceRef.current = null;
+        setIsPlaying(false);
+        setCurrentTime(ttsEstimatedDuration.current);
+        if (ttsIntervalRef.current) clearInterval(ttsIntervalRef.current);
+      };
+
+      utterance.onerror = (ev: any) => {
+        activeTtsUtteranceRef.current = null;
+        const errCode = ev?.error;
+        if (errCode !== 'canceled' && errCode !== 'interrupted' && useCustomVoice && bestVoice) {
+          startUtterance(false);
+          return;
+        }
+        setIsPlaying(false);
+        if (ttsIntervalRef.current) clearInterval(ttsIntervalRef.current);
+      };
+
+      try {
+        if (synth.paused) synth.resume();
+      } catch {}
+      synth.speak(utterance);
+    };
+
+    if (synth.speaking || synth.pending) {
+      synth.cancel();
+      ttsStartTimerRef.current = setTimeout(() => {
+        ttsStartTimerRef.current = null;
+        startUtterance(Boolean(bestVoice));
+      }, 60);
+    } else {
+      startUtterance(Boolean(bestVoice));
     }
-    utterance.pitch = getPitchForPreference(settings?.voiceGender, bestVoice);
-
-    utterance.onstart = () => {
-      setIsPlaying(true);
-      if (ttsIntervalRef.current) clearInterval(ttsIntervalRef.current);
-      ttsIntervalRef.current = setInterval(() => {
-        setCurrentTime(prev => {
-          const next = prev + 0.25;
-          if (next >= ttsEstimatedDuration.current) {
-            clearInterval(ttsIntervalRef.current);
-            return ttsEstimatedDuration.current;
-          }
-          return next;
-        });
-      }, 250);
-    };
-
-    utterance.onend = () => {
-      setIsPlaying(false);
-      setCurrentTime(ttsEstimatedDuration.current);
-      if (ttsIntervalRef.current) clearInterval(ttsIntervalRef.current);
-    };
-
-    utterance.onerror = () => {
-      setIsPlaying(false);
-      if (ttsIntervalRef.current) clearInterval(ttsIntervalRef.current);
-    };
-
-    window.speechSynthesis.speak(utterance);
   };
 
   // Handle Play / Pause

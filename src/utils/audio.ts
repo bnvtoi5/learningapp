@@ -140,9 +140,25 @@ export function triggerHaptic(type: 'light' | 'heavy' | boolean = true) {
 }
 
 /**
+ * Nhận diện thiết bị di động & Chrome trên iOS (CriOS)
+ */
+export function isMobileDevice(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+}
+
+export function isIOSChrome(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /CriOS/i.test(navigator.userAgent) && /iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
+/**
  * Lấy danh sách giọng đọc TTS từ trình duyệt (Web Speech API)
  */
 let cachedVoices: SpeechSynthesisVoice[] = [];
+// Giữ tham chiếu utterance hiện tại ở cấp module để Chrome Android/Desktop không tự ý Garbage Collect giữa chừng
+let activeUtterance: SpeechSynthesisUtterance | null = null;
+let pendingSpeakTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function getAvailableSpeechVoices(): SpeechSynthesisVoice[] {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) return [];
@@ -271,21 +287,26 @@ export function getBestVoiceForPreference(
   const voices = getAvailableSpeechVoices();
   if (!voices || voices.length === 0) return null;
 
-  // 1. Nếu người dùng chọn đích danh 1 Voice qua URI
+  // 1. Nếu người dùng chọn đích danh 1 Voice qua URI (chỉ áp dụng nếu thực sự tồn tại trên thiết bị này)
   if (customVoiceURI) {
     const directMatch = voices.find(v => v.voiceURI === customVoiceURI || v.name === customVoiceURI);
     if (directMatch) return directMatch;
   }
 
+  const normalizeLang = (lang?: string) => (lang || '').replace(/_/g, '-').toLowerCase();
+  const mobile = isMobileDevice();
+
   // Nếu chọn 'auto' -> Dùng giọng mặc định của thiết bị (an toàn tuyệt đối)
   if (preference === 'auto') {
-    const defaultVoice = voices.find(v => v.default && v.lang.toLowerCase().startsWith('en'));
+    const defaultVoice = voices.find(v => v.default && normalizeLang(v.lang).startsWith('en'));
     if (defaultVoice) return defaultVoice;
-    const anyEn = voices.find(v => v.lang.toLowerCase().startsWith('en'));
+    const localEn = voices.find(v => v.localService && normalizeLang(v.lang).startsWith('en'));
+    if (mobile && localEn) return localEn;
+    const anyEn = voices.find(v => normalizeLang(v.lang).startsWith('en'));
     return anyEn || null;
   }
 
-  const englishVoices = voices.filter(v => v.lang.toLowerCase().startsWith('en'));
+  const englishVoices = voices.filter(v => normalizeLang(v.lang).startsWith('en'));
   if (englishVoices.length === 0) return null;
 
   const isUkPreference = preference === 'uk_female' || preference === 'uk_male';
@@ -300,7 +321,7 @@ export function getBestVoiceForPreference(
   const scored: ScoredVoice[] = englishVoices.map(v => {
     let score = 0;
     const str = `${v.name} ${v.voiceURI}`.toLowerCase();
-    const lang = v.lang.toLowerCase();
+    const lang = normalizeLang(v.lang);
 
     const isUkLang = lang.includes('gb') || lang.includes('uk');
     const isUsLang = lang.includes('us');
@@ -319,8 +340,14 @@ export function getBestVoiceForPreference(
     }
 
     if (isRegionMatch) score += 30;
-    if (isHighQuality) score += 20;
-    if (v.default) score += 5;
+    // Trên điện thoại (Android/iOS), ưu tiên giọng localService để tránh lỗi im tiếng do network voice bị treo
+    if (mobile) {
+      if (v.localService) score += 40;
+      else score -= 25;
+    } else if (isHighQuality) {
+      score += 20;
+    }
+    if (v.default) score += 10;
 
     return { voice: v, score };
   });
@@ -332,13 +359,19 @@ export function getBestVoiceForPreference(
     return scored[0].voice;
   }
 
-  // Fallback: Tìm giọng theo vùng UK / US
+  // Fallback: Tìm giọng theo vùng UK / US (ưu tiên localService trên di động)
   const regionCandidates = englishVoices.filter(v => {
-    const lang = v.lang.toLowerCase();
+    const lang = normalizeLang(v.lang);
     return isUkPreference ? (lang.includes('gb') || lang.includes('uk')) : lang.includes('us');
   });
 
-  const fallbackDefault = regionCandidates.find(v => v.default) || regionCandidates[0] || englishVoices.find(v => v.default) || englishVoices[0];
+  const fallbackDefault =
+    (mobile ? regionCandidates.find(v => v.localService && v.default) || regionCandidates.find(v => v.localService) : null) ||
+    regionCandidates.find(v => v.default) ||
+    regionCandidates[0] ||
+    (mobile ? englishVoices.find(v => v.localService) : null) ||
+    englishVoices.find(v => v.default) ||
+    englishVoices[0];
   return fallbackDefault || null;
 }
 
@@ -356,11 +389,19 @@ export interface SpeakOptions {
  * Text to Speech đa năng, hỗ trợ chọn giọng và an toàn với fallback mặc định
  */
 export function speakText(text: string, options?: SpeakOptions | string) {
-  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
-  if (!text || !text.trim()) return;
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+    if (typeof options === 'object') options.onError?.();
+    return;
+  }
+  const cleanText = (text || '').trim();
+  if (!cleanText) return;
 
   try {
-    window.speechSynthesis.cancel();
+    const synth = window.speechSynthesis;
+    if (pendingSpeakTimer) {
+      clearTimeout(pendingSpeakTimer);
+      pendingSpeakTimer = null;
+    }
 
     // Hỗ trợ truyền nhanh speakText('Hello', 'en-US')
     const opts: SpeakOptions = typeof options === 'string' ? { lang: options } : (options || {});
@@ -370,26 +411,78 @@ export function speakText(text: string, options?: SpeakOptions | string) {
     const voicePreference: VoiceGenderPreference = opts.voiceGender || settings.voiceGender || 'female';
     const chosenRate = opts.rate !== undefined ? opts.rate : (settings.voiceSpeed || 0.9);
     const chosenLang = opts.lang || 'en-US';
-
-    const utterance = new SpeechSynthesisUtterance(text.trim());
-    utterance.lang = chosenLang;
-    utterance.rate = chosenRate;
-
-    // Tìm và gán Voice tốt nhất
     const bestVoice = getBestVoiceForPreference(voicePreference, opts.voiceURI || settings.selectedVoiceURI);
-    if (bestVoice) {
-      utterance.voice = bestVoice;
+
+    const createUtterance = (useCustomVoice: boolean) => {
+      const u = new SpeechSynthesisUtterance(cleanText);
+      u.lang = chosenLang;
+      u.rate = Math.max(0.5, Math.min(2, chosenRate));
+      u.volume = 1;
+
+      if (useCustomVoice && bestVoice) {
+        u.voice = bestVoice;
+        u.pitch = opts.pitch !== undefined ? opts.pitch : getPitchForPreference(voicePreference, bestVoice);
+      } else {
+        u.pitch = opts.pitch !== undefined ? opts.pitch : 1.0;
+      }
+      return u;
+    };
+
+    const dispatchSpeak = (useCustomVoice: boolean) => {
+      const utterance = createUtterance(useCustomVoice);
+      activeUtterance = utterance;
+
+      let settled = false;
+      const finishEnd = () => {
+        if (settled) return;
+        settled = true;
+        if (activeUtterance === utterance) activeUtterance = null;
+        opts.onEnd?.();
+      };
+
+      utterance.onend = finishEnd;
+      utterance.onerror = (ev: any) => {
+        if (settled) return;
+        const errCode = ev?.error;
+        if (errCode === 'canceled' || errCode === 'interrupted') {
+          settled = true;
+          if (activeUtterance === utterance) activeUtterance = null;
+          opts.onEnd?.();
+          return;
+        }
+        // Nếu giọng chọn cụ thể bị lỗi trên điện thoại -> tự động thử lại bằng giọng mặc định hệ thống
+        if (useCustomVoice && bestVoice) {
+          settled = true;
+          if (activeUtterance === utterance) activeUtterance = null;
+          dispatchSpeak(false);
+          return;
+        }
+        settled = true;
+        if (activeUtterance === utterance) activeUtterance = null;
+        opts.onError?.();
+      };
+
+      try {
+        if (synth.paused) synth.resume();
+      } catch {}
+      synth.speak(utterance);
+    };
+
+    // Quan trọng cho Chrome Android / iOS:
+    // KHÔNG gọi cancel() khi hàng đợi đang trống (vì cancel() + speak() cùng tick hay bị nuốt tiếng trên mobile).
+    // Nếu đang có câu khác phát dở thì cancel() rồi chờ 60ms mới gọi speak().
+    if (synth.speaking || synth.pending) {
+      synth.cancel();
+      pendingSpeakTimer = setTimeout(() => {
+        pendingSpeakTimer = null;
+        dispatchSpeak(Boolean(bestVoice));
+      }, 60);
+    } else {
+      dispatchSpeak(Boolean(bestVoice));
     }
-
-    // Tự động điều chỉnh pitch thông minh: Giọng nam sẽ có pitch 0.76 - 0.88 để đảm bảo luôn phát âm giọng nam trên mọi thiết bị
-    utterance.pitch = opts.pitch !== undefined ? opts.pitch : getPitchForPreference(voicePreference, bestVoice);
-
-    if (opts.onEnd) utterance.onend = opts.onEnd;
-    if (opts.onError) utterance.onerror = opts.onError;
-
-    window.speechSynthesis.speak(utterance);
   } catch (err) {
     console.warn('Speech synthesis playback error, fallback silent:', err);
+    if (typeof options === 'object') options.onError?.();
   }
 }
 
@@ -418,16 +511,39 @@ export function startSpeechRecognition(
 ): { stop: () => void } | null {
   if (typeof window === 'undefined') return null;
 
+  if (isIOSChrome()) {
+    handlers.onError?.(
+      'Chrome trên iPhone/iPad không hỗ trợ nhận diện giọng nói (giới hạn của iOS). Bạn hãy mở link bằng Safari hoặc dùng chế độ Gõ tay nhé.'
+    );
+    return null;
+  }
+
+  if (!window.isSecureContext) {
+    handlers.onError?.(
+      'Micro chỉ hoạt động trên đường dẫn bảo mật (HTTPS). Hãy mở ứng dụng bằng link https:// chính thức.'
+    );
+    return null;
+  }
+
   const SpeechRecognition =
     (window as any).SpeechRecognition ||
     (window as any).webkitSpeechRecognition;
 
   if (!SpeechRecognition) {
-    handlers.onError?.('Trình duyệt không hỗ trợ Web Speech API nhận diện giọng nói. Hãy dùng Chrome, Edge hoặc Safari.');
+    handlers.onError?.('Trình duyệt này chưa hỗ trợ nhận diện giọng nói. Hãy dùng Chrome (Android/PC) hoặc Safari (iPhone).');
     return null;
   }
 
   try {
+    // Dừng TTS trước khi bật mic để tránh xung đột AudioFocus trên Android Chrome
+    if ('speechSynthesis' in window) {
+      try {
+        if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+          window.speechSynthesis.cancel();
+        }
+      } catch {}
+    }
+
     const recognition = new SpeechRecognition();
     recognition.continuous = false;
     recognition.interimResults = true;
@@ -441,24 +557,36 @@ export function startSpeechRecognition(
     recognition.onresult = (event: any) => {
       let finalTranscript = '';
       let interimTranscript = '';
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) {
-          finalTranscript += event.results[i][0].transcript;
+      for (let i = 0; i < event.results.length; ++i) {
+        const res = event.results[i];
+        const txt = res?.[0]?.transcript || '';
+        if (res.isFinal) {
+          finalTranscript += (finalTranscript ? ' ' : '') + txt;
         } else {
-          interimTranscript += event.results[i][0].transcript;
+          interimTranscript += (interimTranscript ? ' ' : '') + txt;
         }
       }
-      const combined = finalTranscript || interimTranscript;
-      handlers.onResult?.(combined.trim(), !!finalTranscript);
+      const combined = (finalTranscript || interimTranscript).trim();
+      if (combined) {
+        handlers.onResult?.(combined, Boolean(finalTranscript.trim()));
+      }
     };
 
     recognition.onerror = (event: any) => {
       console.warn('SpeechRecognition error:', event.error);
       let msg = 'Lỗi nhận diện giọng nói: ' + event.error;
       if (event.error === 'not-allowed') {
-        msg = 'Trình duyệt chưa được cấp quyền micro. Vui lòng bấm Cho Phép Micro để luyện phát âm.';
+        msg = 'Trình duyệt chưa được cấp quyền Micro. Hãy bấm biểu tượng ổ khóa cạnh thanh địa chỉ → Quyền → Bật Micro (và kiểm tra Cài đặt điện thoại → Ứng dụng → Chrome → Quyền → Micro).';
+      } else if (event.error === 'service-not-allowed') {
+        msg = 'Dịch vụ nhận diện giọng nói đang bị chặn. Nếu mở trong khung nhúng/Zalo/Facebook hãy mở trực tiếp bằng Chrome, hoặc bật Dịch vụ giọng nói của Google trên Android.';
+      } else if (event.error === 'audio-capture') {
+        msg = 'Không thu được âm thanh từ Micro (có thể ứng dụng khác đang chiếm Micro). Hãy đóng ứng dụng gọi/ghi âm khác rồi thử lại.';
+      } else if (event.error === 'network') {
+        msg = 'Lỗi mạng khi gửi giọng nói tới máy chủ nhận diện. Hãy kiểm tra kết nối Wi-Fi/4G rồi thử lại.';
       } else if (event.error === 'no-speech') {
-        msg = 'Không nhận diện được giọng nói. Vui lòng nói to và rõ hơn.';
+        msg = 'Chưa nghe thấy giọng nói. Hãy bấm Micro và đọc to, rõ gần điện thoại hơn nhé.';
+      } else if (event.error === 'aborted') {
+        return;
       }
       handlers.onError?.(msg);
     };
@@ -479,7 +607,7 @@ export function startSpeechRecognition(
       }
     };
   } catch (err: any) {
-    handlers.onError?.(err?.message || 'Không thể khởi động micro.');
+    handlers.onError?.(err?.message || 'Không thể khởi động micro trên thiết bị này.');
     return null;
   }
 }
